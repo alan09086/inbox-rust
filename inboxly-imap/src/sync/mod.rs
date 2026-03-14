@@ -1,6 +1,6 @@
-//! # IMAP Sync Engine — Phase 1 (Header Sync)
+//! # IMAP Sync Engine — Phase 1 & 2
 //!
-//! This module implements the initial sync flow for Inboxly:
+//! ## Phase 1 (Header Sync)
 //!
 //! 1. SELECT the target folder to discover UIDVALIDITY and UIDNEXT
 //! 2. Split the UID range into batches of 500, newest-first
@@ -11,6 +11,19 @@
 //! 7. Emit progress events to the UI via `tokio::sync::mpsc`
 //! 8. Fire a first-batch-ready signal so the inbox is usable immediately
 //! 9. Persist UIDVALIDITY + last-synced-UID for crash recovery
+//!
+//! ## Phase 2 (Body Download — M8)
+//!
+//! After Phase 1 completes, Phase 2 runs as a background tokio task:
+//! 1. Query SQLite for `body_downloaded = false` UIDs (newest-first)
+//! 2. Fetch RFC822 bodies in batches of 500
+//! 3. Write each body to Maildir, extract text for search, update SQLite
+//! 4. Emit progress events to the UI
+//! 5. Resume capability: on restart, picks up where it left off
+//!
+//! Phase 2 entry point: [`crate::phase2::phase2_download`]
+//! On-demand fetch: [`crate::on_demand::fetch_body_on_demand`]
+//! Offline replay: [`crate::offline_replay::replay_offline_queue`]
 //!
 //! ## Usage
 //!
