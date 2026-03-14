@@ -463,4 +463,58 @@ mod tests {
         assert_eq!(config.accounts[0].imap_port, 993);
         assert_eq!(config.snooze, SnoozePresets::default());
     }
+
+    // === Task 16: Config load/save with temp files (4 tests) ===
+
+    #[test]
+    fn load_missing_file_returns_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nonexistent.toml");
+        let config = AppConfig::load_from(&path).unwrap();
+        assert_eq!(config, AppConfig::default());
+    }
+
+    #[test]
+    fn save_and_load_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let config = AppConfig {
+            accounts: vec![AccountConfig {
+                email: "test@example.com".to_string(),
+                display_name: "Test".to_string(),
+                provider: "generic".to_string(),
+                auth_method: AuthMethod::Password,
+                imap_host: "imap.example.com".to_string(),
+                imap_port: 993,
+                smtp_host: "smtp.example.com".to_string(),
+                smtp_port: 587,
+            }],
+            theme: ThemePreference::Light,
+            data_dir: None,
+            cache_dir: None,
+            snooze: SnoozePresets::default(),
+        };
+        config.save_to(&path).unwrap();
+        let loaded = AppConfig::load_from(&path).unwrap();
+        assert_eq!(config, loaded);
+    }
+
+    #[test]
+    fn save_creates_parent_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested").join("deep").join("config.toml");
+        let config = AppConfig::default();
+        config.save_to(&path).unwrap();
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn load_malformed_toml_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bad.toml");
+        std::fs::write(&path, "this is not valid toml = [[[").unwrap();
+        let result = AppConfig::load_from(&path);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), ConfigError::Parse(_)));
+    }
 }
