@@ -39,7 +39,7 @@ impl BatchIterator {
             None => 0,
             Some(cursor) => {
                 let range = cursor - self.lowest_uid + 1;
-                (range + self.batch_size - 1) / self.batch_size
+                range.div_ceil(self.batch_size)
             }
         }
     }

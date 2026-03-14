@@ -149,11 +149,7 @@ where
         }
     };
 
-    let total_estimate = if effective_uid_next > lowest_uid {
-        effective_uid_next - lowest_uid
-    } else {
-        0
-    };
+    let total_estimate = effective_uid_next.saturating_sub(lowest_uid);
 
     if total_estimate == 0 {
         return Ok(SyncPhase1Result {
