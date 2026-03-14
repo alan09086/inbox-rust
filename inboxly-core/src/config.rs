@@ -388,4 +388,79 @@ mod tests {
         let deserialized: AccountConfig = toml::from_str(&serialized).unwrap();
         assert_eq!(account, deserialized);
     }
+
+    // === Task 15: AppConfig (4 tests) ===
+
+    #[test]
+    fn app_config_default_is_empty() {
+        let config = AppConfig::default();
+        assert!(config.accounts.is_empty());
+        assert_eq!(config.theme, ThemePreference::System);
+        assert!(config.data_dir.is_none());
+        assert!(config.cache_dir.is_none());
+    }
+
+    #[test]
+    fn app_config_full_toml_round_trip() {
+        let config = AppConfig {
+            accounts: vec![
+                AccountConfig {
+                    email: "personal@gmail.com".to_string(),
+                    display_name: "Personal".to_string(),
+                    provider: "gmail".to_string(),
+                    auth_method: AuthMethod::OAuth2,
+                    imap_host: "imap.gmail.com".to_string(),
+                    imap_port: 993,
+                    smtp_host: "smtp.gmail.com".to_string(),
+                    smtp_port: 465,
+                },
+                AccountConfig {
+                    email: "work@fastmail.com".to_string(),
+                    display_name: "Work".to_string(),
+                    provider: "fastmail".to_string(),
+                    auth_method: AuthMethod::AppPassword,
+                    imap_host: "imap.fastmail.com".to_string(),
+                    imap_port: 993,
+                    smtp_host: "smtp.fastmail.com".to_string(),
+                    smtp_port: 587,
+                },
+            ],
+            theme: ThemePreference::Dark,
+            data_dir: Some(PathBuf::from("/custom/data")),
+            cache_dir: None,
+            snooze: SnoozePresets {
+                morning_hour: 7,
+                afternoon_hour: 14,
+                evening_hour: 19,
+                weekend_day: 6,
+            },
+        };
+        let serialized = toml::to_string_pretty(&config).unwrap();
+        let deserialized: AppConfig = toml::from_str(&serialized).unwrap();
+        assert_eq!(config, deserialized);
+    }
+
+    #[test]
+    fn app_config_minimal_toml_parses() {
+        let config: AppConfig = toml::from_str("").unwrap();
+        assert!(config.accounts.is_empty());
+        assert_eq!(config.theme, ThemePreference::System);
+    }
+
+    #[test]
+    fn app_config_partial_toml_fills_defaults() {
+        let toml_str = r#"
+            theme = "dark"
+
+            [[accounts]]
+            email = "user@example.com"
+            imap_host = "imap.example.com"
+            smtp_host = "smtp.example.com"
+        "#;
+        let config: AppConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.theme, ThemePreference::Dark);
+        assert_eq!(config.accounts.len(), 1);
+        assert_eq!(config.accounts[0].imap_port, 993);
+        assert_eq!(config.snooze, SnoozePresets::default());
+    }
 }
