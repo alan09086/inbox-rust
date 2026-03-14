@@ -5,7 +5,7 @@
 //! - [`evaluate_rules`]: checks user rules (Layer 1 in the pipeline)
 //! - [`evaluate_affinity`]: checks sender learning (Layer 2 in the pipeline)
 
-use crate::affinity::{SenderAffinity, CONFIDENCE_THRESHOLD};
+use crate::affinity::{CONFIDENCE_THRESHOLD, SenderAffinity};
 use crate::user_rules::{RuleMatchable, UserCompiledRule};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
@@ -75,10 +75,7 @@ pub enum AffinityResult {
 /// Looks up the sender's affinity data.  Returns [`AffinityResult::Confident`]
 /// if effective confidence (after decay) exceeds the threshold.
 /// This is the "Sender Learning" layer in the evaluation order.
-pub fn evaluate_affinity(
-    affinity: Option<&SenderAffinity>,
-    now: DateTime<Utc>,
-) -> AffinityResult {
+pub fn evaluate_affinity(affinity: Option<&SenderAffinity>, now: DateTime<Utc>) -> AffinityResult {
     let Some(aff) = affinity else {
         return AffinityResult::Unknown;
     };

@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::affinity::SenderAffinity;
-use crate::evaluator::{evaluate_affinity, evaluate_rules, AffinityResult, RuleResult};
+use crate::evaluator::{AffinityResult, RuleResult, evaluate_affinity, evaluate_rules};
 use crate::user_rules::{RuleMatchable, UserCompiledRule};
 
 // ---------------------------------------------------------------------------
@@ -83,10 +83,7 @@ pub struct BundlerEngine {
 
 impl BundlerEngine {
     /// Create a new engine with the given rules and category mapping.
-    pub fn new(
-        rules: Vec<UserCompiledRule>,
-        category_bundle_map: HashMap<String, Uuid>,
-    ) -> Self {
+    pub fn new(rules: Vec<UserCompiledRule>, category_bundle_map: HashMap<String, Uuid>) -> Self {
         Self {
             compiled_rules: rules,
             category_bundle_map,

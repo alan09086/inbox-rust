@@ -226,9 +226,7 @@ pub(crate) mod mock {
 
             // Check for existing affinity with DIFFERENT category -> penalize
             for aff in affs.iter_mut() {
-                if aff.sender_address == sender_address
-                    && aff.bundle_category != bundle_category
-                {
+                if aff.sender_address == sender_address && aff.bundle_category != bundle_category {
                     aff.penalize();
                 }
             }
@@ -279,10 +277,7 @@ mod tests {
     fn fresh_affinity_no_decay() {
         let a = make_affinity(0.8, 0);
         let eff = a.effective_confidence(Utc::now());
-        assert!(
-            (eff - 0.8).abs() < 0.01,
-            "expected ~0.8, got {eff}"
-        );
+        assert!((eff - 0.8).abs() < 0.01, "expected ~0.8, got {eff}");
     }
 
     #[test]
@@ -290,10 +285,7 @@ mod tests {
         let a = make_affinity(1.0, CONFIDENCE_HALF_LIFE_DAYS as i64);
         let eff = a.effective_confidence(Utc::now());
         // After one half-life, confidence should be ~0.5
-        assert!(
-            (eff - 0.5).abs() < 0.05,
-            "expected ~0.5, got {eff}"
-        );
+        assert!((eff - 0.5).abs() < 0.05, "expected ~0.5, got {eff}");
     }
 
     #[test]
@@ -301,10 +293,7 @@ mod tests {
         let a = make_affinity(1.0, (CONFIDENCE_HALF_LIFE_DAYS * 2.0) as i64);
         let eff = a.effective_confidence(Utc::now());
         // After two half-lives, confidence should be ~0.25
-        assert!(
-            (eff - 0.25).abs() < 0.05,
-            "expected ~0.25, got {eff}"
-        );
+        assert!((eff - 0.25).abs() < 0.05, "expected ~0.25, got {eff}");
     }
 
     #[test]

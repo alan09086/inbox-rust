@@ -102,11 +102,7 @@ pub trait BundleStore {
     /// # Errors
     ///
     /// Returns [`BundleStoreError::NotFound`] if the bundle does not exist.
-    fn update_bundle(
-        &self,
-        id: Uuid,
-        params: UpdateBundleParams,
-    ) -> Result<(), BundleStoreError>;
+    fn update_bundle(&self, id: Uuid, params: UpdateBundleParams) -> Result<(), BundleStoreError>;
 
     /// Delete a custom bundle and all its rules.
     ///
@@ -142,7 +138,7 @@ pub(crate) mod mock {
     impl MockBundleStore {
         /// Create a new mock store with the 8 system bundles pre-populated.
         pub fn new_with_system_bundles() -> Self {
-            use crate::system_bundles::{system_bundle_id, SYSTEM_BUNDLES};
+            use crate::system_bundles::{SYSTEM_BUNDLES, system_bundle_id};
 
             let bundles: Vec<BundleInfo> = SYSTEM_BUNDLES
                 .iter()
@@ -263,7 +259,10 @@ mod tests {
         assert_ne!(id, Uuid::nil());
 
         let bundles = store.list_bundles().expect("list");
-        let work = bundles.iter().find(|b| b.name == "Work").expect("find Work");
+        let work = bundles
+            .iter()
+            .find(|b| b.name == "Work")
+            .expect("find Work");
         assert!(work.is_custom);
         assert_eq!(work.color, "#336699");
     }

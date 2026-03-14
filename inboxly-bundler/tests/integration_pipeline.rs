@@ -6,10 +6,10 @@
 use std::collections::HashMap;
 
 use chrono::{TimeDelta, Utc};
-use inboxly_bundler::user_rules::{BundleRule, RuleMatchable, UserCompiledRule, UserRuleField, UserRuleOp};
-use inboxly_bundler::{
-    BundlerEngine, CategoriseSource, HeuristicMatch, SenderAffinity,
+use inboxly_bundler::user_rules::{
+    BundleRule, RuleMatchable, UserCompiledRule, UserRuleField, UserRuleOp,
 };
+use inboxly_bundler::{BundlerEngine, CategoriseSource, HeuristicMatch, SenderAffinity};
 use uuid::Uuid;
 
 // -- Test double (re-defined here since test_utils is pub(crate)) ----------
@@ -94,10 +94,7 @@ fn full_pipeline_four_layers() {
     };
     let e2 = MockEmail::new("deals@shop.com", "Sale ends today!");
     let r2 = engine.categorise(&e2, Some(&aff), None, now);
-    assert!(matches!(
-        r2.source,
-        CategoriseSource::SenderLearning { .. }
-    ));
+    assert!(matches!(r2.source, CategoriseSource::SenderLearning { .. }));
     assert_eq!(r2.bundle_category, Some("Promos".into()));
 
     // Email 3: from unknown sender with heuristic match -> heuristic

@@ -67,6 +67,7 @@ pub(crate) mod fixtures {
     }
 
     /// Create a [`BundleRule`] for testing with default id/bundle_id/priority.
+    #[allow(dead_code)]
     pub fn make_rule(field: UserRuleField, op: UserRuleOp, value: &str) -> BundleRule {
         BundleRule {
             id: Uuid::new_v4(),

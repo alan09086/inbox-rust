@@ -72,8 +72,7 @@ pub fn validate_rule(
     value: &str,
 ) -> Result<(), RuleStoreError> {
     if *operator == UserRuleOp::Matches {
-        regex::Regex::new(value)
-            .map_err(|e| RuleStoreError::InvalidRegex(e.to_string()))?;
+        regex::Regex::new(value).map_err(|e| RuleStoreError::InvalidRegex(e.to_string()))?;
     }
     Ok(())
 }
@@ -111,10 +110,7 @@ pub trait RuleStore {
     /// # Errors
     ///
     /// Returns [`RuleStoreError::Database`] on database failure.
-    fn list_rules_for_bundle(
-        &self,
-        bundle_id: Uuid,
-    ) -> Result<Vec<BundleRule>, RuleStoreError>;
+    fn list_rules_for_bundle(&self, bundle_id: Uuid) -> Result<Vec<BundleRule>, RuleStoreError>;
 
     /// Update a rule.  Only fields that are `Some` in `params` are changed.
     ///

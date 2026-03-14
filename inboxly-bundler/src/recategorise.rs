@@ -8,7 +8,7 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::affinity::{AffinityStore, AffinityStoreError, SenderAffinity, CONFIDENCE_INCREMENT};
+use crate::affinity::{AffinityStore, AffinityStoreError, CONFIDENCE_INCREMENT, SenderAffinity};
 
 /// Describes a user's manual move action.
 pub struct MoveAction {

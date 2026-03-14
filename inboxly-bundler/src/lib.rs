@@ -49,17 +49,17 @@ mod test_utils;
 
 // M13 re-exports: user rules, sender learning, evaluation pipeline
 pub use affinity::{
-    AffinityStore, AffinityStoreError, SenderAffinity, CONFIDENCE_HALF_LIFE_DAYS,
-    CONFIDENCE_INCREMENT, CONFIDENCE_MAX, CONFIDENCE_OVERRIDE_PENALTY, CONFIDENCE_THRESHOLD,
+    AffinityStore, AffinityStoreError, CONFIDENCE_HALF_LIFE_DAYS, CONFIDENCE_INCREMENT,
+    CONFIDENCE_MAX, CONFIDENCE_OVERRIDE_PENALTY, CONFIDENCE_THRESHOLD, SenderAffinity,
 };
 pub use custom_bundle::{
     BundleInfo, BundleStore, BundleStoreError, CreateBundleParams, UpdateBundleParams,
 };
 pub use engine::{BundlerEngine, CategoriseResult, CategoriseSource, HeuristicMatch};
-pub use evaluator::{evaluate_affinity, evaluate_rules, AffinityResult, RuleResult};
-pub use recategorise::{process_move, MoveAction, MoveResult};
+pub use evaluator::{AffinityResult, RuleResult, evaluate_affinity, evaluate_rules};
+pub use recategorise::{MoveAction, MoveResult, process_move};
 pub use rule_store::{
-    validate_rule, CreateRuleParams, RuleStore, RuleStoreError, UpdateRuleParams,
+    CreateRuleParams, RuleStore, RuleStoreError, UpdateRuleParams, validate_rule,
 };
 pub use user_rules::{
     BundleRule, RuleId, RuleMatchable, UserCompiledRule, UserRuleField, UserRuleOp,

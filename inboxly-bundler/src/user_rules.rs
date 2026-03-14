@@ -169,12 +169,8 @@ impl BundleRule {
                 .iter()
                 .any(|addr| self.test_value(addr)),
             UserRuleField::Subject => self.test_value(email.subject()),
-            UserRuleField::Header(name) => {
-                email.header(name).is_some_and(|v| self.test_value(v))
-            }
-            UserRuleField::Body => {
-                email.body_text().is_some_and(|v| self.test_value(v))
-            }
+            UserRuleField::Header(name) => email.header(name).is_some_and(|v| self.test_value(v)),
+            UserRuleField::Body => email.body_text().is_some_and(|v| self.test_value(v)),
         }
     }
 
@@ -192,9 +188,7 @@ impl BundleRule {
             }
             UserRuleOp::Domain => {
                 // Extract domain from email address: "user@example.com" -> "example.com"
-                let domain = field_value
-                    .rsplit_once('@')
-                    .map_or(field_value, |(_, d)| d);
+                let domain = field_value.rsplit_once('@').map_or(field_value, |(_, d)| d);
                 domain.eq_ignore_ascii_case(&self.value)
             }
         }
@@ -240,16 +234,10 @@ impl UserCompiledRule {
             };
             match &self.rule.field {
                 UserRuleField::From => re.is_match(email.sender_address()),
-                UserRuleField::To => {
-                    email.to_addresses().iter().any(|a| re.is_match(a))
-                }
+                UserRuleField::To => email.to_addresses().iter().any(|a| re.is_match(a)),
                 UserRuleField::Subject => re.is_match(email.subject()),
-                UserRuleField::Header(name) => {
-                    email.header(name).is_some_and(|v| re.is_match(v))
-                }
-                UserRuleField::Body => {
-                    email.body_text().is_some_and(|v| re.is_match(v))
-                }
+                UserRuleField::Header(name) => email.header(name).is_some_and(|v| re.is_match(v)),
+                UserRuleField::Body => email.body_text().is_some_and(|v| re.is_match(v)),
             }
         } else {
             // Non-regex operators delegate to BundleRule::matches
@@ -453,8 +441,8 @@ mod tests {
             UserRuleOp::Contains,
             "campaign",
         );
-        let email = MockEmail::new("a@b.com", "Promo")
-            .with_header("X-Mailer", "MailChimp Campaign v3");
+        let email =
+            MockEmail::new("a@b.com", "Promo").with_header("X-Mailer", "MailChimp Campaign v3");
         assert!(rule.matches(&email));
     }
 
