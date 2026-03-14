@@ -967,6 +967,7 @@ pub fn rebuild_emails_from_maildir(
             imap_uid: meta.imap_uid as i64,
             imap_folder: meta.imap_folder.clone(),
             has_attachments: !meta.attachments.is_empty(),
+            body_downloaded: true, // Rebuilding from Maildir means body is on disk
             message_id_header: None,
             in_reply_to: None,
             references_json: None,

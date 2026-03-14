@@ -4,7 +4,7 @@ use crate::error::{Result, StoreError};
 use crate::store::Store;
 
 /// Current schema version. Bump this when adding a new migration.
-const CURRENT_VERSION: u32 = 1;
+const CURRENT_VERSION: u32 = 2;
 
 /// Run all pending migrations.
 pub fn run(store: &mut Store) -> Result<()> {
@@ -21,8 +21,9 @@ pub fn run(store: &mut Store) -> Result<()> {
         migrate_v0_to_v1(store)?;
     }
 
-    // Future migrations:
-    // if version < 2 { migrate_v1_to_v2(store)?; }
+    if version < 2 {
+        migrate_v1_to_v2(store)?;
+    }
 
     set_version(store, CURRENT_VERSION)?;
     info!("Database at schema version {CURRENT_VERSION}");
@@ -82,6 +83,7 @@ fn migrate_v0_to_v1(store: &mut Store) -> Result<()> {
             imap_uid            INTEGER NOT NULL DEFAULT 0,
             imap_folder         TEXT NOT NULL DEFAULT 'INBOX',
             has_attachments     INTEGER NOT NULL DEFAULT 0,
+            body_downloaded     INTEGER NOT NULL DEFAULT 0,
             message_id_header   TEXT,
             in_reply_to         TEXT,
             references_json     TEXT,
@@ -206,6 +208,20 @@ fn migrate_v0_to_v1(store: &mut Store) -> Result<()> {
             created_at        INTEGER NOT NULL DEFAULT (unixepoch())
         );
         "
+    )?;
+
+    Ok(())
+}
+
+/// M8: Add body_downloaded column and index for Phase 2 sync.
+fn migrate_v1_to_v2(store: &mut Store) -> Result<()> {
+    info!("Running migration v1 -> v2: add body_downloaded column to emails");
+
+    store.conn().execute_batch(
+        "ALTER TABLE emails ADD COLUMN body_downloaded INTEGER NOT NULL DEFAULT 0;
+         CREATE INDEX IF NOT EXISTS idx_emails_body_downloaded
+             ON emails(account_id, imap_folder, body_downloaded)
+             WHERE body_downloaded = 0;"
     )?;
 
     Ok(())

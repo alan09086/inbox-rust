@@ -26,6 +26,7 @@ pub struct EmailRow {
     pub imap_uid: i64,
     pub imap_folder: String,
     pub has_attachments: bool,
+    pub body_downloaded: bool,
     pub message_id_header: Option<String>,
     pub in_reply_to: Option<String>,
     pub references_json: Option<String>,
@@ -45,8 +46,8 @@ impl Store {
         self.conn().execute(
             "INSERT INTO emails (id, account_id, thread_id, from_name, from_address, to_json, cc_json,
              subject, snippet, date, maildir_path, flags, size_bytes, imap_uid, imap_folder,
-             has_attachments, message_id_header, in_reply_to, references_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+             has_attachments, body_downloaded, message_id_header, in_reply_to, references_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
             params![
                 email.id,
                 email.account_id,
@@ -64,6 +65,7 @@ impl Store {
                 email.imap_uid,
                 email.imap_folder,
                 email.has_attachments,
+                email.body_downloaded,
                 email.message_id_header,
                 email.in_reply_to,
                 email.references_json,
@@ -77,7 +79,7 @@ impl Store {
             .query_row(
                 "SELECT id, account_id, thread_id, from_name, from_address, to_json, cc_json,
                  subject, snippet, date, maildir_path, flags, size_bytes, imap_uid, imap_folder,
-                 has_attachments, message_id_header, in_reply_to, references_json
+                 has_attachments, body_downloaded, message_id_header, in_reply_to, references_json
                  FROM emails WHERE id = ?1",
                 params![id],
                 Self::row_to_email,
@@ -207,9 +209,110 @@ impl Store {
             imap_uid: row.get(13)?,
             imap_folder: row.get(14)?,
             has_attachments: row.get(15)?,
-            message_id_header: row.get(16)?,
-            in_reply_to: row.get(17)?,
-            references_json: row.get(18)?,
+            body_downloaded: row.get(16)?,
+            message_id_header: row.get(17)?,
+            in_reply_to: row.get(18)?,
+            references_json: row.get(19)?,
         })
+    }
+
+    // -- Phase 2 (M8) query methods --
+
+    /// Mark an email's body as downloaded and update its Maildir path.
+    pub fn mark_body_downloaded(&self, email_id: &str, maildir_path: &str) -> Result<()> {
+        let changed = self.conn().execute(
+            "UPDATE emails SET body_downloaded = 1, maildir_path = ?1 WHERE id = ?2",
+            params![maildir_path, email_id],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound(format!("email {email_id}")));
+        }
+        Ok(())
+    }
+
+    /// Check if an email's body has been downloaded.
+    pub fn is_body_downloaded(&self, email_id: &str) -> Result<bool> {
+        let downloaded: bool = self.conn().query_row(
+            "SELECT body_downloaded FROM emails WHERE id = ?1",
+            params![email_id],
+            |row| row.get(0),
+        ).map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                StoreError::NotFound(format!("email {email_id}"))
+            }
+            other => StoreError::Sqlite(other),
+        })?;
+        Ok(downloaded)
+    }
+
+    /// Get the Maildir path for an email.
+    pub fn get_maildir_path(&self, email_id: &str) -> Result<Option<String>> {
+        let path: String = self.conn().query_row(
+            "SELECT maildir_path FROM emails WHERE id = ?1",
+            params![email_id],
+            |row| row.get(0),
+        ).map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                StoreError::NotFound(format!("email {email_id}"))
+            }
+            other => StoreError::Sqlite(other),
+        })?;
+        if path.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(path))
+        }
+    }
+
+    /// Count emails in a folder that have not had their body downloaded yet.
+    pub fn count_emails_without_body(&self, account_id: &str, folder: &str) -> Result<u64> {
+        let count: u64 = self.conn().query_row(
+            "SELECT COUNT(*) FROM emails WHERE account_id = ?1 AND imap_folder = ?2 AND body_downloaded = 0",
+            params![account_id, folder],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
+    /// Get UIDs of emails without bodies, ordered by UID descending (newest first).
+    /// Returns at most `limit` UIDs.
+    pub fn get_uids_without_body(
+        &self,
+        account_id: &str,
+        folder: &str,
+        limit: usize,
+    ) -> Result<Vec<i64>> {
+        let mut stmt = self.conn().prepare(
+            "SELECT imap_uid FROM emails
+             WHERE account_id = ?1 AND imap_folder = ?2 AND body_downloaded = 0
+             ORDER BY imap_uid DESC
+             LIMIT ?3",
+        )?;
+        let uids = stmt
+            .query_map(
+                params![account_id, folder, limit as i64],
+                |row| row.get(0),
+            )?
+            .collect::<std::result::Result<Vec<i64>, _>>()?;
+        Ok(uids)
+    }
+
+    /// Look up an email's ID by its IMAP UID within an account + folder.
+    pub fn get_email_id_by_uid(
+        &self,
+        account_id: &str,
+        folder: &str,
+        uid: i64,
+    ) -> Result<Option<String>> {
+        let result = self.conn().query_row(
+            "SELECT id FROM emails WHERE account_id = ?1 AND imap_folder = ?2 AND imap_uid = ?3",
+            params![account_id, folder, uid],
+            |row| row.get::<_, String>(0),
+        );
+        match result {
+            Ok(id) => Ok(Some(id)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(StoreError::Sqlite(e)),
+        }
     }
 }

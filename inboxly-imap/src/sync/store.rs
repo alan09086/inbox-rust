@@ -21,13 +21,15 @@ pub fn batch_insert_envelopes(conn: &Connection, envelopes: &[EnvelopeData]) -> 
                 from_name, from_address, to_json, cc_json,
                 subject, snippet, date, maildir_path,
                 flags, size_bytes, imap_uid, imap_folder,
-                has_attachments, message_id_header, in_reply_to, references_json
+                has_attachments, body_downloaded,
+                message_id_header, in_reply_to, references_json
             ) VALUES (
                 ?1, ?2, NULL,
                 ?3, ?4, ?5, ?6,
                 ?7, '', ?8, '',
                 ?9, ?10, ?11, ?12,
-                0, ?13, ?14, ?15
+                0, 0,
+                ?13, ?14, ?15
             )",
         )?;
 

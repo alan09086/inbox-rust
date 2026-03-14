@@ -50,6 +50,7 @@ fn sample_email(account_id: &str, thread_id: &str) -> EmailRow {
         imap_uid: 42,
         imap_folder: "INBOX".into(),
         has_attachments: false,
+        body_downloaded: false,
         message_id_header: Some("<msg001@example.com>".into()),
         in_reply_to: None,
         references_json: None,
