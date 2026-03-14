@@ -26,3 +26,4 @@ pub use error::StoreError;
 pub use store::Store;
 pub use accounts::AccountRow;
 pub use emails::{EmailRow, flags};
+pub use threads::ThreadRow;
