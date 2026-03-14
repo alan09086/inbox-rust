@@ -152,6 +152,37 @@ impl BundlerEngine {
             source: CategoriseSource::Uncategorised,
         }
     }
+
+    /// Re-evaluate an email's bundle assignment using full body content.
+    ///
+    /// Called when Phase 2 sync delivers a message body for an email that was
+    /// previously categorised using headers only. Runs the full pipeline
+    /// (user rules -> sender learning -> header heuristics) with body content
+    /// available via the `RuleMatchable` trait.
+    ///
+    /// Returns `Some(new_bundle_id)` if the re-evaluation changed the
+    /// assignment, or `None` if the assignment remains the same.
+    ///
+    /// The caller is responsible for:
+    /// 1. Constructing a `RuleMatchable` that includes the body text
+    /// 2. Fetching the sender affinity and heuristic result
+    /// 3. Comparing the returned bundle_id with the current assignment
+    /// 4. Updating `thread_state.bundle_id` if it changed
+    pub fn re_evaluate_with_body(
+        &self,
+        email: &dyn RuleMatchable,
+        sender_affinity: Option<&SenderAffinity>,
+        heuristic_result: Option<HeuristicMatch>,
+        current_bundle_id: Option<Uuid>,
+        now: DateTime<Utc>,
+    ) -> Option<Uuid> {
+        let result = self.categorise(email, sender_affinity, heuristic_result, now);
+        if result.bundle_id != current_bundle_id {
+            result.bundle_id
+        } else {
+            None
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -303,5 +334,103 @@ mod tests {
             engine.categorise(&email, None, None, Utc::now()).source,
             CategoriseSource::Uncategorised
         ));
+    }
+
+    // -- Body re-evaluation tests (M14) ----------------------------------------
+
+    #[test]
+    fn body_rule_skipped_when_no_body() {
+        // Create a rule matching "unsubscribe" in body
+        let promo_bundle = Uuid::new_v4();
+        let rules = vec![UserCompiledRule::compile(BundleRule {
+            id: Uuid::new_v4(),
+            bundle_id: promo_bundle,
+            field: UserRuleField::Body,
+            operator: UserRuleOp::Contains,
+            value: "unsubscribe".into(),
+            priority: 100,
+        })];
+
+        let engine = BundlerEngine::new(rules, HashMap::new());
+
+        // Email with no body -- body rule should not fire
+        let email = MockEmail::new("news@example.com", "Newsletter");
+        let result = engine.categorise(&email, None, None, Utc::now());
+        assert!(matches!(result.source, CategoriseSource::Uncategorised));
+    }
+
+    #[test]
+    fn body_rule_fires_on_reevaluation() {
+        let promo_bundle = Uuid::new_v4();
+        let rules = vec![UserCompiledRule::compile(BundleRule {
+            id: Uuid::new_v4(),
+            bundle_id: promo_bundle,
+            field: UserRuleField::Body,
+            operator: UserRuleOp::Contains,
+            value: "unsubscribe".into(),
+            priority: 100,
+        })];
+
+        let engine = BundlerEngine::new(rules, HashMap::new());
+
+        // Email with body containing "unsubscribe" -- rule fires
+        let email = MockEmail::new("news@example.com", "Newsletter")
+            .with_body("Click here to unsubscribe from this list.");
+        let result = engine.categorise(&email, None, None, Utc::now());
+        assert_eq!(result.bundle_id, Some(promo_bundle));
+        assert!(matches!(result.source, CategoriseSource::UserRule { .. }));
+    }
+
+    #[test]
+    fn reevaluation_no_change_returns_none() {
+        let (engine, social_id, _, _) = setup_engine();
+
+        // Email already categorised by heuristic to Social
+        let email = MockEmail::new("bot@facebook.com", "Friend request");
+        let heuristic = HeuristicMatch {
+            category: "Social".into(),
+            pattern: "domain".into(),
+        };
+
+        // Re-evaluate: same result, should return None
+        let change = engine.re_evaluate_with_body(
+            &email,
+            None,
+            Some(heuristic),
+            Some(social_id),
+            Utc::now(),
+        );
+        assert!(change.is_none());
+    }
+
+    #[test]
+    fn body_rule_overrides_header_heuristic() {
+        let custom_id = Uuid::new_v4();
+        let rules = vec![UserCompiledRule::compile(BundleRule {
+            id: Uuid::new_v4(),
+            bundle_id: custom_id,
+            field: UserRuleField::Body,
+            operator: UserRuleOp::Contains,
+            value: "unsubscribe".into(),
+            priority: 100,
+        })];
+
+        let mut category_map = HashMap::new();
+        category_map.insert("Social".to_owned(), Uuid::new_v4());
+
+        let engine = BundlerEngine::new(rules, category_map);
+
+        // Header heuristic says Social, but body rule overrides
+        let email = MockEmail::new("promo@shop.com", "Sale")
+            .with_body("Click to unsubscribe");
+        let heuristic = HeuristicMatch {
+            category: "Social".into(),
+            pattern: "List-Id".into(),
+        };
+
+        let result = engine.categorise(&email, None, Some(heuristic), Utc::now());
+        // User rule (body match) beats heuristic
+        assert_eq!(result.bundle_id, Some(custom_id));
+        assert!(matches!(result.source, CategoriseSource::UserRule { .. }));
     }
 }
