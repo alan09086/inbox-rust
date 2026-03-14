@@ -29,3 +29,7 @@ pub use highlight::{Highlight, TripBundle};
 pub mod inbox;
 
 pub use inbox::{InboxItem, SnoozeInfo, SnoozeUntil, ThreadState};
+
+pub mod error;
+
+pub use error::{InboxlyError, Result};
