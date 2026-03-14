@@ -1,0 +1,212 @@
+# Default header heuristic rules for email categorisation.
+# Priority: higher number = evaluated first. First match wins.
+# These are Layer 1 (lowest priority) -- user rules and sender learning override these.
+
+# --- Forums (List-Id present = mailing list) ---
+[[rules]]
+name = "mailing-list-id"
+category = "Forums"
+priority = 50
+field = { Header = "List-Id" }
+operator = "Present"
+value = ""
+
+# --- Promos (List-Unsubscribe without List-Id = marketing) ---
+[[rules]]
+name = "marketing-unsubscribe"
+category = "Promos"
+priority = 40
+field = { Header = "List-Unsubscribe" }
+operator = "PresentWithout"
+value = "List-Unsubscribe|List-Id"
+
+# --- Promos (X-Mailer campaign tools) ---
+[[rules]]
+name = "mailer-campaign"
+category = "Promos"
+priority = 45
+field = { Header = "X-Mailer" }
+operator = "Matches"
+value = "(?i)(campaign|mailchimp|sendgrid|mailgun|constant.?contact|brevo|klaviyo|hubspot)"
+
+# --- Low Priority (Precedence: bulk) ---
+[[rules]]
+name = "precedence-bulk"
+category = "LowPriority"
+priority = 10
+field = { Header = "Precedence" }
+operator = "Equals"
+value = "bulk"
+
+# --- Social (known social domains) ---
+[[rules]]
+name = "social-facebook"
+category = "Social"
+priority = 60
+field = "SenderDomain"
+operator = "DomainGlob"
+value = "facebookmail.com"
+
+[[rules]]
+name = "social-twitter"
+category = "Social"
+priority = 60
+field = "SenderDomain"
+operator = "DomainGlob"
+value = "twitter.com"
+
+[[rules]]
+name = "social-x"
+category = "Social"
+priority = 60
+field = "SenderDomain"
+operator = "DomainGlob"
+value = "x.com"
+
+[[rules]]
+name = "social-linkedin"
+category = "Social"
+priority = 60
+field = "SenderDomain"
+operator = "DomainGlob"
+value = "linkedin.com"
+
+[[rules]]
+name = "social-instagram"
+category = "Social"
+priority = 60
+field = "SenderDomain"
+operator = "DomainGlob"
+value = "instagram.com"
+
+[[rules]]
+name = "social-github"
+category = "Social"
+priority = 55
+field = "SenderDomain"
+operator = "DomainGlob"
+value = "github.com"
+
+[[rules]]
+name = "social-discord"
+category = "Social"
+priority = 60
+field = "SenderDomain"
+operator = "DomainGlob"
+value = "discord.com"
+
+[[rules]]
+name = "social-reddit"
+category = "Social"
+priority = 60
+field = "SenderDomain"
+operator = "DomainGlob"
+value = "redditmail.com"
+
+# --- Purchases (e-commerce domains) ---
+[[rules]]
+name = "purchases-amazon"
+category = "Purchases"
+priority = 55
+field = "SenderDomain"
+operator = "DomainGlob"
+value = "*.amazon.*"
+
+[[rules]]
+name = "purchases-ebay"
+category = "Purchases"
+priority = 55
+field = "SenderDomain"
+operator = "DomainGlob"
+value = "ebay.*"
+
+[[rules]]
+name = "purchases-etsy"
+category = "Purchases"
+priority = 55
+field = "SenderDomain"
+operator = "DomainGlob"
+value = "etsy.com"
+
+[[rules]]
+name = "purchases-shopify"
+category = "Purchases"
+priority = 55
+field = "SenderDomain"
+operator = "DomainGlob"
+value = "shopify.com"
+
+[[rules]]
+name = "purchases-stripe"
+category = "Purchases"
+priority = 55
+field = "SenderDomain"
+operator = "DomainGlob"
+value = "stripe.com"
+
+# --- Finance (banking/payment domains) ---
+[[rules]]
+name = "finance-paypal"
+category = "Finance"
+priority = 55
+field = "SenderDomain"
+operator = "DomainGlob"
+value = "paypal.*"
+
+[[rules]]
+name = "finance-bank-domain"
+category = "Finance"
+priority = 30
+field = "SenderDomain"
+operator = "Matches"
+value = "(?i)(bank|banking|creditunion|visa|mastercard|amex)"
+
+[[rules]]
+name = "finance-statement-subject"
+category = "Finance"
+priority = 25
+field = "Subject"
+operator = "Matches"
+value = "(?i)(statement|account.?summary|balance.?update|transaction.?alert)"
+
+# --- Travel (booking/airline domains) ---
+[[rules]]
+name = "travel-booking"
+category = "Travel"
+priority = 55
+field = "SenderDomain"
+operator = "DomainGlob"
+value = "booking.com"
+
+[[rules]]
+name = "travel-airbnb"
+category = "Travel"
+priority = 55
+field = "SenderDomain"
+operator = "DomainGlob"
+value = "airbnb.*"
+
+[[rules]]
+name = "travel-expedia"
+category = "Travel"
+priority = 55
+field = "SenderDomain"
+operator = "DomainGlob"
+value = "expedia.*"
+
+[[rules]]
+name = "travel-airline-domain"
+category = "Travel"
+priority = 30
+field = "SenderDomain"
+operator = "Matches"
+value = "(?i)(airline|airways|aircanada|westjet|united\\.com|delta\\.com|southwest\\.com)"
+
+# --- Updates (generic noreply/notification senders -- catch-all, low priority) ---
+[[rules]]
+name = "updates-noreply"
+category = "Updates"
+priority = 5
+field = "From"
+operator = "Matches"
+value = "(?i)(no.?reply|noreply|do.?not.?reply|notifications?@)"

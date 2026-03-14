@@ -17,6 +17,8 @@
 //! the application. For database persistence with avatar metadata, see
 //! `ContactRow` in `inboxly-store`.
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -141,6 +143,17 @@ impl Contact {
     }
 }
 
+impl fmt::Display for Contact {
+    /// Formats the contact as `"Name <address>"` or just `"address"` if name is empty.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.name.is_empty() {
+            write!(f, "{}", self.address)
+        } else {
+            write!(f, "{} <{}>", self.name, self.address)
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // RFC 2822 address parsing
 // ---------------------------------------------------------------------------
@@ -258,6 +271,20 @@ pub fn parse_address_list(raw: &str) -> Vec<ParsedAddress> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- Contact Display tests ---
+
+    #[test]
+    fn contact_display_with_name() {
+        let c = Contact::new("Alice", "alice@example.com");
+        assert_eq!(format!("{c}"), "Alice <alice@example.com>");
+    }
+
+    #[test]
+    fn contact_display_without_name() {
+        let c = Contact::new("", "bob@example.com");
+        assert_eq!(format!("{c}"), "bob@example.com");
+    }
 
     // --- Existing Contact tests (preserved) ---
 

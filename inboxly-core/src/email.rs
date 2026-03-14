@@ -45,6 +45,33 @@ pub struct EmailMeta {
     pub imap_folder: String,
 }
 
+impl EmailMeta {
+    /// Create a default `EmailMeta` for use in test fixtures.
+    ///
+    /// All fields are set to sensible defaults. Tests should override the
+    /// fields they care about (e.g., `from`, `subject`).
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub fn test_default() -> Self {
+        Self {
+            id: EmailId::new(format!("<test-{}@example.com>", uuid::Uuid::new_v4())),
+            account_id: AccountId::new(),
+            thread_id: ThreadId::new(),
+            from: Contact::new("", "test@example.com"),
+            to: vec![],
+            cc: vec![],
+            subject: String::new(),
+            snippet: String::new(),
+            date: Utc::now(),
+            maildir_path: PathBuf::from("/tmp/test"),
+            attachments: vec![],
+            flags: EmailFlags::new(),
+            size_bytes: 0,
+            imap_uid: 1,
+            imap_folder: "INBOX".into(),
+        }
+    }
+}
+
 /// Full email content — loaded on demand when user opens a message.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EmailContent {
