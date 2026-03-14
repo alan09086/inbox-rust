@@ -1,4 +1,4 @@
-use inboxly_imap::connection::{ImapCapabilities, parse_capabilities};
+use inboxly_imap::connection::parse_capabilities;
 
 #[test]
 fn parse_capabilities_detects_condstore() {
