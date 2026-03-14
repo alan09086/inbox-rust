@@ -14,9 +14,4 @@ inboxly-extract.workspace = true
 iced.workspace = true
 chrono.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
 tracing = "0.1"
-zbus = { version = "5", default-features = false, features = ["tokio"] }
-
-[dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

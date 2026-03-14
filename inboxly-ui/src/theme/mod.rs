@@ -259,47 +259,36 @@ impl InboxlyTheme {
     /// - D-Bus is unavailable
     /// - The portal doesn't support the setting
     /// - The system reports "no preference"
-    pub async fn from_system() -> Self {
-        // zbus requires a Tokio runtime, but Iced's Task::perform runs on its
-        // own executor (not Tokio). We spawn a std thread with its own
-        // single-threaded Tokio runtime so zbus gets the reactor it needs.
-        let handle = std::thread::spawn(|| {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build();
-            match rt {
-                Ok(rt) => rt.block_on(system::query_system_color_scheme()).ok(),
-                Err(_) => None,
-            }
-        });
-
-        // Await the thread result via a blocking join (fine in Task::perform context).
-        let scheme = handle.join().ok().flatten();
-
-        match scheme {
-            Some(SystemColorScheme::Dark) => {
+    /// Detect system theme via D-Bus (`dbus-send`).
+    ///
+    /// This is synchronous and safe to call from any context (no Tokio needed).
+    pub fn from_system() -> Self {
+        match system::query_system_color_scheme() {
+            Ok(SystemColorScheme::Dark) => {
                 tracing::info!("system theme detected: dark");
                 Self::dark()
             }
-            Some(SystemColorScheme::Light | SystemColorScheme::NoPreference) | None => {
-                if scheme.is_none() {
-                    tracing::warn!("system theme detection failed, defaulting to light");
-                }
+            Ok(SystemColorScheme::Light | SystemColorScheme::NoPreference) => {
+                tracing::info!("system theme detected: light (or no preference)");
+                Self::light()
+            }
+            Err(e) => {
+                tracing::warn!("system theme detection failed ({e}), defaulting to light");
                 Self::light()
             }
         }
     }
 
-    /// Resolve theme from user preference.
+    /// Resolve theme from user preference (blocking).
     ///
     /// - `ThemePreference::Light` -> light theme
     /// - `ThemePreference::Dark` -> dark theme
-    /// - `ThemePreference::System` -> queries D-Bus portal (async)
-    pub async fn from_preference(pref: ThemePreference) -> Self {
+    /// - `ThemePreference::System` -> queries D-Bus portal (blocking Tokio runtime)
+    pub fn from_preference(pref: ThemePreference) -> Self {
         match pref {
             ThemePreference::Light => Self::light(),
             ThemePreference::Dark => Self::dark(),
-            ThemePreference::System => Self::from_system().await,
+            ThemePreference::System => Self::from_system(),
         }
     }
 
@@ -307,7 +296,7 @@ impl InboxlyTheme {
     ///
     /// Reads `"theme"` key from the settings store. If not found or
     /// not parseable, falls back to `ThemePreference::System`.
-    pub async fn from_settings(settings: &dyn SettingsReader) -> Self {
+    pub fn from_settings(settings: &dyn SettingsReader) -> Self {
         let pref = settings
             .get_setting("theme")
             .ok()
@@ -320,7 +309,7 @@ impl InboxlyTheme {
             })
             .unwrap_or(ThemePreference::System);
 
-        Self::from_preference(pref).await
+        Self::from_preference(pref)
     }
 
     /// Toggle between light and dark themes.
@@ -568,49 +557,49 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn from_preference_light() {
-        let theme = InboxlyTheme::from_preference(ThemePreference::Light).await;
+    #[test]
+    fn from_preference_light() {
+        let theme = InboxlyTheme::from_preference(ThemePreference::Light);
         assert!(!theme.colors.is_dark);
     }
 
-    #[tokio::test]
-    async fn from_preference_dark() {
-        let theme = InboxlyTheme::from_preference(ThemePreference::Dark).await;
+    #[test]
+    fn from_preference_dark() {
+        let theme = InboxlyTheme::from_preference(ThemePreference::Dark);
         assert!(theme.colors.is_dark);
     }
 
-    #[tokio::test]
-    async fn from_settings_dark() {
+    #[test]
+    fn from_settings_dark() {
         let settings = MockSettings {
             value: Some("dark".to_owned()),
         };
-        let theme = InboxlyTheme::from_settings(&settings).await;
+        let theme = InboxlyTheme::from_settings(&settings);
         assert!(theme.colors.is_dark);
     }
 
-    #[tokio::test]
-    async fn from_settings_light() {
+    #[test]
+    fn from_settings_light() {
         let settings = MockSettings {
             value: Some("light".to_owned()),
         };
-        let theme = InboxlyTheme::from_settings(&settings).await;
+        let theme = InboxlyTheme::from_settings(&settings);
         assert!(!theme.colors.is_dark);
     }
 
-    #[tokio::test]
-    async fn from_settings_missing_key_defaults_to_system() {
+    #[test]
+    fn from_settings_missing_key_defaults_to_system() {
         let settings = MockSettings { value: None };
-        // System detection may or may not work in CI, but should not panic.
-        let _theme = InboxlyTheme::from_settings(&settings).await;
+        // System detection may or may not work in test, but should not panic.
+        let _theme = InboxlyTheme::from_settings(&settings);
     }
 
-    #[tokio::test]
-    async fn from_settings_invalid_value_defaults_to_system() {
+    #[test]
+    fn from_settings_invalid_value_defaults_to_system() {
         let settings = MockSettings {
             value: Some("purple".to_owned()),
         };
-        let _theme = InboxlyTheme::from_settings(&settings).await;
+        let _theme = InboxlyTheme::from_settings(&settings);
     }
 
     #[test]

@@ -3,7 +3,6 @@
 use iced::widget::{column, container, row, text};
 use iced::{Element, Length, Task, Theme};
 
-use inboxly_core::config::ThemePreference;
 use inboxly_store::Store;
 
 use crate::feed::{self, FeedSection};
@@ -90,25 +89,25 @@ impl Default for Inboxly {
 impl Inboxly {
     /// Create the app with initial state. Returns (Self, startup Task).
     ///
-    /// Fires an async system theme detection command when the preference
-    /// is `ThemePreference::System` (the default). The initial render uses
-    /// light theme until D-Bus responds.
+    /// Theme should be resolved before calling this (via
+    /// `InboxlyTheme::from_system()`) since zbus requires Tokio
+    /// and Iced doesn't provide one.
     pub fn new() -> (Self, Task<Message>) {
         let mut app = Self::default();
+        app.theme = InboxlyTheme::from_system();
         app.reload_feed();
-        let task = Self::startup_theme_task(ThemePreference::System);
-        (app, task)
+        (app, Task::none())
     }
 
     /// Create the app with a store instance (called from binary crate).
     pub fn with_store(store: Store) -> (Self, Task<Message>) {
         let mut app = Self {
             store: Some(store),
+            theme: InboxlyTheme::from_system(),
             ..Self::default()
         };
         app.reload_feed();
-        let task = Self::startup_theme_task(ThemePreference::System);
-        (app, task)
+        (app, Task::none())
     }
 
     /// Iced update function -- handle messages and mutate state.
@@ -313,16 +312,6 @@ impl Inboxly {
     /// Iced theme -- returns the current theme for widget styling.
     pub fn theme(&self) -> Theme {
         self.theme.iced_theme().clone()
-    }
-
-    /// Build the startup task for async system theme detection.
-    fn startup_theme_task(pref: ThemePreference) -> Task<Message> {
-        match pref {
-            ThemePreference::System => {
-                Task::perform(InboxlyTheme::from_system(), Message::ThemeChanged)
-            }
-            _ => Task::none(),
-        }
     }
 
     /// Reload the feed from the store (synchronous, fast).
