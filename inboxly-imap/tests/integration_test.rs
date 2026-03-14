@@ -44,10 +44,7 @@ async fn live_connect_and_list_folders() {
         .expect("Failed to connect");
 
     // Authenticate
-    let creds = inboxly_imap::PasswordCredentials {
-        username,
-        password,
-    };
+    let creds = inboxly_imap::PasswordCredentials { username, password };
     let mut session = inboxly_imap::auth::password::login(conn, &creds)
         .await
         .expect("Failed to authenticate");
@@ -64,7 +61,10 @@ async fn live_connect_and_list_folders() {
         .expect("Failed to list folders");
     println!("Folders ({}):", folders.len());
     for f in &folders {
-        println!("  {} (role: {:?}, attrs: {:?})", f.name, f.role, f.attributes);
+        println!(
+            "  {} (role: {:?}, attrs: {:?})",
+            f.name, f.role, f.attributes
+        );
     }
 
     // Map well-known folders

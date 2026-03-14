@@ -134,10 +134,7 @@ mod tests {
     fn bundle_category_labels() {
         assert_eq!(BundleCategory::Social.label(), "Social");
         assert_eq!(BundleCategory::LowPriority.label(), "Low Priority");
-        assert_eq!(
-            BundleCategory::Custom("Work".into()).label(),
-            "Work"
-        );
+        assert_eq!(BundleCategory::Custom("Work".into()).label(), "Work");
     }
 
     #[test]

@@ -72,10 +72,18 @@ pub struct SnoozePresets {
     pub weekend_day: u8,
 }
 
-fn default_morning_hour() -> u8 { 8 }
-fn default_afternoon_hour() -> u8 { 13 }
-fn default_evening_hour() -> u8 { 18 }
-fn default_weekend_day() -> u8 { 5 }
+fn default_morning_hour() -> u8 {
+    8
+}
+fn default_afternoon_hour() -> u8 {
+    13
+}
+fn default_evening_hour() -> u8 {
+    18
+}
+fn default_weekend_day() -> u8 {
+    5
+}
 
 impl Default for SnoozePresets {
     fn default() -> Self {
@@ -142,7 +150,11 @@ impl Paths {
         let config_dir = dirs::config_dir()?.join(APP_NAME);
         let data_dir = dirs::data_dir()?.join(APP_NAME);
         let cache_dir = dirs::cache_dir()?.join(APP_NAME);
-        Some(Self { config_dir, data_dir, cache_dir })
+        Some(Self {
+            config_dir,
+            data_dir,
+            cache_dir,
+        })
     }
 
     /// Resolve paths, applying overrides from an `AppConfig`.
@@ -158,13 +170,21 @@ impl Paths {
     }
 
     /// Path to the TOML config file.
-    pub fn config_file(&self) -> PathBuf { self.config_dir.join("config.toml") }
+    pub fn config_file(&self) -> PathBuf {
+        self.config_dir.join("config.toml")
+    }
     /// Path to the SQLite database.
-    pub fn database_file(&self) -> PathBuf { self.data_dir.join("inboxly.db") }
+    pub fn database_file(&self) -> PathBuf {
+        self.data_dir.join("inboxly.db")
+    }
     /// Path to the Maildir root.
-    pub fn maildir_root(&self) -> PathBuf { self.data_dir.join("maildir") }
+    pub fn maildir_root(&self) -> PathBuf {
+        self.data_dir.join("maildir")
+    }
     /// Path to the tantivy index directory.
-    pub fn search_index_dir(&self) -> PathBuf { self.data_dir.join("index") }
+    pub fn search_index_dir(&self) -> PathBuf {
+        self.data_dir.join("index")
+    }
 
     /// Ensure all directories exist, creating them if necessary.
     pub fn ensure_dirs(&self) -> std::io::Result<()> {
@@ -230,35 +250,65 @@ impl AppConfig {
         for (i, account) in self.accounts.iter().enumerate() {
             let ctx = format!("accounts[{}]", i);
             if account.email.is_empty() {
-                return Err(ConfigError::Validation(format!("{}: email address is required", ctx)));
+                return Err(ConfigError::Validation(format!(
+                    "{}: email address is required",
+                    ctx
+                )));
             }
             if !account.email.contains('@') {
-                return Err(ConfigError::Validation(format!("{}: '{}' is not a valid email address (missing '@')", ctx, account.email)));
+                return Err(ConfigError::Validation(format!(
+                    "{}: '{}' is not a valid email address (missing '@')",
+                    ctx, account.email
+                )));
             }
             if account.imap_host.is_empty() {
-                return Err(ConfigError::Validation(format!("{}: IMAP host is required", ctx)));
+                return Err(ConfigError::Validation(format!(
+                    "{}: IMAP host is required",
+                    ctx
+                )));
             }
             if account.smtp_host.is_empty() {
-                return Err(ConfigError::Validation(format!("{}: SMTP host is required", ctx)));
+                return Err(ConfigError::Validation(format!(
+                    "{}: SMTP host is required",
+                    ctx
+                )));
             }
             if account.imap_port == 0 {
-                return Err(ConfigError::Validation(format!("{}: IMAP port must be between 1 and 65535", ctx)));
+                return Err(ConfigError::Validation(format!(
+                    "{}: IMAP port must be between 1 and 65535",
+                    ctx
+                )));
             }
             if account.smtp_port == 0 {
-                return Err(ConfigError::Validation(format!("{}: SMTP port must be between 1 and 65535", ctx)));
+                return Err(ConfigError::Validation(format!(
+                    "{}: SMTP port must be between 1 and 65535",
+                    ctx
+                )));
             }
         }
         if self.snooze.morning_hour > 23 {
-            return Err(ConfigError::Validation(format!("snooze.morning_hour {} is out of range (0-23)", self.snooze.morning_hour)));
+            return Err(ConfigError::Validation(format!(
+                "snooze.morning_hour {} is out of range (0-23)",
+                self.snooze.morning_hour
+            )));
         }
         if self.snooze.afternoon_hour > 23 {
-            return Err(ConfigError::Validation(format!("snooze.afternoon_hour {} is out of range (0-23)", self.snooze.afternoon_hour)));
+            return Err(ConfigError::Validation(format!(
+                "snooze.afternoon_hour {} is out of range (0-23)",
+                self.snooze.afternoon_hour
+            )));
         }
         if self.snooze.evening_hour > 23 {
-            return Err(ConfigError::Validation(format!("snooze.evening_hour {} is out of range (0-23)", self.snooze.evening_hour)));
+            return Err(ConfigError::Validation(format!(
+                "snooze.evening_hour {} is out of range (0-23)",
+                self.snooze.evening_hour
+            )));
         }
         if self.snooze.weekend_day > 6 {
-            return Err(ConfigError::Validation(format!("snooze.weekend_day {} is out of range (0=Monday .. 6=Sunday)", self.snooze.weekend_day)));
+            return Err(ConfigError::Validation(format!(
+                "snooze.weekend_day {} is out of range (0=Monday .. 6=Sunday)",
+                self.snooze.weekend_day
+            )));
         }
         Ok(())
     }
@@ -272,7 +322,9 @@ mod tests {
 
     // Helper wrapper so we can serialize AuthMethod as a TOML value (TOML requires a table root).
     #[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug)]
-    struct AuthWrapper { method: AuthMethod }
+    struct AuthWrapper {
+        method: AuthMethod,
+    }
 
     #[test]
     fn auth_method_default_is_password() {
@@ -281,17 +333,30 @@ mod tests {
 
     #[test]
     fn auth_method_serializes_to_snake_case() {
-        let toml_str = toml::to_string(&AuthWrapper { method: AuthMethod::OAuth2 }).unwrap();
+        let toml_str = toml::to_string(&AuthWrapper {
+            method: AuthMethod::OAuth2,
+        })
+        .unwrap();
         assert!(toml_str.contains("oauth2"), "got: {toml_str}");
 
-        let toml_str = toml::to_string(&AuthWrapper { method: AuthMethod::AppPassword }).unwrap();
+        let toml_str = toml::to_string(&AuthWrapper {
+            method: AuthMethod::AppPassword,
+        })
+        .unwrap();
         assert!(toml_str.contains("app_password"), "got: {toml_str}");
     }
 
     #[test]
     fn auth_method_round_trip() {
-        for method in [AuthMethod::Password, AuthMethod::OAuth2, AuthMethod::AppPassword] {
-            let serialized = toml::to_string(&AuthWrapper { method: method.clone() }).unwrap();
+        for method in [
+            AuthMethod::Password,
+            AuthMethod::OAuth2,
+            AuthMethod::AppPassword,
+        ] {
+            let serialized = toml::to_string(&AuthWrapper {
+                method: method.clone(),
+            })
+            .unwrap();
             let deserialized: AuthWrapper = toml::from_str(&serialized).unwrap();
             assert_eq!(method, deserialized.method);
         }
@@ -535,7 +600,10 @@ mod tests {
     fn validate_missing_email() {
         let mut account = valid_account();
         account.email = String::new();
-        let config = AppConfig { accounts: vec![account], ..Default::default() };
+        let config = AppConfig {
+            accounts: vec![account],
+            ..Default::default()
+        };
         let err = config.validate().unwrap_err();
         assert!(err.to_string().contains("email address is required"));
     }
@@ -544,7 +612,10 @@ mod tests {
     fn validate_invalid_email() {
         let mut account = valid_account();
         account.email = "not-an-email".to_string();
-        let config = AppConfig { accounts: vec![account], ..Default::default() };
+        let config = AppConfig {
+            accounts: vec![account],
+            ..Default::default()
+        };
         let err = config.validate().unwrap_err();
         assert!(err.to_string().contains("missing '@'"));
     }
@@ -553,7 +624,10 @@ mod tests {
     fn validate_missing_imap_host() {
         let mut account = valid_account();
         account.imap_host = String::new();
-        let config = AppConfig { accounts: vec![account], ..Default::default() };
+        let config = AppConfig {
+            accounts: vec![account],
+            ..Default::default()
+        };
         let err = config.validate().unwrap_err();
         assert!(err.to_string().contains("IMAP host is required"));
     }
@@ -562,7 +636,10 @@ mod tests {
     fn validate_missing_smtp_host() {
         let mut account = valid_account();
         account.smtp_host = String::new();
-        let config = AppConfig { accounts: vec![account], ..Default::default() };
+        let config = AppConfig {
+            accounts: vec![account],
+            ..Default::default()
+        };
         let err = config.validate().unwrap_err();
         assert!(err.to_string().contains("SMTP host is required"));
     }
@@ -571,7 +648,10 @@ mod tests {
     fn validate_zero_imap_port() {
         let mut account = valid_account();
         account.imap_port = 0;
-        let config = AppConfig { accounts: vec![account], ..Default::default() };
+        let config = AppConfig {
+            accounts: vec![account],
+            ..Default::default()
+        };
         let err = config.validate().unwrap_err();
         assert!(err.to_string().contains("IMAP port"));
     }
@@ -580,35 +660,62 @@ mod tests {
     fn validate_zero_smtp_port() {
         let mut account = valid_account();
         account.smtp_port = 0;
-        let config = AppConfig { accounts: vec![account], ..Default::default() };
+        let config = AppConfig {
+            accounts: vec![account],
+            ..Default::default()
+        };
         let err = config.validate().unwrap_err();
         assert!(err.to_string().contains("SMTP port"));
     }
 
     #[test]
     fn validate_snooze_morning_hour_out_of_range() {
-        let config = AppConfig { snooze: SnoozePresets { morning_hour: 25, ..Default::default() }, ..Default::default() };
+        let config = AppConfig {
+            snooze: SnoozePresets {
+                morning_hour: 25,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         let err = config.validate().unwrap_err();
         assert!(err.to_string().contains("morning_hour"));
     }
 
     #[test]
     fn validate_snooze_afternoon_hour_out_of_range() {
-        let config = AppConfig { snooze: SnoozePresets { afternoon_hour: 24, ..Default::default() }, ..Default::default() };
+        let config = AppConfig {
+            snooze: SnoozePresets {
+                afternoon_hour: 24,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         let err = config.validate().unwrap_err();
         assert!(err.to_string().contains("afternoon_hour"));
     }
 
     #[test]
     fn validate_snooze_evening_hour_out_of_range() {
-        let config = AppConfig { snooze: SnoozePresets { evening_hour: 30, ..Default::default() }, ..Default::default() };
+        let config = AppConfig {
+            snooze: SnoozePresets {
+                evening_hour: 30,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         let err = config.validate().unwrap_err();
         assert!(err.to_string().contains("evening_hour"));
     }
 
     #[test]
     fn validate_snooze_weekend_day_out_of_range() {
-        let config = AppConfig { snooze: SnoozePresets { weekend_day: 7, ..Default::default() }, ..Default::default() };
+        let config = AppConfig {
+            snooze: SnoozePresets {
+                weekend_day: 7,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         let err = config.validate().unwrap_err();
         assert!(err.to_string().contains("weekend_day"));
     }
@@ -618,7 +725,10 @@ mod tests {
         let config = AppConfig {
             accounts: vec![
                 valid_account(),
-                AccountConfig { email: "bad".to_string(), ..valid_account() },
+                AccountConfig {
+                    email: "bad".to_string(),
+                    ..valid_account()
+                },
             ],
             ..Default::default()
         };
@@ -741,10 +851,10 @@ smtp_host = "smtp.fastmail.com"
         assert_eq!(config.accounts[0].smtp_port, 465);
         assert_eq!(config.accounts[1].provider, "fastmail");
         assert_eq!(config.accounts[1].auth_method, AuthMethod::AppPassword);
-        assert_eq!(config.accounts[1].imap_port, 993);  // default
-        assert_eq!(config.accounts[1].smtp_port, 587);  // default
+        assert_eq!(config.accounts[1].imap_port, 993); // default
+        assert_eq!(config.accounts[1].smtp_port, 587); // default
         assert_eq!(config.snooze.morning_hour, 7);
-        assert_eq!(config.snooze.afternoon_hour, 13);    // default
+        assert_eq!(config.snooze.afternoon_hour, 13); // default
         assert_eq!(config.snooze.evening_hour, 20);
         assert_eq!(config.snooze.weekend_day, 6);
         assert!(config.validate().is_ok());

@@ -28,7 +28,7 @@ pub mod tls;
 
 // Convenience re-exports
 pub use auth::{GmailOAuth2Config, OAuth2Token, PasswordCredentials, XOAuth2Credentials};
-pub use channel::{create_sync_channels, SyncEvent, UiCommand};
+pub use channel::{SyncEvent, UiCommand, create_sync_channels};
 pub use connection::{ImapCapabilities, ImapConnection};
 pub use error::{ImapError, Result};
 pub use folders::{FolderRole, ImapFolder, WellKnownFolders};

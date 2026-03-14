@@ -103,14 +103,21 @@ fn test_email_crud() {
     assert!(by_uid.is_some());
 
     // Test flag update
-    store.update_email_flags("<msg001@example.com>", flags::READ | flags::STARRED).unwrap();
+    store
+        .update_email_flags("<msg001@example.com>", flags::READ | flags::STARRED)
+        .unwrap();
     let updated = store.get_email("<msg001@example.com>").unwrap();
     assert_eq!(updated.flags, flags::READ | flags::STARRED);
 
     // Test thread reassignment
-    let thread2 = ThreadRow { id: "thread-002".into(), ..sample_thread("acct-001") };
+    let thread2 = ThreadRow {
+        id: "thread-002".into(),
+        ..sample_thread("acct-001")
+    };
     store.insert_thread(&thread2).unwrap();
-    store.update_email_thread("<msg001@example.com>", "thread-002").unwrap();
+    store
+        .update_email_thread("<msg001@example.com>", "thread-002")
+        .unwrap();
     let moved = store.get_email("<msg001@example.com>").unwrap();
     assert_eq!(moved.thread_id, "thread-002");
 
@@ -203,7 +210,10 @@ fn test_sync_state_upsert() {
     assert_eq!(fetched.uid_next, Some(100));
 
     // Update via upsert
-    let updated = SyncStateRow { uid_next: Some(200), ..state };
+    let updated = SyncStateRow {
+        uid_next: Some(200),
+        ..state
+    };
     store.upsert_sync_state(&updated).unwrap();
     let re_fetched = store.get_sync_state("acct-001", "INBOX").unwrap().unwrap();
     assert_eq!(re_fetched.uid_next, Some(200));
@@ -309,7 +319,10 @@ fn test_sender_affinity() {
     };
     store.upsert_sender_affinity(&affinity).unwrap();
 
-    let fetched = store.get_sender_affinity("news@example.com").unwrap().unwrap();
+    let fetched = store
+        .get_sender_affinity("news@example.com")
+        .unwrap()
+        .unwrap();
     assert_eq!(fetched.bundle_category, "Promos");
     assert!((fetched.confidence - 0.85).abs() < f64::EPSILON);
 
@@ -403,8 +416,12 @@ fn test_settings_crud() {
 fn test_offline_queue() {
     let store = test_store();
 
-    let id1 = store.enqueue_offline_action("mark_done", r#"{"thread_id":"t1"}"#).unwrap();
-    let id2 = store.enqueue_offline_action("pin", r#"{"thread_id":"t2"}"#).unwrap();
+    let id1 = store
+        .enqueue_offline_action("mark_done", r#"{"thread_id":"t1"}"#)
+        .unwrap();
+    let id2 = store
+        .enqueue_offline_action("pin", r#"{"thread_id":"t2"}"#)
+        .unwrap();
     assert!(id2 > id1);
 
     let queue = store.get_offline_queue().unwrap();
@@ -434,7 +451,9 @@ fn test_offline_action_roundtrip_via_store() {
     };
 
     let payload = serde_json::to_string(&action).unwrap();
-    let id = store.enqueue_offline_action(action.variant_name(), &payload).unwrap();
+    let id = store
+        .enqueue_offline_action(action.variant_name(), &payload)
+        .unwrap();
     assert!(id > 0);
 
     let queue = store.get_offline_queue().unwrap();
@@ -453,14 +472,28 @@ fn test_offline_queue_fifo_order() {
     let store = test_store();
 
     let actions = vec![
-        OfflineAction::MarkRead { account_id: "a".into(), folder: "I".into(), imap_uid: 1 },
-        OfflineAction::Star { account_id: "a".into(), folder: "I".into(), imap_uid: 2 },
-        OfflineAction::MarkDone { account_id: "a".into(), folder: "I".into(), imap_uid: 3 },
+        OfflineAction::MarkRead {
+            account_id: "a".into(),
+            folder: "I".into(),
+            imap_uid: 1,
+        },
+        OfflineAction::Star {
+            account_id: "a".into(),
+            folder: "I".into(),
+            imap_uid: 2,
+        },
+        OfflineAction::MarkDone {
+            account_id: "a".into(),
+            folder: "I".into(),
+            imap_uid: 3,
+        },
     ];
 
     for action in &actions {
         let payload = serde_json::to_string(action).unwrap();
-        store.enqueue_offline_action(action.variant_name(), &payload).unwrap();
+        store
+            .enqueue_offline_action(action.variant_name(), &payload)
+            .unwrap();
     }
 
     let queue = store.get_offline_queue().unwrap();
@@ -477,29 +510,74 @@ fn test_all_offline_action_variants_via_store() {
     let store = test_store();
 
     let variants = vec![
-        OfflineAction::MarkRead { account_id: "a".into(), folder: "I".into(), imap_uid: 1 },
-        OfflineAction::MarkUnread { account_id: "a".into(), folder: "I".into(), imap_uid: 2 },
-        OfflineAction::Star { account_id: "a".into(), folder: "I".into(), imap_uid: 3 },
-        OfflineAction::Unstar { account_id: "a".into(), folder: "I".into(), imap_uid: 4 },
-        OfflineAction::MarkDone { account_id: "a".into(), folder: "I".into(), imap_uid: 5 },
-        OfflineAction::MoveToTrash { account_id: "a".into(), folder: "I".into(), imap_uid: 6 },
-        OfflineAction::MoveToFolder {
-            account_id: "a".into(), from_folder: "I".into(), to_folder: "A".into(), imap_uid: 7,
+        OfflineAction::MarkRead {
+            account_id: "a".into(),
+            folder: "I".into(),
+            imap_uid: 1,
         },
-        OfflineAction::MarkAnswered { account_id: "a".into(), folder: "I".into(), imap_uid: 8 },
-        OfflineAction::SendDraft { account_id: "a".into(), draft_maildir_path: "/tmp/d.eml".into() },
+        OfflineAction::MarkUnread {
+            account_id: "a".into(),
+            folder: "I".into(),
+            imap_uid: 2,
+        },
+        OfflineAction::Star {
+            account_id: "a".into(),
+            folder: "I".into(),
+            imap_uid: 3,
+        },
+        OfflineAction::Unstar {
+            account_id: "a".into(),
+            folder: "I".into(),
+            imap_uid: 4,
+        },
+        OfflineAction::MarkDone {
+            account_id: "a".into(),
+            folder: "I".into(),
+            imap_uid: 5,
+        },
+        OfflineAction::MoveToTrash {
+            account_id: "a".into(),
+            folder: "I".into(),
+            imap_uid: 6,
+        },
+        OfflineAction::MoveToFolder {
+            account_id: "a".into(),
+            from_folder: "I".into(),
+            to_folder: "A".into(),
+            imap_uid: 7,
+        },
+        OfflineAction::MarkAnswered {
+            account_id: "a".into(),
+            folder: "I".into(),
+            imap_uid: 8,
+        },
+        OfflineAction::SendDraft {
+            account_id: "a".into(),
+            draft_maildir_path: "/tmp/d.eml".into(),
+        },
     ];
 
     for action in &variants {
         let payload = serde_json::to_string(action).unwrap();
-        store.enqueue_offline_action(action.variant_name(), &payload).unwrap();
+        store
+            .enqueue_offline_action(action.variant_name(), &payload)
+            .unwrap();
     }
 
     let queue = store.get_offline_queue().unwrap();
     assert_eq!(queue.len(), 9);
 
-    let expected = ["mark_read", "mark_unread", "star", "unstar", "mark_done",
-                    "move_to_trash", "move_to_folder", "mark_answered", "send_draft"];
+    let expected = [
+        "mark_read",
+        "mark_unread",
+        "star",
+        "unstar",
+        "mark_done",
+        "move_to_trash",
+        "move_to_folder",
+        "mark_answered",
+        "send_draft",
+    ];
     for (i, row) in queue.iter().enumerate() {
         assert_eq!(row.action, expected[i], "mismatch at index {i}");
         // Verify deserialization works
@@ -570,7 +648,13 @@ fn test_rebuild() {
 // === Phase 2 (M8) integration tests ===
 
 /// Helper to insert a minimal test email for Phase 2 testing.
-fn insert_test_email(store: &Store, account_id: &str, folder: &str, uid: i64, body_downloaded: bool) {
+fn insert_test_email(
+    store: &Store,
+    account_id: &str,
+    folder: &str,
+    uid: i64,
+    body_downloaded: bool,
+) {
     let email_id = format!("<test-{}-{}-{}@example.com>", account_id, folder, uid);
     let email = EmailRow {
         id: email_id,
@@ -610,12 +694,19 @@ fn test_phase2_resume_after_interruption() {
 
     // Mark 3 as downloaded (simulating partial Phase 2 run).
     for uid in 3..=5 {
-        let email_id = store.get_email_id_by_uid("acct-001", "INBOX", uid).unwrap().unwrap();
-        store.mark_body_downloaded(&email_id, &format!("/tmp/{uid}.eml")).unwrap();
+        let email_id = store
+            .get_email_id_by_uid("acct-001", "INBOX", uid)
+            .unwrap()
+            .unwrap();
+        store
+            .mark_body_downloaded(&email_id, &format!("/tmp/{uid}.eml"))
+            .unwrap();
     }
 
     // Query remaining — should be UIDs 1 and 2.
-    let remaining = store.get_uids_without_body("acct-001", "INBOX", 500).unwrap();
+    let remaining = store
+        .get_uids_without_body("acct-001", "INBOX", 500)
+        .unwrap();
     assert_eq!(remaining.len(), 2);
     assert!(remaining.contains(&1));
     assert!(remaining.contains(&2));
@@ -647,16 +738,25 @@ fn test_phase2_progress_count() {
         insert_test_email(&store, "acct-001", "INBOX", uid, false);
     }
 
-    let total = store.count_emails_without_body("acct-001", "INBOX").unwrap();
+    let total = store
+        .count_emails_without_body("acct-001", "INBOX")
+        .unwrap();
     assert_eq!(total, 100);
 
     // Mark 40 as downloaded.
     for uid in 61..=100 {
-        let email_id = store.get_email_id_by_uid("acct-001", "INBOX", uid).unwrap().unwrap();
-        store.mark_body_downloaded(&email_id, &format!("/tmp/{uid}.eml")).unwrap();
+        let email_id = store
+            .get_email_id_by_uid("acct-001", "INBOX", uid)
+            .unwrap()
+            .unwrap();
+        store
+            .mark_body_downloaded(&email_id, &format!("/tmp/{uid}.eml"))
+            .unwrap();
     }
 
-    let remaining = store.count_emails_without_body("acct-001", "INBOX").unwrap();
+    let remaining = store
+        .count_emails_without_body("acct-001", "INBOX")
+        .unwrap();
     assert_eq!(remaining, 60);
 }
 
@@ -667,11 +767,16 @@ fn test_is_body_downloaded() {
     store.insert_thread(&sample_thread("acct-001")).unwrap();
 
     insert_test_email(&store, "acct-001", "INBOX", 42, false);
-    let email_id = store.get_email_id_by_uid("acct-001", "INBOX", 42).unwrap().unwrap();
+    let email_id = store
+        .get_email_id_by_uid("acct-001", "INBOX", 42)
+        .unwrap()
+        .unwrap();
 
     assert!(!store.is_body_downloaded(&email_id).unwrap());
 
-    store.mark_body_downloaded(&email_id, "/tmp/42.eml").unwrap();
+    store
+        .mark_body_downloaded(&email_id, "/tmp/42.eml")
+        .unwrap();
 
     assert!(store.is_body_downloaded(&email_id).unwrap());
 }
@@ -683,14 +788,19 @@ fn test_get_maildir_path() {
     store.insert_thread(&sample_thread("acct-001")).unwrap();
 
     insert_test_email(&store, "acct-001", "INBOX", 42, false);
-    let email_id = store.get_email_id_by_uid("acct-001", "INBOX", 42).unwrap().unwrap();
+    let email_id = store
+        .get_email_id_by_uid("acct-001", "INBOX", 42)
+        .unwrap()
+        .unwrap();
 
     // Before body download, maildir_path is empty.
     let path = store.get_maildir_path(&email_id).unwrap();
     assert!(path.is_none());
 
     // After body download, maildir_path is set.
-    store.mark_body_downloaded(&email_id, "/mail/cur/42.eml").unwrap();
+    store
+        .mark_body_downloaded(&email_id, "/mail/cur/42.eml")
+        .unwrap();
     let path = store.get_maildir_path(&email_id).unwrap();
     assert_eq!(path.unwrap(), "/mail/cur/42.eml");
 }

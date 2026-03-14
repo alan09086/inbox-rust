@@ -149,7 +149,7 @@ async fn sync_engine_components_work_together() {
 
     use inboxly_imap::sync::store::batch_insert_envelopes;
     use inboxly_imap::sync::threading::assign_thread_ids;
-    use inboxly_imap::sync::uid_state::{FolderSyncState, save_sync_state, load_sync_state};
+    use inboxly_imap::sync::uid_state::{FolderSyncState, load_sync_state, save_sync_state};
 
     let conn = fixtures::test_db();
     let account_id = "test-account";
@@ -225,11 +225,13 @@ async fn progress_events_emitted() {
     let (tx, mut rx) = sync_event_channel(64);
 
     // Simulate sending progress events like the engine would
-    tx.send(SyncEvent::HeaderProgress(inboxly_imap::sync::SyncProgress {
-        folder: "INBOX".to_string(),
-        fetched: 500,
-        total: 1000,
-    }))
+    tx.send(SyncEvent::HeaderProgress(
+        inboxly_imap::sync::SyncProgress {
+            folder: "INBOX".to_string(),
+            fetched: 500,
+            total: 1000,
+        },
+    ))
     .await
     .unwrap();
 
@@ -289,7 +291,7 @@ async fn resume_after_crash() {
 
     // First run: insert batch 1
     use inboxly_imap::sync::store::batch_insert_envelopes;
-    use inboxly_imap::sync::uid_state::{FolderSyncState, save_sync_state, load_sync_state};
+    use inboxly_imap::sync::uid_state::{FolderSyncState, load_sync_state, save_sync_state};
 
     let batch1 = fixtures::make_envelopes(501, 1000, account_id, folder);
     batch_insert_envelopes(&conn, &batch1).unwrap();

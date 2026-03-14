@@ -1,8 +1,5 @@
 use inboxly_core::{AccountId, EmailFlags};
-use inboxly_store::{
-    MaildirStore, StandardFolder,
-    parse_email_meta,
-};
+use inboxly_store::{MaildirStore, StandardFolder, parse_email_meta};
 use std::path::PathBuf;
 use tempfile::TempDir;
 use uuid::Uuid;
@@ -223,11 +220,13 @@ fn test_read_email_content() {
     assert_eq!(messages.len(), 1);
     let content = store.read_email_content(&messages[0].path).unwrap();
 
-    assert!(content
-        .body_text
-        .as_deref()
-        .unwrap_or("")
-        .contains("document attached"));
+    assert!(
+        content
+            .body_text
+            .as_deref()
+            .unwrap_or("")
+            .contains("document attached")
+    );
     assert_eq!(content.attachments.len(), 1);
     // Attachment uses nested meta struct
     assert_eq!(content.attachments[0].meta.filename, "report.pdf");

@@ -94,10 +94,9 @@ impl Store {
     }
 
     pub fn delete_thread(&self, id: &str) -> Result<()> {
-        let changed = self.conn().execute(
-            "DELETE FROM threads WHERE id = ?1",
-            params![id],
-        )?;
+        let changed = self
+            .conn()
+            .execute("DELETE FROM threads WHERE id = ?1", params![id])?;
         if changed == 0 {
             return Err(StoreError::NotFound(format!("thread {id}")));
         }

@@ -8,8 +8,8 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use async_imap::Session;
-use tokio::sync::{mpsc, Mutex as AsyncMutex};
 use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::sync::{Mutex as AsyncMutex, mpsc};
 
 use inboxly_core::EmailFlags;
 use inboxly_store::Store;
@@ -28,6 +28,7 @@ use crate::error::ImapError;
 ///
 /// Returns the raw RFC822 bytes on success (so the caller can parse and
 /// display immediately without re-reading from Maildir).
+#[allow(clippy::too_many_arguments)]
 pub async fn fetch_body_on_demand<S>(
     email_id: &str,
     account_id: &str,
@@ -53,8 +54,7 @@ where
             .get_maildir_path(email_id)
             .map_err(|e| ImapError::DatabaseError(e.to_string()))?
             .ok_or_else(|| ImapError::EmailNotFound(email_id.to_string()))?;
-        let bytes = std::fs::read(&path)
-            .map_err(|e| ImapError::MaildirRead(e.to_string()))?;
+        let bytes = std::fs::read(&path).map_err(|e| ImapError::MaildirRead(e.to_string()))?;
         return Ok(bytes);
     }
 
@@ -68,29 +68,22 @@ where
 
     // Process: Maildir write + SQLite update.
     let flags = EmailFlags::default();
-    let maildir_path = process_body(
-        email_id,
-        folder,
-        &raw_bytes,
-        &flags,
-        maildir,
-        store,
-    )?;
+    let maildir_path = process_body(email_id, folder, &raw_bytes, &flags, maildir, store)?;
 
     // Update search index with body text.
     let body_text = extract_body_text(&raw_bytes);
     let uid_i64 = i64::from(imap_uid);
-    if let Ok(Some(email_row)) = store.get_email_by_uid(account_id, folder, uid_i64) {
-        if let Ok(email_meta) = crate::phase2::row_to_search_meta(&email_row, &maildir_path) {
-            if let Err(e) = search_index.update_email(&email_meta, Some(&body_text), None) {
-                tracing::warn!(
-                    email_id = %email_id,
-                    error = %e,
-                    "failed to update search index for on-demand fetch"
-                );
-            }
-            let _ = search_index.commit();
+    if let Ok(Some(email_row)) = store.get_email_by_uid(account_id, folder, uid_i64)
+        && let Ok(email_meta) = crate::phase2::row_to_search_meta(&email_row, &maildir_path)
+    {
+        if let Err(e) = search_index.update_email(&email_meta, Some(&body_text), None) {
+            tracing::warn!(
+                email_id = %email_id,
+                error = %e,
+                "failed to update search index for on-demand fetch"
+            );
         }
+        let _ = search_index.commit();
     }
 
     // Notify UI that the body is ready.

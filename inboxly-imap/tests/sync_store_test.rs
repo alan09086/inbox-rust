@@ -27,8 +27,9 @@ fn setup_db() -> Connection {
             in_reply_to TEXT,
             references_json TEXT,
             UNIQUE(account_id, imap_folder, imap_uid)
-        );"
-    ).unwrap();
+        );",
+    )
+    .unwrap();
     conn
 }
 

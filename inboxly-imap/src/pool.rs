@@ -84,13 +84,10 @@ impl ConnectionPool {
     /// Respects the connection semaphore and connect timeout.
     /// Retries with exponential backoff on failure.
     pub async fn connect(&self) -> Result<connection::ImapConnection> {
-        let _permit = tokio::time::timeout(
-            self.config.connect_timeout,
-            self.semaphore.acquire(),
-        )
-        .await
-        .map_err(|_| ImapError::Timeout(self.config.connect_timeout))?
-        .map_err(|_| ImapError::PoolExhausted)?;
+        let _permit = tokio::time::timeout(self.config.connect_timeout, self.semaphore.acquire())
+            .await
+            .map_err(|_| ImapError::Timeout(self.config.connect_timeout))?
+            .map_err(|_| ImapError::PoolExhausted)?;
 
         // The permit is acquired — we can forget it since async-imap
         // takes ownership of the connection. The pool tracks outstanding
@@ -144,9 +141,7 @@ impl ConnectionPool {
     }
 
     /// Check if a session is still alive by issuing a NOOP command.
-    pub async fn check_health(
-        session: &mut Session<TlsStream<TcpStream>>,
-    ) -> bool {
+    pub async fn check_health(session: &mut Session<TlsStream<TcpStream>>) -> bool {
         session.noop().await.is_ok()
     }
 
@@ -155,4 +150,3 @@ impl ConnectionPool {
         &self.config
     }
 }
-

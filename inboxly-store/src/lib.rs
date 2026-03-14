@@ -10,8 +10,8 @@ mod store;
 pub mod maildir_store;
 
 mod accounts;
-mod bundles;
 mod bundle_rules;
+mod bundles;
 mod contacts;
 mod emails;
 mod highlights;
@@ -23,20 +23,20 @@ mod sync_state;
 mod thread_state;
 mod threads;
 
-pub use error::{StoreError, Result};
+pub use error::{Result, StoreError};
 pub use store::Store;
 
 pub use maildir_store::{
-    MaildirStore, StandardFolder, StoredEmail, MaildirEntry, ScanError,
-    flags_to_suffix, suffix_to_flags, flags_from_filename,
-    parse_email_meta, parse_email_content, rebuild_emails_from_maildir,
+    MaildirEntry, MaildirStore, ScanError, StandardFolder, StoredEmail, flags_from_filename,
+    flags_to_suffix, parse_email_content, parse_email_meta, rebuild_emails_from_maildir,
+    suffix_to_flags,
 };
 
 pub mod search;
 
 pub use accounts::AccountRow;
-pub use bundles::BundleRow;
 pub use bundle_rules::BundleRuleRow;
+pub use bundles::BundleRow;
 pub use contacts::ContactRow;
 pub use emails::{EmailRow, flags};
 pub use highlights::HighlightRow;

@@ -1,4 +1,4 @@
-use inboxly_imap::channel::{create_sync_channels, SyncEvent, UiCommand};
+use inboxly_imap::channel::{SyncEvent, UiCommand, create_sync_channels};
 
 #[test]
 fn sync_event_variants_constructible() {

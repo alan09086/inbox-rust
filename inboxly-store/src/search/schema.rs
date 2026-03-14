@@ -1,11 +1,11 @@
 use tantivy::schema::{
-    DateOptions, FacetOptions, Field, Schema, FAST, INDEXED, STORED, STRING, TEXT,
+    DateOptions, FAST, FacetOptions, Field, INDEXED, STORED, STRING, Schema, TEXT,
 };
 
 use inboxly_core::{BundleCategory, EmailMeta};
-use tantivy::schema::Facet;
 use tantivy::DateTime as TantivyDateTime;
 use tantivy::TantivyDocument;
+use tantivy::schema::Facet;
 
 /// Holds the tantivy schema and named field handles for fast access.
 ///
@@ -108,13 +108,19 @@ impl SearchSchema {
     ///
     /// Used when reopening an index that was created previously.
     pub fn from_existing(schema: Schema) -> Self {
-        let email_id = schema.get_field("email_id").expect("email_id field missing");
+        let email_id = schema
+            .get_field("email_id")
+            .expect("email_id field missing");
         let from = schema.get_field("from").expect("from field missing");
         let to = schema.get_field("to").expect("to field missing");
         let subject = schema.get_field("subject").expect("subject field missing");
-        let body_text = schema.get_field("body_text").expect("body_text field missing");
+        let body_text = schema
+            .get_field("body_text")
+            .expect("body_text field missing");
         let date = schema.get_field("date").expect("date field missing");
-        let account_id = schema.get_field("account_id").expect("account_id field missing");
+        let account_id = schema
+            .get_field("account_id")
+            .expect("account_id field missing");
         let bundle_category = schema
             .get_field("bundle_category")
             .expect("bundle_category field missing");

@@ -14,10 +14,7 @@ pub enum SyncEvent {
     },
 
     /// Phase 1 header sync completed for a folder.
-    HeaderSyncComplete {
-        folder: String,
-        total_emails: u32,
-    },
+    HeaderSyncComplete { folder: String, total_emails: u32 },
 
     /// A non-fatal error occurred during sync (e.g., one malformed envelope skipped).
     Warning(String),

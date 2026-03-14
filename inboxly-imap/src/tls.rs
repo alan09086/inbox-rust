@@ -3,22 +3,22 @@ use std::sync::Arc;
 use rustls::ClientConfig;
 use rustls_pki_types::ServerName;
 use tokio::net::TcpStream;
-use tokio_rustls::{client::TlsStream, TlsConnector};
+use tokio_rustls::{TlsConnector, client::TlsStream};
 
 use crate::error::{ImapError, Result};
 
 /// Build a rustls `ClientConfig` with Mozilla root certificates.
 /// This config is reusable across connections (wrap in `Arc`).
 pub fn build_tls_config() -> Arc<ClientConfig> {
-    let root_store = rustls::RootCertStore::from_iter(
-        webpki_roots::TLS_SERVER_ROOTS.iter().cloned(),
-    );
+    let root_store =
+        rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 
-    let config = ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
-        .with_safe_default_protocol_versions()
-        .expect("ring provider supports default TLS versions")
-        .with_root_certificates(root_store)
-        .with_no_client_auth();
+    let config =
+        ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+            .with_safe_default_protocol_versions()
+            .expect("ring provider supports default TLS versions")
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
 
     Arc::new(config)
 }

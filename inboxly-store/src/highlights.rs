@@ -9,7 +9,7 @@ use crate::store::Store;
 /// `data_json` contains the type-specific fields as JSON (see Highlight enum in core).
 #[derive(Debug, Clone)]
 pub struct HighlightRow {
-    pub id: Option<i64>,     // AUTOINCREMENT, None on insert
+    pub id: Option<i64>, // AUTOINCREMENT, None on insert
     pub thread_id: String,
     pub highlight_type: String,
     pub data_json: String,
@@ -77,10 +77,9 @@ impl Store {
     }
 
     pub fn delete_highlight(&self, id: i64) -> Result<()> {
-        let changed = self.conn().execute(
-            "DELETE FROM highlights WHERE id = ?1",
-            params![id],
-        )?;
+        let changed = self
+            .conn()
+            .execute("DELETE FROM highlights WHERE id = ?1", params![id])?;
         if changed == 0 {
             return Err(StoreError::NotFound(format!("highlight {id}")));
         }

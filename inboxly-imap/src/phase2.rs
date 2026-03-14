@@ -36,16 +36,16 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use async_imap::Session;
-use tokio::sync::{mpsc, Mutex as AsyncMutex};
-use tokio_util::sync::CancellationToken;
 use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::sync::{Mutex as AsyncMutex, mpsc};
+use tokio_util::sync::CancellationToken;
 
 use inboxly_core::EmailFlags;
 use inboxly_store::Store;
 use inboxly_store::maildir_store::MaildirStore;
 use inboxly_store::search::SearchIndex;
 
-use crate::body_fetch::{fetch_bodies_batch, BODY_FETCH_BATCH_SIZE};
+use crate::body_fetch::{BODY_FETCH_BATCH_SIZE, fetch_bodies_batch};
 use crate::body_processor::{extract_body_text, process_body};
 use crate::channel::SyncEvent;
 use crate::error::ImapError;
@@ -60,6 +60,7 @@ use crate::error::ImapError;
 ///
 /// This function is designed to be spawned as `tokio::spawn(phase2_download(...))`.
 /// It does NOT block the UI — progress is communicated via the event channel.
+#[allow(clippy::too_many_arguments)]
 pub async fn phase2_download<S>(
     account_id: String,
     folder: String,
@@ -146,33 +147,22 @@ where
             // from Phase 1; we just need to write the .eml to disk.
             let flags = EmailFlags::default();
 
-            match process_body(
-                &email_id,
-                &folder,
-                raw_bytes,
-                &flags,
-                &maildir,
-                &store,
-            ) {
+            match process_body(&email_id, &folder, raw_bytes, &flags, &maildir, &store) {
                 Ok(maildir_path) => {
                     // Extract body text and update search index.
                     let body_text = extract_body_text(raw_bytes);
 
                     // Get the full EmailMeta to pass to search index.
                     // For now, we update via the email row data.
-                    if let Ok(Some(email_row)) = store.get_email_by_uid(
-                        &account_id,
-                        &folder,
-                        uid_i64,
-                    ) {
+                    if let Ok(Some(email_row)) =
+                        store.get_email_by_uid(&account_id, &folder, uid_i64)
+                    {
                         // Build a minimal EmailMeta for search update.
                         // The search index only needs the fields it indexes.
                         if let Ok(email_meta) = row_to_search_meta(&email_row, &maildir_path) {
-                            if let Err(e) = search_index.update_email(
-                                &email_meta,
-                                Some(&body_text),
-                                None,
-                            ) {
+                            if let Err(e) =
+                                search_index.update_email(&email_meta, Some(&body_text), None)
+                            {
                                 tracing::warn!(
                                     email_id = %email_id,
                                     error = %e,
@@ -241,15 +231,14 @@ pub(crate) fn row_to_search_meta(
     row: &inboxly_store::EmailRow,
     maildir_path: &str,
 ) -> Result<inboxly_core::EmailMeta, ImapError> {
-    use std::path::PathBuf;
     use chrono::{TimeZone, Utc};
     use inboxly_core::{AccountId, Contact, EmailFlags, EmailId, EmailMeta, ThreadId};
+    use std::path::PathBuf;
 
     let account_uuid = uuid::Uuid::parse_str(&row.account_id)
         .map_err(|e| ImapError::DatabaseError(format!("invalid account_id UUID: {e}")))?;
 
-    let thread_uuid = uuid::Uuid::parse_str(&row.thread_id)
-        .unwrap_or_else(|_| uuid::Uuid::nil());
+    let thread_uuid = uuid::Uuid::parse_str(&row.thread_id).unwrap_or_else(|_| uuid::Uuid::nil());
 
     let date = Utc
         .timestamp_opt(row.date, 0)
@@ -271,10 +260,7 @@ pub(crate) fn row_to_search_meta(
         id: EmailId::new(&row.id),
         account_id: AccountId(account_uuid),
         thread_id: ThreadId(thread_uuid),
-        from: Contact::new(
-            row.from_name.as_deref().unwrap_or(""),
-            &row.from_address,
-        ),
+        from: Contact::new(row.from_name.as_deref().unwrap_or(""), &row.from_address),
         to,
         cc,
         subject: row.subject.clone(),

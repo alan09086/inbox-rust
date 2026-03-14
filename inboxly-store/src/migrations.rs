@@ -31,17 +31,17 @@ pub fn run(store: &mut Store) -> Result<()> {
 }
 
 fn get_version(store: &Store) -> Result<u32> {
-    let version: u32 = store.conn().query_row(
-        "PRAGMA user_version",
-        [],
-        |row| row.get(0),
-    )?;
+    let version: u32 = store
+        .conn()
+        .query_row("PRAGMA user_version", [], |row| row.get(0))?;
     Ok(version)
 }
 
 fn set_version(store: &Store, version: u32) -> Result<()> {
     // PRAGMA doesn't support parameters, must format directly
-    store.conn().execute_batch(&format!("PRAGMA user_version = {version}"))?;
+    store
+        .conn()
+        .execute_batch(&format!("PRAGMA user_version = {version}"))?;
     Ok(())
 }
 
@@ -207,7 +207,7 @@ fn migrate_v0_to_v1(store: &mut Store) -> Result<()> {
             payload_json      TEXT NOT NULL,
             created_at        INTEGER NOT NULL DEFAULT (unixepoch())
         );
-        "
+        ",
     )?;
 
     Ok(())
@@ -232,7 +232,7 @@ fn migrate_v1_to_v2(store: &mut Store) -> Result<()> {
 
     if !has_column {
         store.conn().execute_batch(
-            "ALTER TABLE emails ADD COLUMN body_downloaded INTEGER NOT NULL DEFAULT 0;"
+            "ALTER TABLE emails ADD COLUMN body_downloaded INTEGER NOT NULL DEFAULT 0;",
         )?;
     }
 
@@ -240,7 +240,7 @@ fn migrate_v1_to_v2(store: &mut Store) -> Result<()> {
     store.conn().execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_emails_body_downloaded
              ON emails(account_id, imap_folder, body_downloaded)
-             WHERE body_downloaded = 0;"
+             WHERE body_downloaded = 0;",
     )?;
 
     Ok(())

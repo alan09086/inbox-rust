@@ -80,10 +80,8 @@ where
         .await?;
 
     for fetch in &fetches {
-        if fetch.uid == Some(uid) {
-            if let Some(body) = fetch.body() {
-                return Ok(Some(body.to_vec()));
-            }
+        if fetch.uid == Some(uid) && fetch.body().is_some() {
+            return Ok(fetch.body().map(|b| b.to_vec()));
         }
     }
 

@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use async_imap::Session;
 use futures::TryStreamExt;
-use tokio::sync::Mutex as AsyncMutex;
 use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::sync::Mutex as AsyncMutex;
 
 use inboxly_core::OfflineAction;
 use inboxly_store::Store;
@@ -103,7 +103,9 @@ where
     let mut sess = session.lock().await;
 
     match action {
-        OfflineAction::MarkRead { folder, imap_uid, .. } => {
+        OfflineAction::MarkRead {
+            folder, imap_uid, ..
+        } => {
             sess.select(folder).await?;
             let _ = sess
                 .uid_store(imap_uid.to_string(), "+FLAGS (\\Seen)")
@@ -111,7 +113,9 @@ where
                 .try_collect::<Vec<_>>()
                 .await?;
         }
-        OfflineAction::MarkUnread { folder, imap_uid, .. } => {
+        OfflineAction::MarkUnread {
+            folder, imap_uid, ..
+        } => {
             sess.select(folder).await?;
             let _ = sess
                 .uid_store(imap_uid.to_string(), "-FLAGS (\\Seen)")
@@ -119,7 +123,9 @@ where
                 .try_collect::<Vec<_>>()
                 .await?;
         }
-        OfflineAction::Star { folder, imap_uid, .. } => {
+        OfflineAction::Star {
+            folder, imap_uid, ..
+        } => {
             sess.select(folder).await?;
             let _ = sess
                 .uid_store(imap_uid.to_string(), "+FLAGS (\\Flagged)")
@@ -127,7 +133,9 @@ where
                 .try_collect::<Vec<_>>()
                 .await?;
         }
-        OfflineAction::Unstar { folder, imap_uid, .. } => {
+        OfflineAction::Unstar {
+            folder, imap_uid, ..
+        } => {
             sess.select(folder).await?;
             let _ = sess
                 .uid_store(imap_uid.to_string(), "-FLAGS (\\Flagged)")
@@ -135,7 +143,9 @@ where
                 .try_collect::<Vec<_>>()
                 .await?;
         }
-        OfflineAction::MarkDone { folder, imap_uid, .. } => {
+        OfflineAction::MarkDone {
+            folder, imap_uid, ..
+        } => {
             sess.select(folder).await?;
             let _ = sess
                 .uid_store(imap_uid.to_string(), "+FLAGS (\\Seen \\Deleted)")
@@ -144,9 +154,11 @@ where
                 .await?;
             let _ = sess.expunge().await?.try_collect::<Vec<_>>().await?;
         }
-        OfflineAction::MoveToTrash { folder, imap_uid, .. } => {
+        OfflineAction::MoveToTrash {
+            folder, imap_uid, ..
+        } => {
             sess.select(folder).await?;
-            let _ = sess.uid_copy(imap_uid.to_string(), "Trash").await?;
+            sess.uid_copy(imap_uid.to_string(), "Trash").await?;
             let _ = sess
                 .uid_store(imap_uid.to_string(), "+FLAGS (\\Deleted)")
                 .await?
@@ -154,9 +166,14 @@ where
                 .await?;
             let _ = sess.expunge().await?.try_collect::<Vec<_>>().await?;
         }
-        OfflineAction::MoveToFolder { from_folder, to_folder, imap_uid, .. } => {
+        OfflineAction::MoveToFolder {
+            from_folder,
+            to_folder,
+            imap_uid,
+            ..
+        } => {
             sess.select(from_folder).await?;
-            let _ = sess.uid_copy(imap_uid.to_string(), to_folder).await?;
+            sess.uid_copy(imap_uid.to_string(), to_folder).await?;
             let _ = sess
                 .uid_store(imap_uid.to_string(), "+FLAGS (\\Deleted)")
                 .await?
@@ -164,7 +181,9 @@ where
                 .await?;
             let _ = sess.expunge().await?.try_collect::<Vec<_>>().await?;
         }
-        OfflineAction::MarkAnswered { folder, imap_uid, .. } => {
+        OfflineAction::MarkAnswered {
+            folder, imap_uid, ..
+        } => {
             sess.select(folder).await?;
             let _ = sess
                 .uid_store(imap_uid.to_string(), "+FLAGS (\\Answered)")
@@ -172,7 +191,9 @@ where
                 .try_collect::<Vec<_>>()
                 .await?;
         }
-        OfflineAction::SendDraft { draft_maildir_path, .. } => {
+        OfflineAction::SendDraft {
+            draft_maildir_path, ..
+        } => {
             // Draft sending is handled by SMTP (M23), not IMAP.
             tracing::warn!(
                 path = draft_maildir_path,

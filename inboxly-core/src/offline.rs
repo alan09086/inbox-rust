@@ -116,25 +116,63 @@ mod tests {
     #[test]
     fn test_all_variants_serialize() {
         let variants = vec![
-            OfflineAction::MarkRead { account_id: "a".into(), folder: "I".into(), imap_uid: 1 },
-            OfflineAction::MarkUnread { account_id: "a".into(), folder: "I".into(), imap_uid: 2 },
-            OfflineAction::Star { account_id: "a".into(), folder: "I".into(), imap_uid: 3 },
-            OfflineAction::Unstar { account_id: "a".into(), folder: "I".into(), imap_uid: 4 },
-            OfflineAction::MarkDone { account_id: "a".into(), folder: "I".into(), imap_uid: 5 },
-            OfflineAction::MoveToTrash { account_id: "a".into(), folder: "I".into(), imap_uid: 6 },
-            OfflineAction::MoveToFolder {
-                account_id: "a".into(), from_folder: "I".into(), to_folder: "A".into(), imap_uid: 7,
+            OfflineAction::MarkRead {
+                account_id: "a".into(),
+                folder: "I".into(),
+                imap_uid: 1,
             },
-            OfflineAction::MarkAnswered { account_id: "a".into(), folder: "I".into(), imap_uid: 8 },
+            OfflineAction::MarkUnread {
+                account_id: "a".into(),
+                folder: "I".into(),
+                imap_uid: 2,
+            },
+            OfflineAction::Star {
+                account_id: "a".into(),
+                folder: "I".into(),
+                imap_uid: 3,
+            },
+            OfflineAction::Unstar {
+                account_id: "a".into(),
+                folder: "I".into(),
+                imap_uid: 4,
+            },
+            OfflineAction::MarkDone {
+                account_id: "a".into(),
+                folder: "I".into(),
+                imap_uid: 5,
+            },
+            OfflineAction::MoveToTrash {
+                account_id: "a".into(),
+                folder: "I".into(),
+                imap_uid: 6,
+            },
+            OfflineAction::MoveToFolder {
+                account_id: "a".into(),
+                from_folder: "I".into(),
+                to_folder: "A".into(),
+                imap_uid: 7,
+            },
+            OfflineAction::MarkAnswered {
+                account_id: "a".into(),
+                folder: "I".into(),
+                imap_uid: 8,
+            },
             OfflineAction::SendDraft {
-                account_id: "a".into(), draft_maildir_path: "/tmp/d.eml".into(),
+                account_id: "a".into(),
+                draft_maildir_path: "/tmp/d.eml".into(),
             },
         ];
 
         let expected_names = [
-            "mark_read", "mark_unread", "star", "unstar",
-            "mark_done", "move_to_trash", "move_to_folder",
-            "mark_answered", "send_draft",
+            "mark_read",
+            "mark_unread",
+            "star",
+            "unstar",
+            "mark_done",
+            "move_to_trash",
+            "move_to_folder",
+            "mark_answered",
+            "send_draft",
         ];
 
         for (action, expected) in variants.iter().zip(expected_names.iter()) {

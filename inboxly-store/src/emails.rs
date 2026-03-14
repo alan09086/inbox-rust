@@ -85,9 +85,7 @@ impl Store {
                 Self::row_to_email,
             )
             .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => {
-                    StoreError::NotFound(format!("email {id}"))
-                }
+                rusqlite::Error::QueryReturnedNoRows => StoreError::NotFound(format!("email {id}")),
                 other => StoreError::Sqlite(other),
             })
     }
@@ -107,11 +105,7 @@ impl Store {
     }
 
     /// Get all emails for an account in a folder, ordered by date descending.
-    pub fn get_emails_by_folder(
-        &self,
-        account_id: &str,
-        folder: &str,
-    ) -> Result<Vec<EmailRow>> {
+    pub fn get_emails_by_folder(&self, account_id: &str, folder: &str) -> Result<Vec<EmailRow>> {
         let mut stmt = self.conn().prepare(
             "SELECT id, account_id, thread_id, from_name, from_address, to_json, cc_json,
              subject, snippet, date, maildir_path, flags, size_bytes, imap_uid, imap_folder,
@@ -171,10 +165,9 @@ impl Store {
     }
 
     pub fn delete_email(&self, id: &str) -> Result<()> {
-        let changed = self.conn().execute(
-            "DELETE FROM emails WHERE id = ?1",
-            params![id],
-        )?;
+        let changed = self
+            .conn()
+            .execute("DELETE FROM emails WHERE id = ?1", params![id])?;
         if changed == 0 {
             return Err(StoreError::NotFound(format!("email {id}")));
         }
@@ -232,31 +225,37 @@ impl Store {
 
     /// Check if an email's body has been downloaded.
     pub fn is_body_downloaded(&self, email_id: &str) -> Result<bool> {
-        let downloaded: bool = self.conn().query_row(
-            "SELECT body_downloaded FROM emails WHERE id = ?1",
-            params![email_id],
-            |row| row.get(0),
-        ).map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => {
-                StoreError::NotFound(format!("email {email_id}"))
-            }
-            other => StoreError::Sqlite(other),
-        })?;
+        let downloaded: bool = self
+            .conn()
+            .query_row(
+                "SELECT body_downloaded FROM emails WHERE id = ?1",
+                params![email_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => {
+                    StoreError::NotFound(format!("email {email_id}"))
+                }
+                other => StoreError::Sqlite(other),
+            })?;
         Ok(downloaded)
     }
 
     /// Get the Maildir path for an email.
     pub fn get_maildir_path(&self, email_id: &str) -> Result<Option<String>> {
-        let path: String = self.conn().query_row(
-            "SELECT maildir_path FROM emails WHERE id = ?1",
-            params![email_id],
-            |row| row.get(0),
-        ).map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => {
-                StoreError::NotFound(format!("email {email_id}"))
-            }
-            other => StoreError::Sqlite(other),
-        })?;
+        let path: String = self
+            .conn()
+            .query_row(
+                "SELECT maildir_path FROM emails WHERE id = ?1",
+                params![email_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => {
+                    StoreError::NotFound(format!("email {email_id}"))
+                }
+                other => StoreError::Sqlite(other),
+            })?;
         if path.is_empty() {
             Ok(None)
         } else {
@@ -289,10 +288,7 @@ impl Store {
              LIMIT ?3",
         )?;
         let uids = stmt
-            .query_map(
-                params![account_id, folder, limit as i64],
-                |row| row.get(0),
-            )?
+            .query_map(params![account_id, folder, limit as i64], |row| row.get(0))?
             .collect::<std::result::Result<Vec<i64>, _>>()?;
         Ok(uids)
     }

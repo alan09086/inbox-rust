@@ -1,7 +1,7 @@
 use chrono::Datelike;
 use inboxly_imap::sync::envelope::{
-    parse_envelope_date, decode_envelope_bytes, extract_address_string,
-    extract_contacts_json, EnvelopeData,
+    EnvelopeData, decode_envelope_bytes, extract_address_string, extract_contacts_json,
+    parse_envelope_date,
 };
 
 #[test]

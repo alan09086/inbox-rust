@@ -22,8 +22,8 @@
 //!                └──► UPDATE emails SET body_downloaded = 1
 //! ```
 
-use inboxly_store::maildir_store::{MaildirStore, StandardFolder};
 use inboxly_store::Store;
+use inboxly_store::maildir_store::{MaildirStore, StandardFolder};
 
 use crate::error::ImapError;
 
@@ -46,8 +46,7 @@ pub fn process_body(
     store: &Store,
 ) -> Result<String, ImapError> {
     // Step 1: Determine the standard folder from the IMAP folder name.
-    let folder = StandardFolder::from_imap_name(imap_folder)
-        .unwrap_or(StandardFolder::Inbox);
+    let folder = StandardFolder::from_imap_name(imap_folder).unwrap_or(StandardFolder::Inbox);
 
     // Step 2: Write to Maildir (atomic: tmp -> cur with flags).
     let stored = maildir
@@ -215,17 +214,11 @@ mod tests {
         );
         assert_eq!(strip_html_tags("No tags here"), "No tags here");
         assert_eq!(strip_html_tags(""), "");
-        assert_eq!(
-            strip_html_tags("<div class=\"x\">Content</div>"),
-            "Content"
-        );
+        assert_eq!(strip_html_tags("<div class=\"x\">Content</div>"), "Content");
     }
 
     #[test]
     fn test_strip_html_entities() {
-        assert_eq!(
-            strip_html_tags("<p>A &amp; B &lt; C</p>"),
-            "A & B < C"
-        );
+        assert_eq!(strip_html_tags("<p>A &amp; B &lt; C</p>"), "A & B < C");
     }
 }

@@ -81,7 +81,7 @@ impl Store {
              DROP TABLE IF EXISTS bundles;
              DROP TABLE IF EXISTS contacts;
              DROP TABLE IF EXISTS accounts;
-             PRAGMA user_version = 0;"
+             PRAGMA user_version = 0;",
         )?;
         crate::migrations::run(self)?;
         tracing::info!("Database rebuilt successfully");

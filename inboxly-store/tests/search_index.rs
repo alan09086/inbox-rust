@@ -1,18 +1,18 @@
-use inboxly_store::search::schema::SearchSchema;
 use inboxly_store::search::SearchIndex;
+use inboxly_store::search::schema::SearchSchema;
 
+use chrono::{TimeZone, Utc};
 use inboxly_core::{
     AccountId, AttachmentMeta, BundleCategory, Contact, EmailFlags, EmailId, EmailMeta, ThreadId,
 };
-use chrono::{TimeZone, Utc};
 use std::path::PathBuf;
 use tempfile::TempDir;
 use uuid::Uuid;
 
+use tantivy::Term;
 use tantivy::collector::TopDocs;
 use tantivy::query::TermQuery;
 use tantivy::schema::{IndexRecordOption, Value};
-use tantivy::Term;
 
 fn make_test_email() -> EmailMeta {
     EmailMeta {
@@ -150,7 +150,8 @@ fn index_single_email_and_find_by_email_id() {
     let idx = SearchIndex::create(&tmp.path().join("idx")).unwrap();
     let email = make_test_email();
 
-    idx.add_email(&email, Some("Hello world body text"), None).unwrap();
+    idx.add_email(&email, Some("Hello world body text"), None)
+        .unwrap();
     idx.commit().unwrap();
 
     assert_eq!(idx.num_docs(), 1);
@@ -233,8 +234,12 @@ fn update_email_in_index() {
     assert_eq!(idx.num_docs(), 1);
 
     // Update with body and category
-    idx.update_email(&email, Some("Now with body text!"), Some(&BundleCategory::Social))
-        .unwrap();
+    idx.update_email(
+        &email,
+        Some("Now with body text!"),
+        Some(&BundleCategory::Social),
+    )
+    .unwrap();
     idx.commit().unwrap();
 
     // Should still be exactly 1 document (not 2)
@@ -277,9 +282,12 @@ fn create_populated_index() -> (TempDir, SearchIndex) {
     };
     email3.subject = "Weekend lunch plans".to_string();
 
-    idx.add_email(&email1, Some("Let's have lunch at the diner."), None).unwrap();
-    idx.add_email(&email2, Some("We need more time for the project."), None).unwrap();
-    idx.add_email(&email3, Some("How about Saturday for lunch?"), None).unwrap();
+    idx.add_email(&email1, Some("Let's have lunch at the diner."), None)
+        .unwrap();
+    idx.add_email(&email2, Some("We need more time for the project."), None)
+        .unwrap();
+    idx.add_email(&email3, Some("How about Saturday for lunch?"), None)
+        .unwrap();
     idx.commit().unwrap();
 
     (tmp, idx)
@@ -338,11 +346,7 @@ fn multi_field_search_ranks_multi_match_higher() {
 
     // "lunch" appears in subject AND body of email1 and email3
     // email2 has "project" in both subject and body
-    let query = SearchQuery::multi_field(
-        &idx.schema,
-        &["subject", "body_text"],
-        "lunch",
-    );
+    let query = SearchQuery::multi_field(&idx.schema, &["subject", "body_text"], "lunch");
     let results = idx.execute_query(&query, 10).unwrap();
 
     // Should find email1 and email3 (both mention lunch in subject + body)
@@ -363,9 +367,12 @@ fn faceted_search_by_bundle_category() {
     let mut email3 = make_test_email();
     email3.id = EmailId("msg-social2@example.com".to_string());
 
-    idx.add_email(&email1, None, Some(&BundleCategory::Social)).unwrap();
-    idx.add_email(&email2, None, Some(&BundleCategory::Promos)).unwrap();
-    idx.add_email(&email3, None, Some(&BundleCategory::Social)).unwrap();
+    idx.add_email(&email1, None, Some(&BundleCategory::Social))
+        .unwrap();
+    idx.add_email(&email2, None, Some(&BundleCategory::Promos))
+        .unwrap();
+    idx.add_email(&email3, None, Some(&BundleCategory::Social))
+        .unwrap();
     idx.commit().unwrap();
 
     // Filter by Social category
@@ -568,7 +575,9 @@ struct MockRebuildSource {
 }
 
 impl RebuildSource for MockRebuildSource {
-    fn all_emails(&self) -> Box<dyn Iterator<Item = (EmailMeta, Option<String>, Option<BundleCategory>)> + '_> {
+    fn all_emails(
+        &self,
+    ) -> Box<dyn Iterator<Item = (EmailMeta, Option<String>, Option<BundleCategory>)> + '_> {
         Box::new(self.emails.iter().cloned())
     }
 

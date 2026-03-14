@@ -1,6 +1,6 @@
+use super::error::SyncResult;
 use rusqlite::{Connection, params};
 use uuid::Uuid;
-use super::error::SyncResult;
 
 /// Assign `thread_id` to all emails that have `thread_id IS NULL`.
 ///

@@ -1,5 +1,5 @@
-use rusqlite::{Connection, params};
 use super::error::SyncResult;
+use rusqlite::{Connection, params};
 
 /// Persisted sync state for one (account, folder) pair.
 #[derive(Debug, Clone)]
@@ -88,11 +88,7 @@ pub fn check_uid_validity(
 ///
 /// This is a destructive operation — all locally cached metadata for UIDs in this
 /// folder become invalid when the server resets UIDVALIDITY.
-pub fn invalidate_folder(
-    conn: &Connection,
-    account_id: &str,
-    folder_name: &str,
-) -> SyncResult<()> {
+pub fn invalidate_folder(conn: &Connection, account_id: &str, folder_name: &str) -> SyncResult<()> {
     conn.execute(
         "DELETE FROM emails WHERE account_id = ?1 AND imap_folder = ?2",
         params![account_id, folder_name],

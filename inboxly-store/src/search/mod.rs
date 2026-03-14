@@ -9,7 +9,10 @@ use std::sync::Mutex;
 use tantivy::collector::TopDocs;
 use tantivy::query::{Query, QueryParser};
 use tantivy::schema::Value;
-use tantivy::{DocAddress, DocId, Index, IndexReader, IndexWriter, ReloadPolicy, Score, SegmentReader, TantivyDocument, Term};
+use tantivy::{
+    DocAddress, DocId, Index, IndexReader, IndexWriter, ReloadPolicy, Score, SegmentReader,
+    TantivyDocument, Term,
+};
 
 use self::rebuild::RebuildSource;
 use self::schema::SearchSchema;
@@ -125,7 +128,9 @@ impl SearchIndex {
         body_text: Option<&str>,
         bundle_category: Option<&BundleCategory>,
     ) -> Result<(), SearchError> {
-        let doc = self.schema.build_document(email, body_text, bundle_category);
+        let doc = self
+            .schema
+            .build_document(email, body_text, bundle_category);
         let writer = self.writer.lock().map_err(|_| SearchError::WriterLock)?;
         writer.add_document(doc)?;
         Ok(())
@@ -142,7 +147,9 @@ impl SearchIndex {
         let mut writer = self.writer.lock().map_err(|_| SearchError::WriterLock)?;
 
         for (email, body_text, bundle_category) in emails {
-            let doc = self.schema.build_document(email, *body_text, *bundle_category);
+            let doc = self
+                .schema
+                .build_document(email, *body_text, *bundle_category);
             writer.add_document(doc)?;
         }
 
@@ -184,7 +191,9 @@ impl SearchIndex {
         writer.delete_term(term);
 
         // Add the new document
-        let doc = self.schema.build_document(email, body_text, bundle_category);
+        let doc = self
+            .schema
+            .build_document(email, body_text, bundle_category);
         writer.add_document(doc)?;
 
         Ok(())
@@ -240,8 +249,8 @@ impl SearchIndex {
             .parse_query(query_str)
             .map_err(|e| SearchError::QueryParse(e.to_string()))?;
 
-        let collector = TopDocs::with_limit(limit).tweak_score(
-            move |segment_reader: &SegmentReader| {
+        let collector =
+            TopDocs::with_limit(limit).tweak_score(move |segment_reader: &SegmentReader| {
                 // Get the date fast field column for this segment.
                 let date_column = segment_reader
                     .fast_fields()
@@ -258,8 +267,7 @@ impl SearchIndex {
                         original_score
                     }
                 }
-            },
-        );
+            });
 
         let results = searcher.search(&query, &collector)?;
         Ok(results)
@@ -286,11 +294,9 @@ impl SearchIndex {
             let mut writer = idx.writer.lock().map_err(|_| SearchError::WriterLock)?;
 
             for (email, body_text, category) in source.all_emails() {
-                let doc = idx.schema.build_document(
-                    &email,
-                    body_text.as_deref(),
-                    category.as_ref(),
-                );
+                let doc =
+                    idx.schema
+                        .build_document(&email, body_text.as_deref(), category.as_ref());
                 writer.add_document(doc)?;
                 count += 1;
 
@@ -313,11 +319,7 @@ impl SearchIndex {
     /// High-level search: parse query, execute with recency boost, return structured hits.
     ///
     /// This is the primary API for the UI search bar.
-    pub fn search(
-        &self,
-        query_str: &str,
-        limit: usize,
-    ) -> Result<Vec<SearchHit>, SearchError> {
+    pub fn search(&self, query_str: &str, limit: usize) -> Result<Vec<SearchHit>, SearchError> {
         let raw_results = self.search_with_recency_boost(query_str, limit)?;
         let searcher = self.reader.searcher();
         let mut hits = Vec::with_capacity(raw_results.len());

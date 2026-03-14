@@ -47,10 +47,16 @@ pub struct WellKnownFolders {
 impl WellKnownFolders {
     /// Returns all resolved folder names for iteration.
     pub fn all_names(&self) -> Vec<&str> {
-        [&self.inbox, &self.sent, &self.drafts, &self.trash, &self.spam]
-            .iter()
-            .filter_map(|opt| opt.as_deref())
-            .collect()
+        [
+            &self.inbox,
+            &self.sent,
+            &self.drafts,
+            &self.trash,
+            &self.spam,
+        ]
+        .iter()
+        .filter_map(|opt| opt.as_deref())
+        .collect()
     }
 
     /// Returns true if all five well-known folders have been resolved.
@@ -164,11 +170,21 @@ pub fn map_well_known_folders(folders: &[ImapFolder]) -> WellKnownFolders {
     for folder in folders {
         if let Some(role) = &folder.role {
             match role {
-                FolderRole::Inbox => { wk.inbox.get_or_insert(folder.name.clone()); }
-                FolderRole::Sent => { wk.sent.get_or_insert(folder.name.clone()); }
-                FolderRole::Drafts => { wk.drafts.get_or_insert(folder.name.clone()); }
-                FolderRole::Trash => { wk.trash.get_or_insert(folder.name.clone()); }
-                FolderRole::Spam => { wk.spam.get_or_insert(folder.name.clone()); }
+                FolderRole::Inbox => {
+                    wk.inbox.get_or_insert(folder.name.clone());
+                }
+                FolderRole::Sent => {
+                    wk.sent.get_or_insert(folder.name.clone());
+                }
+                FolderRole::Drafts => {
+                    wk.drafts.get_or_insert(folder.name.clone());
+                }
+                FolderRole::Trash => {
+                    wk.trash.get_or_insert(folder.name.clone());
+                }
+                FolderRole::Spam => {
+                    wk.spam.get_or_insert(folder.name.clone());
+                }
                 _ => {}
             };
         }
@@ -226,9 +242,7 @@ pub fn map_well_known_folders(folders: &[ImapFolder]) -> WellKnownFolders {
 ///
 /// Issues `LIST "" "*"` and parses SPECIAL-USE attributes where available.
 pub async fn list_folders(
-    session: &mut async_imap::Session<
-        tokio_rustls::client::TlsStream<tokio::net::TcpStream>,
-    >,
+    session: &mut async_imap::Session<tokio_rustls::client::TlsStream<tokio::net::TcpStream>>,
 ) -> Result<Vec<ImapFolder>> {
     info!("Listing IMAP folders");
 
@@ -244,9 +258,7 @@ pub async fn list_folders(
                 .map(name_attribute_to_string)
                 .collect();
 
-            let delimiter = name
-                .delimiter()
-                .and_then(|s: &str| s.chars().next());
+            let delimiter = name.delimiter().and_then(|s: &str| s.chars().next());
 
             // Try to resolve role from SPECIAL-USE attributes first, then name
             let role = attrs

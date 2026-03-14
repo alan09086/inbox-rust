@@ -82,10 +82,8 @@ impl Store {
     }
 
     pub fn delete_contact(&self, address: &str) -> Result<()> {
-        self.conn().execute(
-            "DELETE FROM contacts WHERE address = ?1",
-            params![address],
-        )?;
+        self.conn()
+            .execute("DELETE FROM contacts WHERE address = ?1", params![address])?;
         Ok(())
     }
 }

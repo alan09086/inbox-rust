@@ -46,7 +46,6 @@ pub enum ImapError {
     Timeout(std::time::Duration),
 
     // -- Phase 2 (M8) error variants --
-
     #[error("Maildir write failed: {0}")]
     MaildirWrite(String),
 

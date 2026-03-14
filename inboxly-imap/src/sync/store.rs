@@ -1,6 +1,6 @@
-use rusqlite::{Connection, params};
 use super::envelope::EnvelopeData;
 use super::error::SyncResult;
+use rusqlite::{Connection, params};
 
 /// Insert a batch of envelopes into the `emails` table within a single transaction.
 ///
@@ -35,7 +35,7 @@ pub fn batch_insert_envelopes(conn: &Connection, envelopes: &[EnvelopeData]) -> 
 
         for env in envelopes {
             let changes = stmt.execute(params![
-                env.message_id,       // id (Message-ID as primary key)
+                env.message_id, // id (Message-ID as primary key)
                 env.account_id,
                 env.from_name,
                 env.from_address,
@@ -47,7 +47,7 @@ pub fn batch_insert_envelopes(conn: &Connection, envelopes: &[EnvelopeData]) -> 
                 env.size_bytes,
                 env.imap_uid,
                 env.imap_folder,
-                env.message_id,       // message_id_header (same as id)
+                env.message_id, // message_id_header (same as id)
                 env.in_reply_to,
                 env.references_json,
             ])?;
