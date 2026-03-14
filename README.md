@@ -46,13 +46,11 @@ Requires Rust edition 2024 (rustc 1.85+).
 
 ## Status
 
-**M19 complete** -- Done + Pin + Sweep + Undo:
-- Mark Done, Toggle Pin, Sweep inbox triage actions
-- Timed undo system (7-second window, matching Google Inbox)
-- Undo snackbar widget at bottom of content area
-- Optimistic local updates with undo reversal
-- Sweep marks all unpinned threads as done in one action
-- 688 tests passing, 0 clippy warnings
+**M20 complete** -- Swipe + Hover Actions:
+- Swipe gesture state tracking (per-row drag offset, direction detection, arm threshold)
+- Hover-reveal action buttons (Done/Pin/Snooze) for desktop interaction
+- Two-threshold arm/commit system for swipe gestures
+- 697 tests passing, 0 clippy warnings
 
 ## Licence
 

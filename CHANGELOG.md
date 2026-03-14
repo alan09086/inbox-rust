@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.20.0] - 2026-03-14
+
+### Added
+
+- **Swipe state**: `SwipeState` per-row tracking with drag offset, direction detection (Right=Done, Left=Snooze), 50% arm threshold
+- **Swipe state collection**: `SwipeStates` HashMap-keyed collection with get_mut/reset/clear for managing all visible rows
+- **Hover action buttons**: `hover_action_buttons()` rendering Done/Pin/Snooze circular 32dp buttons with Unicode icons for desktop interaction
+- **Action button**: Reusable `action_button()` helper with icon, accent colour, circular styling
+- Full custom Widget-level swipe rendering deferred to M25 polish pass
+- 9 new tests (697 total): swipe defaults (1), direction detection (2), threshold arming (2), reset (1), collection ops (2), hover construction (1)
+
 ## [0.19.0] - 2026-03-14
 
 ### Added
