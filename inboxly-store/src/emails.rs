@@ -311,4 +311,124 @@ impl Store {
             Err(e) => Err(StoreError::Sqlite(e)),
         }
     }
+
+    // -- M9: Incremental sync query methods --
+
+    /// Get all IMAP UIDs for an account + folder.
+    pub fn get_uids_in_folder(&self, account_id: &str, folder: &str) -> Result<Vec<i64>> {
+        let mut stmt = self.conn().prepare(
+            "SELECT imap_uid FROM emails
+             WHERE account_id = ?1 AND imap_folder = ?2
+             ORDER BY imap_uid ASC",
+        )?;
+        let uids = stmt
+            .query_map(params![account_id, folder], |row| row.get(0))?
+            .collect::<std::result::Result<Vec<i64>, _>>()?;
+        Ok(uids)
+    }
+
+    /// Get IMAP UIDs for emails received since a given unix timestamp.
+    ///
+    /// Used by the non-CONDSTORE fallback to scope flag sync to a recent window
+    /// (e.g., last 30 days) rather than scanning the entire mailbox.
+    pub fn get_uids_since(
+        &self,
+        account_id: &str,
+        folder: &str,
+        since_unix: i64,
+    ) -> Result<Vec<i64>> {
+        let mut stmt = self.conn().prepare(
+            "SELECT imap_uid FROM emails
+             WHERE account_id = ?1 AND imap_folder = ?2 AND date >= ?3
+             ORDER BY imap_uid ASC",
+        )?;
+        let uids = stmt
+            .query_map(params![account_id, folder, since_unix], |row| row.get(0))?
+            .collect::<std::result::Result<Vec<i64>, _>>()?;
+        Ok(uids)
+    }
+
+    /// Mark an email as deleted by setting the DELETED flag bit.
+    ///
+    /// This is a soft-delete: the row remains in SQLite with the deleted flag set.
+    /// The email can be purged later during a maintenance pass.
+    pub fn mark_email_deleted_by_uid(
+        &self,
+        account_id: &str,
+        folder: &str,
+        uid: i64,
+    ) -> Result<()> {
+        let changed = self.conn().execute(
+            "UPDATE emails SET flags = flags | ?4
+             WHERE account_id = ?1 AND imap_folder = ?2 AND imap_uid = ?3",
+            params![account_id, folder, uid, flags::DELETED],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound(format!("email uid={uid} in {folder}")));
+        }
+        Ok(())
+    }
+
+    /// Update flags for an email identified by account + folder + UID.
+    ///
+    /// Used by incremental sync when we know the IMAP UID but not the email ID.
+    pub fn update_flags_by_uid(
+        &self,
+        account_id: &str,
+        folder: &str,
+        uid: i64,
+        new_flags: i64,
+    ) -> Result<()> {
+        let changed = self.conn().execute(
+            "UPDATE emails SET flags = ?4
+             WHERE account_id = ?1 AND imap_folder = ?2 AND imap_uid = ?3",
+            params![account_id, folder, uid, new_flags],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound(format!("email uid={uid} in {folder}")));
+        }
+        Ok(())
+    }
+
+    /// Upsert an email row (insert or update on conflict).
+    ///
+    /// Used by incremental sync to insert newly discovered emails.
+    /// On conflict (same id), updates all fields except id.
+    pub fn upsert_email(&self, email: &EmailRow) -> Result<()> {
+        self.conn().execute(
+            "INSERT INTO emails (id, account_id, thread_id, from_name, from_address, to_json, cc_json,
+             subject, snippet, date, maildir_path, flags, size_bytes, imap_uid, imap_folder,
+             has_attachments, body_downloaded, message_id_header, in_reply_to, references_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
+             ON CONFLICT(id) DO UPDATE SET
+                flags = excluded.flags,
+                size_bytes = excluded.size_bytes,
+                snippet = excluded.snippet,
+                body_downloaded = excluded.body_downloaded,
+                maildir_path = excluded.maildir_path",
+            params![
+                email.id,
+                email.account_id,
+                email.thread_id,
+                email.from_name,
+                email.from_address,
+                email.to_json,
+                email.cc_json,
+                email.subject,
+                email.snippet,
+                email.date,
+                email.maildir_path,
+                email.flags,
+                email.size_bytes,
+                email.imap_uid,
+                email.imap_folder,
+                email.has_attachments,
+                email.body_downloaded,
+                email.message_id_header,
+                email.in_reply_to,
+                email.references_json,
+            ],
+        )?;
+        Ok(())
+    }
 }

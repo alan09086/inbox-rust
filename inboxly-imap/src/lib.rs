@@ -11,6 +11,9 @@
 //! - Phase 2: Background body download (RFC822 fetch + Maildir + tantivy)
 //! - On-demand body fetch for immediate display
 //! - Offline action queue replay on reconnect
+//! - Incremental sync: UIDNEXT comparison, CONDSTORE flags, deletion detection
+//! - Push sync: IDLE command with timeout, reconnect loop
+//! - Sync lifecycle: per-account sync loops, multi-account management
 
 pub mod auth;
 pub mod body_fetch;
@@ -19,11 +22,15 @@ pub mod channel;
 pub mod connection;
 pub mod error;
 pub mod folders;
+pub mod idle;
+pub mod incremental;
 pub mod offline_replay;
 pub mod on_demand;
 pub mod phase2;
 pub mod pool;
 pub mod sync;
+pub mod sync_loop;
+pub mod sync_manager;
 pub mod tls;
 
 // Convenience re-exports
@@ -32,5 +39,8 @@ pub use channel::{SyncEvent, UiCommand, create_sync_channels};
 pub use connection::{ImapCapabilities, ImapConnection};
 pub use error::{ImapError, Result};
 pub use folders::{FolderRole, ImapFolder, WellKnownFolders};
+pub use idle::{IdleEvent, IdleLoopConfig, IdleWakeup};
+pub use incremental::{IncrementalSyncResult, NewUidCheckResult};
 pub use pool::{ConnectionPool, PoolConfig};
+pub use sync_manager::SyncManager;
 pub use tls::build_tls_config;

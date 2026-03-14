@@ -70,6 +70,26 @@ pub enum SyncEvent {
 
     /// Phase 2 body download encountered a non-fatal error on a single email.
     BodyDownloadError { email_id: String, error: String },
+
+    // -- M9: Incremental sync + IDLE events --
+    /// Emails were deleted on the server (no longer exist remotely).
+    EmailsDeleted {
+        account_id: String,
+        folder: String,
+        count: u64,
+    },
+
+    /// Incremental sync completed for a folder (post-IDLE or launch catch-up).
+    IncrementalSyncComplete {
+        account_id: String,
+        folder: String,
+        new_emails: u64,
+        flag_changes: u64,
+        deleted: u64,
+    },
+
+    /// Sync is now up to date for a folder (entering IDLE or poll wait).
+    SyncUpToDate { account_id: String, folder: String },
 }
 
 /// Commands sent from the UI to the IMAP sync engine.
