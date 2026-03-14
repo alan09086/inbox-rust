@@ -61,6 +61,33 @@ impl Store {
         }
     }
 
+    /// Drop and recreate all tables. Used for full database rebuild from Maildir.
+    ///
+    /// **Destructive** — all data is lost. Caller is responsible for re-indexing
+    /// from Maildir files after calling this.
+    pub fn rebuild(&mut self) -> Result<()> {
+        tracing::warn!("Rebuilding database — dropping all tables");
+        self.conn.execute_batch(
+            "DROP TABLE IF EXISTS offline_queue;
+             DROP TABLE IF EXISTS highlights;
+             DROP TABLE IF EXISTS settings;
+             DROP TABLE IF EXISTS reminders;
+             DROP TABLE IF EXISTS sender_affinity;
+             DROP TABLE IF EXISTS bundle_rules;
+             DROP TABLE IF EXISTS thread_state;
+             DROP TABLE IF EXISTS sync_state;
+             DROP TABLE IF EXISTS emails;
+             DROP TABLE IF EXISTS threads;
+             DROP TABLE IF EXISTS bundles;
+             DROP TABLE IF EXISTS contacts;
+             DROP TABLE IF EXISTS accounts;
+             PRAGMA user_version = 0;"
+        )?;
+        crate::migrations::run(self)?;
+        tracing::info!("Database rebuilt successfully");
+        Ok(())
+    }
+
     /// Configure connection pragmas.
     fn configure(conn: &Connection) -> Result<()> {
         conn.execute_batch(
