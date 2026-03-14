@@ -313,4 +313,25 @@ mod tests {
             assert_eq!(method, deserialized.method);
         }
     }
+
+    // === Task 13: SnoozePresets (2 tests) ===
+
+    #[test]
+    fn snooze_presets_defaults() {
+        let presets = SnoozePresets::default();
+        assert_eq!(presets.morning_hour, 8);
+        assert_eq!(presets.afternoon_hour, 13);
+        assert_eq!(presets.evening_hour, 18);
+        assert_eq!(presets.weekend_day, 5);
+    }
+
+    #[test]
+    fn snooze_presets_partial_toml_uses_defaults() {
+        let toml_str = r#"morning_hour = 7"#;
+        let presets: SnoozePresets = toml::from_str(toml_str).unwrap();
+        assert_eq!(presets.morning_hour, 7);
+        assert_eq!(presets.afternoon_hour, 13);
+        assert_eq!(presets.evening_hour, 18);
+        assert_eq!(presets.weekend_day, 5);
+    }
 }
