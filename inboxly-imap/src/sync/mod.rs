@@ -1,4 +1,5 @@
 pub mod batch;
+pub mod envelope;
 pub mod error;
 pub mod progress;
 pub mod uid_state;
