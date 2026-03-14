@@ -33,6 +33,12 @@ pub struct SearchSchema {
     pub has_attachment: Field,
 }
 
+impl Default for SearchSchema {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SearchSchema {
     /// Build the tantivy schema with all indexed fields.
     pub fn new() -> Self {
