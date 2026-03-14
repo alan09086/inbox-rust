@@ -7,6 +7,8 @@ mod error;
 mod migrations;
 mod store;
 
+pub mod maildir_store;
+
 mod accounts;
 mod bundles;
 mod bundle_rules;
@@ -23,6 +25,12 @@ mod threads;
 
 pub use error::{StoreError, Result};
 pub use store::Store;
+
+pub use maildir_store::{
+    MaildirStore, StandardFolder, StoredEmail, MaildirEntry, ScanError,
+    flags_to_suffix, suffix_to_flags, flags_from_filename,
+    parse_email_meta, parse_email_content, rebuild_emails_from_maildir,
+};
 
 pub use accounts::AccountRow;
 pub use bundles::BundleRow;

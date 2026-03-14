@@ -19,6 +19,12 @@ pub enum StoreError {
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("Maildir operation failed: {0}")]
+    Maildir(String),
+
+    #[error("Email parse error: {0}")]
+    Parse(String),
 }
 
 pub type Result<T> = std::result::Result<T, StoreError>;
