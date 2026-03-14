@@ -17,3 +17,7 @@ pub use email::{EmailContent, EmailMeta};
 pub mod thread;
 
 pub use thread::Thread;
+
+pub mod bundle;
+
+pub use bundle::{Bundle, BundleCategory, BundleIcon, BundleThrottle, BundleVisibility, Color};
