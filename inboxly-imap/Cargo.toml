@@ -5,4 +5,20 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-inboxly-core.workspace = true
+inboxly-core = { path = "../inboxly-core" }
+async-imap = "0.11"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time"] }
+tokio-rustls = "0.26"
+rustls = "0.23"
+webpki-roots = "1"
+rustls-pki-types = "1"
+oauth2 = "5"
+base64 = "0.22"
+thiserror = "2"
+tracing = "0.1"
+url = "2"
+serde = { version = "1", features = ["derive"] }
+rand = "0.9"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
