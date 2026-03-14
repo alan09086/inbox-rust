@@ -46,18 +46,14 @@ Requires Rust edition 2024 (rustc 1.85+).
 
 ## Status
 
-**M13 complete** — Bundler User Rules + Sender Learning:
-- Four-layer categorisation pipeline: user rules > sender learning > header heuristics > uncategorised
-- User-defined rules with Contains, Equals, Matches (regex), and Domain operators across From, To, Subject, Header, and Body fields
-- Pre-compiled regex caching for efficient repeated evaluation
-- Sender affinity learning from user moves with exponential confidence decay (90-day half-life)
-- Confidence threshold (0.6): sender learning only fires with sufficient evidence
-- Override penalty: moving to a different bundle penalises the old affinity
-- Custom bundle creation with BundleStore trait (name, colour, visibility, throttle)
-- Re-categorisation on user move: updates both thread bundle and sender affinity
-- `BundlerEngine::categorise()` unifies all four layers with clear precedence
-- RuleStore and AffinityStore traits for testable persistence abstraction
-- 496 tests passing, 0 clippy warnings
+**M14 complete** — Bundle Throttling (final backend milestone):
+- Throttle non-urgent bundles: Immediate, Daily (with delivery time), Weekly (with day + time)
+- Inbox feed filtering: suppressed bundles hidden until delivery window opens
+- Background scheduler: tokio task checks windows every 60s, emits events on transition
+- Body re-evaluation: Phase 2 catch-up re-runs pipeline when message bodies arrive
+- Default presets: Promos 5PM, Updates 9AM, Forums noon, Low Priority Mon 8AM
+- Schema migration v3->v4: existing throttle values converted to JSON
+- 557 tests passing, 0 clippy warnings
 
 ## Licence
 

@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.14.0] - 2026-03-14
+
+### Added
+
+- **Bundle throttling**: `BundleThrottle` enum with `Immediate`, `Daily { delivery_time }`, and `Weekly { delivery_day, delivery_time }` variants in `inboxly-core/src/throttle.rs`
+- **WeekdayWrapper**: Serializable wrapper around `chrono::Weekday` with lowercase string serde (monday, tuesday, etc.)
+- **Throttle delivery windows**: `is_window_open()` and `next_window()` for computing when throttled bundles surface in the inbox feed
+- **Store throttle CRUD**: `get_bundle_throttle()`, `set_bundle_throttle()`, `get_throttled_bundles()`, `get_currently_suppressed_bundle_ids()` in `inboxly-store/src/throttle.rs`
+- **Throttle-aware thread queries**: `get_threads_excluding_bundles()` and `get_threads_throttled()` for inbox feed filtering
+- **Schema migration v3->v4**: Converts plain-string throttle values (Immediate/Daily/Weekly) to JSON format with delivery times
+- **Background throttle scheduler**: `spawn_throttle_scheduler()` in `inboxly-bundler/src/scheduler.rs` -- tokio task that checks windows every 60s and emits `ThrottleEvent::WindowOpened` events
+- **Body re-evaluation**: `BundlerEngine::re_evaluate_with_body()` re-runs the four-layer pipeline when Phase 2 sync delivers message bodies
+- **BundlerEvent types**: `ThrottleChanged`, `BundleChanged`, `ThrottleWindowOpened` in `inboxly-bundler/src/events.rs` for UI notification
+- **ThrottleWindowOpened sync event**: Added to `SyncEvent` in `inboxly-imap/src/channel.rs`
+- **Default throttle presets**: `default_throttle_for_category()` -- Promos daily 5 PM, Updates daily 9 AM, Forums daily noon, Low Priority weekly Monday 8 AM, Social/Finance/Travel/Purchases immediate
+- **BundleCategory::as_str()**: Stable lowercase string key for settings storage
+- **BundleId::FromStr**: Parse UUID strings into BundleId
+- **Application scheduler wiring**: Basic tokio runtime with scheduler demo in `inboxly/src/main.rs`
+- 49 new tests (557 total): throttle types (17), store CRUD (9), scheduler (3), body re-evaluation (4), events (3), presets (5), integration (8)
+
 ## [0.13.0] - 2026-03-14
 
 ### Added
