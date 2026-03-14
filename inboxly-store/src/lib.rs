@@ -21,6 +21,7 @@ mod sender_affinity;
 mod settings;
 mod sync_state;
 mod thread_state;
+pub mod threading;
 mod threads;
 
 pub use error::{Result, StoreError};
