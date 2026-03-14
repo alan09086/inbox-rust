@@ -4,8 +4,8 @@
 //! suppression query used by the inbox feed.
 
 use chrono::{DateTime, Local};
-use inboxly_core::throttle::BundleThrottle;
 use inboxly_core::BundleId;
+use inboxly_core::throttle::BundleThrottle;
 use rusqlite::params;
 
 use crate::error::Result;

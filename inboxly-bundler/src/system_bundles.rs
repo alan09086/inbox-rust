@@ -343,8 +343,7 @@ mod tests {
 
     #[test]
     fn custom_bundles_default_to_immediate() {
-        let throttle =
-            default_throttle_for_category(&BundleCategory::Custom("My Bundle".into()));
+        let throttle = default_throttle_for_category(&BundleCategory::Custom("My Bundle".into()));
         assert_eq!(throttle, BundleThrottle::Immediate);
     }
 

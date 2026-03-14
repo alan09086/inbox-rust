@@ -8,8 +8,8 @@
 
 use chrono::{Local, NaiveTime};
 use inboxly_bundler::system_bundles;
-use inboxly_core::throttle::{BundleThrottle, WeekdayWrapper};
 use inboxly_core::BundleId;
+use inboxly_core::throttle::{BundleThrottle, WeekdayWrapper};
 use inboxly_store::{AccountRow, Store, ThreadRow, ThreadStateRow};
 
 /// Create an in-memory store for testing.
@@ -315,7 +315,9 @@ fn system_bundles_have_json_throttle_after_creation() {
         let throttle = store.get_bundle_throttle(bundle_id).expect("get throttle");
         // Just verify it deserializes without error
         match &throttle {
-            BundleThrottle::Immediate | BundleThrottle::Daily { .. } | BundleThrottle::Weekly { .. } => {}
+            BundleThrottle::Immediate
+            | BundleThrottle::Daily { .. }
+            | BundleThrottle::Weekly { .. } => {}
         }
     }
 
@@ -332,8 +334,8 @@ fn system_bundles_have_json_throttle_after_creation() {
 async fn scheduler_detects_window_opening_integration() {
     use inboxly_bundler::{ThrottleEvent, ThrottleSchedulerConfig, spawn_throttle_scheduler};
     use std::sync::Arc;
-    use tokio::sync::mpsc;
     use tokio::sync::Mutex;
+    use tokio::sync::mpsc;
     use tokio::time::Duration;
 
     let bundle_a = BundleId::new();

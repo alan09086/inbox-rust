@@ -3,8 +3,8 @@
 //! These events are emitted by the bundler subsystem (throttle changes,
 //! bundle reassignments) and consumed by the UI layer to refresh views.
 
-use inboxly_core::throttle::BundleThrottle;
 use inboxly_core::BundleId;
+use inboxly_core::throttle::BundleThrottle;
 use uuid::Uuid;
 
 /// Events emitted by the bundler subsystem.

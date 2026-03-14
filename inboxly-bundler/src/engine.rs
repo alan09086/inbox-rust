@@ -421,8 +421,7 @@ mod tests {
         let engine = BundlerEngine::new(rules, category_map);
 
         // Header heuristic says Social, but body rule overrides
-        let email = MockEmail::new("promo@shop.com", "Sale")
-            .with_body("Click to unsubscribe");
+        let email = MockEmail::new("promo@shop.com", "Sale").with_body("Click to unsubscribe");
         let heuristic = HeuristicMatch {
             category: "Social".into(),
             pattern: "List-Id".into(),

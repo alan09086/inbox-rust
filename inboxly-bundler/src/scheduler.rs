@@ -86,7 +86,8 @@ where
 {
     tokio::spawn(async move {
         // Enforce minimum 1ms interval (tokio panics on zero-duration intervals)
-        let interval_duration = Duration::from_secs(config.check_interval_secs).max(Duration::from_millis(1));
+        let interval_duration =
+            Duration::from_secs(config.check_interval_secs).max(Duration::from_millis(1));
         let mut tick = interval(interval_duration);
         let mut previously_suppressed: Vec<BundleId> = Vec::new();
 
@@ -106,9 +107,7 @@ where
             let currently_suppressed = match query_fn().await {
                 Ok(s) => s,
                 Err(e) => {
-                    tracing::warn!(
-                        "throttle scheduler: failed to query suppressed bundles: {e}"
-                    );
+                    tracing::warn!("throttle scheduler: failed to query suppressed bundles: {e}");
                     continue;
                 }
             };
@@ -129,9 +128,7 @@ where
                     .send(ThrottleEvent::WindowOpened(newly_opened))
                     .is_err()
                 {
-                    tracing::debug!(
-                        "throttle scheduler: event channel closed, shutting down"
-                    );
+                    tracing::debug!("throttle scheduler: event channel closed, shutting down");
                     break;
                 }
             }
@@ -155,7 +152,6 @@ mod tests {
 
     #[tokio::test]
     async fn scheduler_detects_window_opening() {
-
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
 
         // State: first call returns [bundle_a], second call returns [] (window opened)

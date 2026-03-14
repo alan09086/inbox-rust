@@ -23,11 +23,8 @@ fn main() {
             Ok::<Vec<BundleId>, String>(vec![])
         };
 
-        let _scheduler_handle = spawn_throttle_scheduler(
-            ThrottleSchedulerConfig::default(),
-            query_fn,
-            event_tx,
-        );
+        let _scheduler_handle =
+            spawn_throttle_scheduler(ThrottleSchedulerConfig::default(), query_fn, event_tx);
 
         println!("Throttle scheduler started (checking every 60s)");
         println!("Press Ctrl+C to exit");

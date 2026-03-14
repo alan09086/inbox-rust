@@ -24,10 +24,11 @@ use serde::{Deserialize, Serialize};
 /// How a bundle delivers its emails to the inbox feed.
 ///
 /// Stored as JSON in the `bundles.throttle` column, tagged by `mode`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "mode")]
 pub enum BundleThrottle {
     /// Emails appear as they arrive (default).
+    #[default]
     Immediate,
 
     /// Bundle surfaces once per day at the configured time.
@@ -43,12 +44,6 @@ pub enum BundleThrottle {
         /// Time of day to deliver (e.g., 08:00 for 8 AM). Local time.
         delivery_time: NaiveTime,
     },
-}
-
-impl Default for BundleThrottle {
-    fn default() -> Self {
-        Self::Immediate
-    }
 }
 
 impl BundleThrottle {
@@ -113,8 +108,7 @@ impl BundleThrottle {
                 let today = local_now.date_naive();
                 let today_weekday = today.weekday();
                 let days_ahead = days_until(today_weekday, delivery_day.0);
-                let candidate_date =
-                    today + chrono::Duration::days(i64::from(days_ahead));
+                let candidate_date = today + chrono::Duration::days(i64::from(days_ahead));
                 let candidate = candidate_date.and_time(*delivery_time);
                 let next = if days_ahead == 0 && local_now.naive_local() >= candidate {
                     // Same day but past the time, next week

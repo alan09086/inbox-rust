@@ -18,7 +18,6 @@ pub mod traits;
 // Re-exports for convenience
 pub use attachment::{Attachment, AttachmentMeta};
 pub use bundle::{Bundle, BundleCategory, BundleIcon, BundleThrottle, BundleVisibility, Color};
-pub use throttle::WeekdayWrapper;
 pub use config::{
     AccountConfig, AppConfig, AuthMethod, ConfigError, Paths, SnoozePresets, ThemePreference,
 };
@@ -34,4 +33,5 @@ pub use id::{AccountId, BundleId, EmailId, ThreadId};
 pub use inbox::{InboxItem, SnoozeInfo, SnoozeUntil, ThreadState};
 pub use offline::OfflineAction;
 pub use thread::Thread;
+pub use throttle::WeekdayWrapper;
 pub use traits::{Bundler, Extractor, Store};
