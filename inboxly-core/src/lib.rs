@@ -20,7 +20,10 @@ pub use bundle::{Bundle, BundleCategory, BundleIcon, BundleThrottle, BundleVisib
 pub use config::{
     AccountConfig, AppConfig, AuthMethod, ConfigError, Paths, SnoozePresets, ThemePreference,
 };
-pub use contact::Contact;
+pub use contact::{
+    AVATAR_COLOR_DEFAULT, AVATAR_PALETTE, AvatarColor, Contact, ParsedAddress,
+    avatar_color_for_letter, avatar_color_index, parse_address, parse_address_list,
+};
 pub use email::{EmailContent, EmailMeta};
 pub use error::{InboxlyError, Result};
 pub use flags::EmailFlags;
