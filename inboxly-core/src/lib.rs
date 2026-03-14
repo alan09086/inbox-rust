@@ -4,32 +4,23 @@ pub mod id;
 pub mod contact;
 pub mod attachment;
 pub mod flags;
+pub mod email;
+pub mod thread;
+pub mod bundle;
+pub mod highlight;
+pub mod inbox;
+pub mod error;
+pub mod traits;
 
+// Re-exports for convenience
 pub use id::{AccountId, BundleId, EmailId, ThreadId};
 pub use contact::Contact;
 pub use attachment::{Attachment, AttachmentMeta};
 pub use flags::EmailFlags;
-
-pub mod email;
-
 pub use email::{EmailContent, EmailMeta};
-
-pub mod thread;
-
 pub use thread::Thread;
-
-pub mod bundle;
-
 pub use bundle::{Bundle, BundleCategory, BundleIcon, BundleThrottle, BundleVisibility, Color};
-
-pub mod highlight;
-
 pub use highlight::{Highlight, TripBundle};
-
-pub mod inbox;
-
 pub use inbox::{InboxItem, SnoozeInfo, SnoozeUntil, ThreadState};
-
-pub mod error;
-
 pub use error::{InboxlyError, Result};
+pub use traits::{Bundler, Extractor, Store};
