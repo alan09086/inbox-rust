@@ -10,6 +10,7 @@ pub enum AuthMethod {
     /// Plain username + password (IMAP LOGIN / STARTTLS).
     Password,
     /// OAuth2 with XOAUTH2 SASL (Gmail, Microsoft, etc.).
+    #[serde(rename = "oauth2")]
     OAuth2,
     /// App-specific password (Fastmail, etc.).
     AppPassword,
@@ -277,5 +278,39 @@ impl AppConfig {
             return Err(ConfigError::Validation(format!("snooze.weekend_day {} is out of range (0=Monday .. 6=Sunday)", self.snooze.weekend_day)));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // === Task 12: AuthMethod serialization (3 tests) ===
+
+    // Helper wrapper so we can serialize AuthMethod as a TOML value (TOML requires a table root).
+    #[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug)]
+    struct AuthWrapper { method: AuthMethod }
+
+    #[test]
+    fn auth_method_default_is_password() {
+        assert_eq!(AuthMethod::default(), AuthMethod::Password);
+    }
+
+    #[test]
+    fn auth_method_serializes_to_snake_case() {
+        let toml_str = toml::to_string(&AuthWrapper { method: AuthMethod::OAuth2 }).unwrap();
+        assert!(toml_str.contains("oauth2"), "got: {toml_str}");
+
+        let toml_str = toml::to_string(&AuthWrapper { method: AuthMethod::AppPassword }).unwrap();
+        assert!(toml_str.contains("app_password"), "got: {toml_str}");
+    }
+
+    #[test]
+    fn auth_method_round_trip() {
+        for method in [AuthMethod::Password, AuthMethod::OAuth2, AuthMethod::AppPassword] {
+            let serialized = toml::to_string(&AuthWrapper { method: method.clone() }).unwrap();
+            let deserialized: AuthWrapper = toml::from_str(&serialized).unwrap();
+            assert_eq!(method, deserialized.method);
+        }
     }
 }
