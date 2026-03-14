@@ -9,7 +9,7 @@ use inboxly_store::Store;
 use crate::feed::{self, FeedSection};
 use crate::nav::{NavBundleCategory, NavTarget, default_bundle_categories};
 use crate::theme::{ActiveView, InboxlyTheme};
-use crate::views::inbox_view::inbox_view;
+use crate::views::inbox_view::{InboxViewMessage, inbox_view};
 
 /// Top-level application state.
 pub struct Inboxly {
@@ -48,6 +48,8 @@ pub enum Message {
     ThemeChanged(InboxlyTheme),
     /// Reload the inbox feed from the store.
     ReloadFeed,
+    /// Message from the inbox view (bundle toggle, etc.).
+    InboxView(InboxViewMessage),
 }
 
 impl Default for Inboxly {
@@ -114,6 +116,14 @@ impl Inboxly {
             Message::ReloadFeed => {
                 self.reload_feed();
             }
+            Message::InboxView(inbox_msg) => {
+                match inbox_msg {
+                    InboxViewMessage::ToggleBundle(bundle_id) => {
+                        tracing::debug!("toggle bundle: {bundle_id}");
+                        // TODO(M18): expand/collapse bundle state tracking
+                    }
+                }
+            }
         }
         Task::none()
     }
@@ -140,6 +150,7 @@ impl Inboxly {
                 self.theme.colors.surface,
                 self.theme.colors.divider,
             )
+            .map(Message::InboxView)
         } else {
             container(
                 text(format!(

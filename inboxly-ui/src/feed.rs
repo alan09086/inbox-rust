@@ -103,13 +103,32 @@ pub struct FeedItem {
     pub email_count: u32,
 }
 
-/// A section of the feed -- a date group header + its items.
+/// A single entry in the feed -- either an email thread or a collapsed bundle.
+#[derive(Debug, Clone)]
+pub enum FeedEntry {
+    /// An individual email thread (unbundled or expanded from a bundle).
+    Thread(FeedItem),
+    /// A collapsed bundle summary.
+    Bundle(inboxly_store::BundleSummary),
+}
+
+impl FeedEntry {
+    /// Timestamp for sorting (newest date).
+    pub fn newest_date(&self) -> DateTime<Utc> {
+        match self {
+            Self::Thread(item) => item.timestamp,
+            Self::Bundle(summary) => summary.newest_date,
+        }
+    }
+}
+
+/// A section of the feed -- a date group header + its entries.
 #[derive(Debug, Clone)]
 pub struct FeedSection {
     /// The date group this section represents.
     pub group: DateGroup,
-    /// Items in this section, ordered newest-first.
-    pub items: Vec<FeedItem>,
+    /// Entries in this section, ordered newest-first.
+    pub items: Vec<FeedEntry>,
 }
 
 /// Format a timestamp for display in an email row.
@@ -159,9 +178,15 @@ pub fn format_timestamp(date: DateTime<Utc>) -> String {
 /// Returns a store error if the database query fails.
 pub fn build_feed(store: &Store) -> Result<Vec<FeedSection>, inboxly_store::StoreError> {
     let threads = store.query_inbox_threads()?;
+    let bundles = store.query_bundle_summaries()?;
 
-    let mut pinned_items = Vec::new();
-    let mut grouped: BTreeMap<DateGroup, Vec<FeedItem>> = BTreeMap::new();
+    let mut pinned_entries = Vec::new();
+    let mut grouped: BTreeMap<DateGroup, Vec<FeedEntry>> = BTreeMap::new();
+
+    // query_inbox_threads returns all non-done threads (including bundled ones).
+    // Bundled threads appear inside bundle rows, so unbundled threads are
+    // the only individual rows. The query already filters to bundle_id IS NULL
+    // in the WHERE clause, so we don't need additional filtering here.
 
     for thread in threads {
         let item = FeedItem {
@@ -184,20 +209,37 @@ pub fn build_feed(store: &Store) -> Result<Vec<FeedSection>, inboxly_store::Stor
         };
 
         if thread.pinned {
-            pinned_items.push(item);
+            pinned_entries.push(FeedEntry::Thread(item));
         } else {
             let group = DateGroup::from_date(thread.newest_date);
-            grouped.entry(group).or_default().push(item);
+            grouped
+                .entry(group)
+                .or_default()
+                .push(FeedEntry::Thread(item));
         }
+    }
+
+    // Add bundle summaries into their date groups.
+    for bundle in bundles {
+        let group = DateGroup::from_date(bundle.newest_date);
+        grouped
+            .entry(group)
+            .or_default()
+            .push(FeedEntry::Bundle(bundle));
+    }
+
+    // Sort entries within each group by newest_date descending.
+    for entries in grouped.values_mut() {
+        entries.sort_by_key(|e| std::cmp::Reverse(e.newest_date()));
     }
 
     let mut sections = Vec::new();
 
     // Pinned section first (if any).
-    if !pinned_items.is_empty() {
+    if !pinned_entries.is_empty() {
         sections.push(FeedSection {
             group: DateGroup::Pinned,
-            items: pinned_items,
+            items: pinned_entries,
         });
     }
 

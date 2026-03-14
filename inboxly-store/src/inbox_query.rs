@@ -95,6 +95,7 @@ impl Store {
                 ORDER BY e.date DESC LIMIT 1
             )
             WHERE COALESCE(ts.done, 0) = 0
+              AND (ts.bundle_id IS NULL)
             ORDER BY t.newest_date DESC",
         )?;
 
@@ -107,7 +108,10 @@ impl Store {
 }
 
 /// Map a query row to an `InboxThreadSummary`.
-fn map_inbox_thread(row: &Row<'_>) -> rusqlite::Result<InboxThreadSummary> {
+///
+/// The row must have columns in the order produced by `query_inbox_threads`
+/// and `query_bundle_threads`.
+pub(crate) fn map_inbox_thread(row: &Row<'_>) -> rusqlite::Result<InboxThreadSummary> {
     let newest_date_epoch: i64 = row.get(3)?;
     let newest_date = Utc
         .timestamp_opt(newest_date_epoch, 0)
