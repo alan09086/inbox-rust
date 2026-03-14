@@ -6,6 +6,7 @@ pub mod bundle_row;
 pub mod email_row;
 pub mod empty_state;
 pub mod hover_actions;
+pub mod inbox_zero;
 pub mod reminder_row;
 pub mod section_header;
 pub mod snooze_picker;

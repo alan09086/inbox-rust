@@ -5,6 +5,7 @@
 
 pub mod app;
 pub mod feed;
+pub mod keyboard;
 pub mod nav;
 pub mod theme;
 pub mod toolbar;
