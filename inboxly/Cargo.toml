@@ -9,4 +9,8 @@ name = "inboxly"
 path = "src/main.rs"
 
 [dependencies]
+inboxly-bundler.workspace = true
+inboxly-core.workspace = true
+inboxly-store.workspace = true
 inboxly-ui.workspace = true
+tokio.workspace = true
