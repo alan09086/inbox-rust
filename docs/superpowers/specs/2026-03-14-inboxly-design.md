@@ -45,13 +45,48 @@ inboxly/
 └── inboxly/                    ← thin binary, wires crates together
 ```
 
-### Dependency Flow (strictly one-directional)
+### Dependency Flow (A → B means "A depends on B")
 
 ```
-core ← imap ← store ← bundler ← snooze ← extract
-                                    ↑
-                              ui ← binary
+                    ┌──────┐
+                    │ core │
+                    └──┬───┘
+          ┌───────────┼───────────┐
+          ▼           ▼           ▼
+      ┌──────┐   ┌───────┐   ┌─────────┐
+      │ imap │   │ store │   │ extract │
+      └──┬───┘   └───┬───┘   └────┬────┘
+         │           │            │
+         ▼           ▼            ▼
+      ┌─────────────────────────────┐
+      │          bundler            │
+      │  (depends on: core, store)  │
+      └─────────────┬───────────────┘
+                    ▼
+              ┌──────────┐
+              │  snooze  │
+              │ (core,   │
+              │  store)  │
+              └────┬─────┘
+                   ▼
+              ┌─────────┐
+              │   ui    │
+              │ (all)   │
+              └────┬────┘
+                   ▼
+              ┌─────────┐
+              │ binary  │
+              └─────────┘
 ```
+
+- `inboxly-core`: no internal dependencies (foundation types)
+- `inboxly-imap`: depends on `core` (uses Email/Account types, writes raw data)
+- `inboxly-store`: depends on `core` (persists core types to Maildir/SQLite/tantivy)
+- `inboxly-extract`: depends on `core` (reads Email, produces Highlights)
+- `inboxly-bundler`: depends on `core`, `store` (reads emails from store, writes bundle assignments)
+- `inboxly-snooze`: depends on `core`, `store` (reads/writes snooze state)
+- `inboxly-ui`: depends on all crates (renders everything)
+- `inboxly` (binary): depends on `ui` (bootstrap only)
 
 ### Crate Responsibilities
 
@@ -70,7 +105,7 @@ core ← imap ← store ← bundler ← snooze ← extract
 
 Three-layer storage with clear responsibilities:
 
-- **Maildir** — Canonical email store. Raw `.eml` files on disk. Survives database loss. Industry-standard format compatible with other tools.
+- **Maildir++** — Canonical email store. Raw `.eml` files on disk. Survives database loss. Uses Maildir++ layout with `new/`, `cur/`, `tmp/` subdirectories per folder (e.g., `.Sent/`, `.Drafts/`, `.Trash/`). IMAP flags map to Maildir filename suffixes: `:2,S` (seen), `:2,F` (flagged/starred), `:2,R` (replied), `:2,D` (draft). Compatible with other Maildir-aware tools (mutt, notmuch, offlineimap).
 - **SQLite** — Metadata, state, bundle rules/assignments, reminders, settings, sync state. All structured data that doesn't belong in Maildir.
 - **Tantivy** — Full-text search index. Rebuildable from Maildir + SQLite at any time.
 
@@ -82,11 +117,13 @@ Three-layer storage with clear responsibilities:
 // === Identity ===
 AccountId(Uuid)
 EmailId(String)          // Message-ID header
-ThreadId(Uuid)           // locally generated, groups by In-Reply-To/References
+ThreadId(Uuid)           // locally generated, groups by References/In-Reply-To (see Threading below)
 BundleId(Uuid)
 
 // === Email ===
-Email {
+// EmailMeta is what lives in SQLite and memory (lightweight).
+// Body content is loaded lazily from Maildir on demand.
+EmailMeta {
     id: EmailId,
     account_id: AccountId,
     thread_id: ThreadId,
@@ -95,14 +132,21 @@ Email {
     cc: Vec<Contact>,
     subject: String,
     snippet: String,         // first ~200 chars, plaintext
-    body_text: Option<String>,
-    body_html: Option<String>,
     date: DateTime<Utc>,
     maildir_path: PathBuf,   // canonical location on disk
-    headers: HashMap<String, String>,
-    attachments: Vec<Attachment>,
+    attachments: Vec<AttachmentMeta>,  // name, mime, size (not content)
     flags: EmailFlags,       // read, starred, answered, draft
     size_bytes: u64,
+    imap_uid: u32,           // for sync tracking
+}
+
+// Full email content — loaded on demand when user opens a message.
+EmailContent {
+    id: EmailId,
+    body_text: Option<String>,
+    body_html: Option<String>,
+    headers: HashMap<String, String>,
+    attachments: Vec<Attachment>,  // includes content bytes
 }
 
 // === Thread (conversation) ===
@@ -180,27 +224,66 @@ Highlight enum {
 }
 ```
 
-### SQLite Schema (key tables)
+### Threading Algorithm
 
-- `accounts` — id, email, provider, auth_method, imap_host, smtp_host
-- `sync_state` — account_id, uid_validity, uid_next, last_sync
-- `threads` — id, account_id, subject, newest_date, oldest_date, unread_count
-- `thread_state` — thread_id, pinned, done, snoozed_until, snoozed_location, bundle_id
-- `bundles` — id, category, name, color, visibility, throttle
-- `bundle_rules` — id, bundle_id, field, operator, value, priority
-- `sender_affinity` — sender_domain, sender_address, bundle_category, confidence, learned_at
-- `reminders` — id, title, due_at, location_lat, location_lng, location_label, recurring, done
-- `highlights` — thread_id, highlight_type, data_json
-- `settings` — key, value (theme, snooze presets, etc.)
-- `offline_queue` — id, action, payload_json, created_at (queued actions for replay)
+Simplified References-based threading (inspired by JWZ but without the full container/subject-merge complexity):
+
+1. On ingest, extract `Message-ID`, `In-Reply-To`, and `References` headers.
+2. If `References` is present, the thread ID is determined by the **first** Message-ID in the References list (the original message that started the thread).
+3. If only `In-Reply-To` is present, look up the referenced message and join its thread.
+4. If neither header exists, the email starts a new thread with a fresh `ThreadId`.
+5. **No subject-based grouping** — this avoids false positives (e.g., multiple "Re: Hello" threads). Users can manually merge threads later if needed.
+6. When a reply arrives before its parent, a placeholder thread is created. When the parent arrives, the placeholder is resolved and the thread is unified.
+
+### SQLite Schema
+
+**`emails`** — per-email metadata (most-queried table):
+- id (TEXT PK), account_id, thread_id, from_name, from_address, to_json, cc_json
+- subject, snippet, date (INTEGER, unix epoch), maildir_path
+- flags (INTEGER, bitmask: read/starred/answered/draft/deleted)
+- size_bytes, imap_uid, has_attachments (BOOLEAN)
+- message_id_header, in_reply_to, references_json
+
+**`threads`** — aggregated thread metadata:
+- id (TEXT PK), account_id, subject, newest_date, oldest_date
+- email_count, unread_count, has_attachments, snippet
+
+**`accounts`** — id, email, display_name, provider, auth_method, imap_host, imap_port, smtp_host, smtp_port
+
+**`sync_state`** — account_id, folder_name, uid_validity, uid_next, highest_modseq, last_sync
+
+**`thread_state`** — thread_id, pinned, done, snoozed_until, snoozed_location_json, bundle_id
+
+**`contacts`** — address (TEXT PK), display_name, avatar_letter, avatar_color_index, last_seen
+- Populated from From headers on ingest, avoids re-parsing
+
+**`bundles`** — id, category, name, color, badge_color, visibility, throttle, sort_order
+
+**`bundle_rules`** — id, bundle_id, field, operator, value, priority
+
+**`sender_affinity`** — sender_domain, sender_address, bundle_category, confidence, learned_at
+
+**`reminders`** — id, title, due_at, location_lat, location_lng, location_label, recurring, done
+
+**`highlights`** — thread_id, highlight_type, data_json
+
+**`settings`** — key (TEXT PK), value (TEXT)
+
+**`offline_queue`** — id, action, payload_json, created_at
 
 ## IMAP Sync Engine
 
 ### Three Sync Modes
 
-1. **Initial sync** — First run per account. Downloads all mail in batches (newest-first so inbox is usable quickly). Writes each email to Maildir, indexes in SQLite + tantivy, runs through bundler. Progress reported to UI via channel.
+1. **Initial sync** — First run per account. Two-phase approach:
+   - **Phase 1 (fast)**: Fetch headers + envelope data for all messages via `FETCH (ENVELOPE FLAGS RFC822.SIZE)`, newest-first, in batches of 500. This populates `emails` table, builds threads, runs bundler. The inbox is usable once phase 1 completes for the most recent batch.
+   - **Phase 2 (background)**: Download full message bodies (RFC822) to Maildir, also in batches of 500, newest-first. Bodies are written to Maildir and tantivy index is updated. Highlights extraction runs during this phase.
+   - Progress reported to UI via channel (e.g., "Syncing headers: 12,000 / 45,000", "Downloading bodies: 3,500 / 45,000").
+   - For very large mailboxes (100k+), phase 2 may take hours. The app is functional after phase 1 completes; opening an email whose body hasn't been fetched yet triggers an on-demand fetch.
 
-2. **Incremental sync** — Subsequent launches. Uses IMAP `UIDVALIDITY` + `UIDNEXT` to fetch only new messages. Detects flag changes (read/unread/starred) and deletions via `CONDSTORE` where supported, falling back to full UID comparison.
+2. **Incremental sync** — Subsequent launches. Uses IMAP `UIDVALIDITY` + `UIDNEXT` to fetch only new messages since last sync. Flag change detection:
+   - If server supports `CONDSTORE`: use `FETCH (FLAGS) (CHANGEDSINCE <highestmodseq>)` to get only changed flags. Efficient even for 100k+ mailboxes.
+   - If no `CONDSTORE`: fetch flags for the last 30 days of UIDs only (`UID FETCH <recent_uid>:* (FLAGS)`), not the entire mailbox. Older flag changes are accepted as missed — an acceptable trade-off vs. scanning the full mailbox on every sync.
 
 3. **Push sync** — Maintains IMAP `IDLE` connection for real-time new mail notification. When IDLE breaks (server drops after ~29 min), reconnects and does quick incremental catch-up.
 
@@ -233,7 +316,7 @@ Three-layer categorisation with clear precedence:
 
 ### Layer 1 — Header Heuristics (instant, zero config)
 
-Ships with ~50-100 default patterns covering common senders and headers:
+v1 ships with the patterns listed below. The rule set is iterative — additional patterns are added over time based on user feedback and common sender discovery. The architecture supports loading rules from a TOML config file for easy expansion without code changes.
 
 | Signal | Category |
 |--------|----------|
@@ -310,9 +393,15 @@ Throttled emails are synced and stored but don't surface in the inbox feed until
 ### Location-Based Snooze
 
 - Stores lat/lng/radius/label in SQLite
-- Background task polls system location via D-Bus `GeoClue2` interface
+- Background task polls system location via D-Bus `GeoClue2` interface every 5 minutes (only when location-snoozed items exist, otherwise idle)
 - When device enters geofence radius → un-snooze and notify
 - Primarily useful for laptop users who move between locations; much more powerful on mobile
+
+**Graceful degradation:**
+- If GeoClue2 is unavailable (not installed or D-Bus fails): location snooze option is hidden from the snooze picker UI. Time-based snooze remains fully functional.
+- If GeoClue2 is available but location permission is denied: show a one-time prompt explaining why location access is needed. If denied, hide the option.
+- If location accuracy is poor (>500m): widen geofence radius automatically and log a warning.
+- Existing location-snoozed items when GeoClue2 becomes unavailable: remain snoozed, shown in Snoozed view with a "(location unavailable)" badge. User can manually un-snooze or convert to time-based.
 
 ### Reminders
 
@@ -329,9 +418,25 @@ Throttled emails are synced and stored but don't surface in the inbox feed until
 
 - Index built during initial sync, updated incrementally with new mail
 - Indexed fields: `from`, `to`, `subject`, `body_text` (full-text), `date` (datetime), `account_id` (facet), `bundle_category` (facet), `has_attachment` (bool)
-- Query syntax: `from:sarah subject:lunch`, `after:2026-01-01 has:attachment`, `in:purchases amazon`
 - Results ranked by BM25 relevance with recency boost
 - Search UI: toolbar search bar expands into full results view with snippet highlighting
+
+**Query syntax** — application-layer parser translates user queries to tantivy queries:
+
+| User Syntax | Tantivy Mapping |
+|------------|-----------------|
+| `from:sarah` | Term query on `from` field |
+| `to:bob@example.com` | Term query on `to` field |
+| `subject:lunch` | Term query on `subject` field |
+| `has:attachment` | Bool query on `has_attachment` field |
+| `in:purchases` | Facet query on `bundle_category` field |
+| `after:2026-01-01` | Range query on `date` field (>= epoch) |
+| `before:2026-03-01` | Range query on `date` field (<= epoch) |
+| `is:pinned` | Joined with SQLite `thread_state.pinned` (not in tantivy) |
+| `is:unread` | Joined with SQLite `emails.flags` (not in tantivy) |
+| bare words | Full-text query across `subject` + `body_text` |
+
+Queries mixing tantivy fields and SQLite-only fields (like `is:pinned`) are executed as tantivy search first, then filtered via SQLite join. This keeps the common case (text search) fast while supporting stateful filters.
 
 ### Highlights / Smart Extraction
 
@@ -395,10 +500,10 @@ Iced (wgpu-rendered, elm architecture). Custom widgets for Inbox-specific intera
 | `BundleRow` | Collapsed bundle with category icon/colour, name, unread badge, sender preview. Click expands in-place. |
 | `ReminderRow` | Reminder item with blue left border and bell icon. |
 | `SectionHeader` | Date group header (Pinned/Today/This Month/Earlier) with sweep button. |
-| `SwipeContainer` | Wraps any row. Right swipe = green + checkmark (Done). Left swipe = orange + clock (Snooze). Two thresholds: arm at 25%, commit at 50%. |
+| `SwipeContainer` | Wraps any row. Supports two input modes: **Mouse** (click-and-drag horizontally on the row) and **touchpad** (horizontal two-finger swipe). Right drag = green + checkmark (Done). Left drag = orange + clock (Snooze). Two thresholds: arm at 25% of row width, commit at 50%. On hover (without drag), action buttons (Done/Snooze/Pin) appear on the right side of the row as icon buttons — this is the primary desktop interaction path, with swipe as an accelerator. |
 | `SpeedDialFab` | Main FAB (red, 56dp) expands to Compose + Reminder with scrim overlay. |
 | `SnoozePicker` | 2-column grid dialog (288dp): time presets + custom time + pick location. |
-| `ComposeView` | Full email composition: To/Cc/Bcc fields, subject, rich text body, attachments, draft auto-save. |
+| `ComposeView` | Full email composition: To/Cc/Bcc fields, subject, plaintext body with Markdown preview toggle (v1 — full WYSIWYG is deferred as Iced lacks a built-in rich text editor). Attachments via file picker. Draft auto-save to Maildir every 30 seconds. Outbound HTML generated from Markdown on send. |
 | `ConversationView` | Thread view with stacked messages, expand/collapse per message, reply inline. |
 | `SearchBar` | Toolbar search with query syntax, expands to results view. |
 | `InboxZeroSun` | Celebratory sun illustration when inbox is clear. |
@@ -495,6 +600,8 @@ V=#b39ddb  W=#c2c2c2  X=#80deea  Y=#bcaaa4  Z=#aed581  default=#efefef
 
 ### Dimensions (from BigTop APK)
 
+All dimensions use logical pixels (1dp = 1 logical pixel at 1x DPI scaling). On HiDPI displays, Iced's built-in scaling applies automatically. Typography uses `sp` from the APK which maps 1:1 to logical pixels on desktop (sp's accessibility scaling is an Android concept; on desktop, system font scaling is handled by the window manager).
+
 | Token | Value |
 |-------|-------|
 | Toolbar height | 56dp |
@@ -540,7 +647,7 @@ V=#b39ddb  W=#c2c2c2  X=#80deea  Y=#bcaaa4  Z=#aed581  default=#efefef
 4. **Snooze (Time-based)** — Later Today, Tomorrow, This Weekend, Next Week, Someday, Custom. Snoozed view in sidebar.
 5. **Snooze (Location-based)** — Geofence triggers via GeoClue2 D-Bus.
 6. **Reminders** — Non-email tasks in the feed. Speed dial FAB creation. Time/date triggers.
-7. **Compose + Reply** — Full email authoring: reply, reply-all, forward, rich text, attachments, draft auto-save.
+7. **Compose + Reply** — Full email authoring: reply, reply-all, forward, Markdown body with preview (HTML on send), attachments, draft auto-save.
 8. **Full-text Search** — Tantivy-powered with query syntax and snippet highlighting.
 9. **Highlights / Smart Extraction** — Tracking numbers, flights, hotels, events, payments shown inline.
 10. **Multi-account** — Multiple IMAP accounts. Per-account sync. Account switcher in nav drawer.
