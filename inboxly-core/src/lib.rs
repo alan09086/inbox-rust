@@ -11,6 +11,7 @@ pub mod highlight;
 pub mod inbox;
 pub mod error;
 pub mod traits;
+pub mod config;
 
 // Re-exports for convenience
 pub use id::{AccountId, BundleId, EmailId, ThreadId};
