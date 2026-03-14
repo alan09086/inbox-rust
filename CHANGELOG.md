@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.17.0] - 2026-03-14
+
+### Added
+
+- **Inbox feed**: Scrollable feed in the main content area with date-grouped section headers (Pinned/Today/Yesterday/This Week/This Month/Earlier)
+- **Email row widget**: Avatar circle (40dp, BigTop A-Z palette), sender name (bold if unread, 16sp), subject + snippet (14sp), timestamp (12sp), attachment indicator
+- **Date grouping**: `DateGroup` enum with `from_date()` classification relative to local time
+- **Relative timestamps**: `format_timestamp()` -- time for today, "Yesterday", weekday name, "Mar 12", "Mar 12, 2025"
+- **Feed data model**: `FeedItem` and `FeedSection` view-model types, `build_feed()` query + grouping function
+- **Store inbox query**: `query_inbox_threads()` on `Store` joining threads, thread_state, emails, and contacts with `InboxThreadSummary` return type
+- **Avatar widget**: Container-based 40dp circle with letter and palette colour from theme module
+- **Section header widget**: 48dp tall, 14sp bold grey text, left-aligned
+- **Empty inbox placeholder**: Centered "You're all done!" message (full Inbox Zero sun deferred to M25)
+- **Inbox view**: Scrollable column composing section headers + email rows, theme-aware colours
+- **App integration**: `with_store()` constructor, `ReloadFeed` message, feed sections in app state, inbox view replaces M15 content placeholder
+- 19 new tests (674 total): store query (5), date grouping (6), timestamp formatting (4), feed building (1), app integration (3)
+
 ## [0.16.0] - 2026-03-14
 
 ### Added

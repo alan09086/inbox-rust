@@ -46,15 +46,15 @@ Requires Rust edition 2024 (rustc 1.85+).
 
 ## Status
 
-**M16 complete** -- Theme System:
-- Light and dark themes with full BigTop colour tokens
-- System theme detection via freedesktop D-Bus portal
-- InboxlyTheme with Iced Theme::Custom integration
-- Bundle category colours (8 categories), avatar A-Z palette (27 colours)
-- Comprehensive dimensions (16) and typography (20) constants
-- Theme toggle, persistence via SettingsReader/Writer traits
-- Async system detection on startup, falls back to light
-- 655 tests passing, 0 clippy warnings
+**M17 complete** -- Inbox Feed + Email Rows (first data on screen):
+- Scrollable inbox feed with date-grouped section headers
+- Email rows: avatar circle, sender name (bold if unread), subject/snippet, timestamp, attachment indicator
+- Date grouping: Pinned / Today / Yesterday / This Week / This Month / Earlier
+- Relative timestamp formatting (time for today, "Yesterday", weekday, "Mar 12", "Mar 12, 2025")
+- Empty inbox state ("You're all done!") placeholder
+- Store query joining threads + thread_state + emails + contacts
+- Theme-aware rendering with InboxlyTheme colour tokens
+- 674 tests passing, 0 clippy warnings
 
 ## Licence
 
