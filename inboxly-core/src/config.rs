@@ -517,4 +517,129 @@ mod tests {
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), ConfigError::Parse(_)));
     }
+
+    // === Task 17: Config validation (12 tests) ===
+
+    fn valid_account() -> AccountConfig {
+        AccountConfig {
+            email: "test@example.com".to_string(),
+            display_name: "Test".to_string(),
+            provider: "generic".to_string(),
+            auth_method: AuthMethod::Password,
+            imap_host: "imap.example.com".to_string(),
+            imap_port: 993,
+            smtp_host: "smtp.example.com".to_string(),
+            smtp_port: 587,
+        }
+    }
+
+    #[test]
+    fn validate_valid_config() {
+        let config = AppConfig {
+            accounts: vec![valid_account()],
+            ..Default::default()
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_empty_config_is_valid() {
+        let config = AppConfig::default();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_missing_email() {
+        let mut account = valid_account();
+        account.email = String::new();
+        let config = AppConfig { accounts: vec![account], ..Default::default() };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("email address is required"));
+    }
+
+    #[test]
+    fn validate_invalid_email() {
+        let mut account = valid_account();
+        account.email = "not-an-email".to_string();
+        let config = AppConfig { accounts: vec![account], ..Default::default() };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("missing '@'"));
+    }
+
+    #[test]
+    fn validate_missing_imap_host() {
+        let mut account = valid_account();
+        account.imap_host = String::new();
+        let config = AppConfig { accounts: vec![account], ..Default::default() };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("IMAP host is required"));
+    }
+
+    #[test]
+    fn validate_missing_smtp_host() {
+        let mut account = valid_account();
+        account.smtp_host = String::new();
+        let config = AppConfig { accounts: vec![account], ..Default::default() };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("SMTP host is required"));
+    }
+
+    #[test]
+    fn validate_zero_imap_port() {
+        let mut account = valid_account();
+        account.imap_port = 0;
+        let config = AppConfig { accounts: vec![account], ..Default::default() };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("IMAP port"));
+    }
+
+    #[test]
+    fn validate_zero_smtp_port() {
+        let mut account = valid_account();
+        account.smtp_port = 0;
+        let config = AppConfig { accounts: vec![account], ..Default::default() };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("SMTP port"));
+    }
+
+    #[test]
+    fn validate_snooze_morning_hour_out_of_range() {
+        let config = AppConfig { snooze: SnoozePresets { morning_hour: 25, ..Default::default() }, ..Default::default() };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("morning_hour"));
+    }
+
+    #[test]
+    fn validate_snooze_afternoon_hour_out_of_range() {
+        let config = AppConfig { snooze: SnoozePresets { afternoon_hour: 24, ..Default::default() }, ..Default::default() };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("afternoon_hour"));
+    }
+
+    #[test]
+    fn validate_snooze_evening_hour_out_of_range() {
+        let config = AppConfig { snooze: SnoozePresets { evening_hour: 30, ..Default::default() }, ..Default::default() };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("evening_hour"));
+    }
+
+    #[test]
+    fn validate_snooze_weekend_day_out_of_range() {
+        let config = AppConfig { snooze: SnoozePresets { weekend_day: 7, ..Default::default() }, ..Default::default() };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("weekend_day"));
+    }
+
+    #[test]
+    fn validate_multiple_accounts_second_invalid() {
+        let config = AppConfig {
+            accounts: vec![
+                valid_account(),
+                AccountConfig { email: "bad".to_string(), ..valid_account() },
+            ],
+            ..Default::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("accounts[1]"));
+    }
 }
