@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - 2026-03-14
+
+### Added
+
+- **Tantivy search index**: Full-text search engine in `inboxly-store`
+- **Search schema**: 9 indexed fields (email_id, from, to, subject, body_text, date, account_id, bundle_category, has_attachment)
+- **Document conversion**: EmailMeta + body text to tantivy Document with facet encoding
+- **SearchIndex**: create/open/open_or_create lifecycle, in-memory for tests
+- **Indexing**: add_email, batch_index, remove_email, update_email with atomic commit
+- **Query builders**: term, phrase, multi-field, facet filter, date range, has:attachment
+- **BM25 + recency boost**: Exponential decay scoring (60-day half-life, 2x max boost)
+- **SearchHit**: Structured results with score, email_id, subject, from, date
+- **Rebuild**: Abstract RebuildSource trait for full index reconstruction
+- **Clear/destroy**: Delete all documents or entire index directory
+- 26 new search integration tests
+
 ## [0.4.0] - 2026-03-14
 
 ### Added

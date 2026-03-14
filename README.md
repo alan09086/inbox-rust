@@ -46,13 +46,13 @@ Requires Rust edition 2024 (rustc 1.85+).
 
 ## Status
 
-**M4 complete** — Maildir filesystem operations:
-- Maildir++ folder structure with standard IMAP folder mapping
-- Atomic email storage (tmp → new → cur), flag encoding/decoding
-- .eml parsing to EmailMeta (lightweight) and EmailContent (lazy-loaded)
-- Message listing, deletion, move, copy operations
-- Disaster recovery: rebuild SQLite from Maildir scan
-- 126 tests passing
+**M5 complete** — Full-text search with Tantivy:
+- Indexed fields: from, to, subject, body, date, account_id, bundle_category, has_attachment
+- Multi-field search, faceted filtering, date range queries
+- BM25 ranking with recency boost (exponential decay, 60-day half-life)
+- Batch indexing, incremental updates, full rebuild from SQLite
+- SearchHit results with score, snippet, and metadata
+- 152 tests passing
 
 ## Licence
 
