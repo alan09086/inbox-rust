@@ -46,15 +46,13 @@ Requires Rust edition 2024 (rustc 1.85+).
 
 ## Status
 
-**M1 complete** — workspace scaffolded, all core types defined in `inboxly-core`:
-- Identity types (AccountId, EmailId, ThreadId, BundleId)
-- Email types (EmailMeta, EmailContent, Contact, AttachmentMeta, EmailFlags)
-- Thread and Bundle types with full Inbox-style categorisation
-- Highlight extraction types (flights, hotels, tracking, events, payments)
-- Inbox feed types (InboxItem, ThreadState, SnoozeInfo)
-- Error types with thiserror
-- Async trait interfaces (Store, Bundler, Extractor)
-- 50 tests passing
+**M2 complete** — TOML-based config system with XDG path resolution:
+- Config file at `~/.config/inboxly/config.toml`
+- Multi-account support (Gmail OAuth2, Fastmail app passwords, generic IMAP)
+- Configurable snooze presets, theme preference, data/cache dir overrides
+- XDG path resolver with `Paths` struct (config, data, cache directories)
+- Load/save with first-run defaults, validation with clear error messages
+- 88 tests passing
 
 ## Licence
 

@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0] - 2026-03-14
+
+### Added
+
+- **Config system**: TOML-based configuration at `~/.config/inboxly/config.toml`
+- **AuthMethod**: Password, OAuth2, AppPassword authentication variants
+- **AccountConfig**: Multi-account email settings with serde defaults (IMAP 993, SMTP 587)
+- **SnoozePresets**: Configurable morning/afternoon/evening hours and weekend day
+- **ThemePreference**: System/Light/Dark theme selection
+- **AppConfig**: Top-level config with accounts, theme, directory overrides, snooze presets
+- **Paths**: XDG path resolver for config/data/cache directories with config overrides
+- **ConfigError**: Typed errors for I/O, parse, serialize, validation, and missing home dir
+- **load/save**: First-run defaults on missing file, pretty TOML serialization
+- **validate**: Account field validation, port range, snooze hour bounds
+- 38 new config tests (serialization, defaults, validation, file I/O, XDG paths, realistic TOML)
+
 ## [0.1.0] - 2026-03-14
 
 ### Added
