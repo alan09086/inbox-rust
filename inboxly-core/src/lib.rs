@@ -13,3 +13,7 @@ pub use flags::EmailFlags;
 pub mod email;
 
 pub use email::{EmailContent, EmailMeta};
+
+pub mod thread;
+
+pub use thread::Thread;
