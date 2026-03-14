@@ -12,6 +12,7 @@ inboxly-bundler.workspace = true
 inboxly-snooze.workspace = true
 inboxly-extract.workspace = true
 iced.workspace = true
+chrono.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing = "0.1"
