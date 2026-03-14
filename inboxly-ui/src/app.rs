@@ -3,8 +3,10 @@
 use iced::widget::{column, container, row, text};
 use iced::{Element, Length, Task, Theme};
 
+use inboxly_core::config::ThemePreference;
+
 use crate::nav::{NavBundleCategory, NavTarget, default_bundle_categories};
-use crate::theme::ActiveView;
+use crate::theme::{ActiveView, InboxlyTheme};
 
 /// Top-level application state.
 pub struct Inboxly {
@@ -20,6 +22,8 @@ pub struct Inboxly {
     pub account_email: String,
     /// Number of accounts (for the account switcher display).
     pub account_count: u32,
+    /// Active theme (light or dark, with full BigTop tokens).
+    pub theme: InboxlyTheme,
 }
 
 /// All messages the application can receive.
@@ -31,6 +35,10 @@ pub enum Message {
     ToggleDrawer,
     /// Search bar text changed (placeholder for now).
     SearchChanged(String),
+    /// User toggled the theme (light <-> dark).
+    ThemeToggled,
+    /// Async system theme detection completed.
+    ThemeChanged(InboxlyTheme),
 }
 
 impl Default for Inboxly {
@@ -42,14 +50,22 @@ impl Default for Inboxly {
             bundle_categories: default_bundle_categories(),
             account_email: "user@example.com".into(),
             account_count: 1,
+            theme: InboxlyTheme::light(),
         }
     }
 }
 
 impl Inboxly {
-    /// Create the app with initial state. Returns (Self, Task).
+    /// Create the app with initial state. Returns (Self, startup Task).
+    ///
+    /// Fires an async system theme detection command when the preference
+    /// is `ThemePreference::System` (the default). The initial render uses
+    /// light theme until D-Bus responds.
     pub fn new() -> (Self, Task<Message>) {
-        (Self::default(), Task::none())
+        let app = Self::default();
+        // Default ThemePreference is System, so fire async detection.
+        let task = Self::startup_theme_task(ThemePreference::System);
+        (app, task)
     }
 
     /// Iced update function -- handle messages and mutate state.
@@ -66,6 +82,12 @@ impl Inboxly {
             }
             Message::SearchChanged(_query) => {
                 // Placeholder -- search is M24.
+            }
+            Message::ThemeToggled => {
+                self.theme = self.theme.toggle();
+            }
+            Message::ThemeChanged(new_theme) => {
+                self.theme = new_theme;
             }
         }
         Task::none()
@@ -115,9 +137,19 @@ impl Inboxly {
         format!("Inboxly -- {}", self.active_view.title())
     }
 
-    /// Iced theme.
+    /// Iced theme -- returns the current theme for widget styling.
     pub fn theme(&self) -> Theme {
-        Theme::Light
+        self.theme.iced_theme().clone()
+    }
+
+    /// Build the startup task for async system theme detection.
+    fn startup_theme_task(pref: ThemePreference) -> Task<Message> {
+        match pref {
+            ThemePreference::System => {
+                Task::perform(InboxlyTheme::from_system(), Message::ThemeChanged)
+            }
+            _ => Task::none(),
+        }
     }
 }
 
@@ -221,5 +253,36 @@ mod tests {
         assert_eq!(cats.len(), 8);
         assert_eq!(cats[0].name, "Social");
         assert_eq!(cats[7].name, "Low Priority");
+    }
+
+    // -- M16 theme integration tests --
+
+    #[test]
+    fn default_theme_is_light() {
+        let app = Inboxly::default();
+        assert!(!app.theme.colors.is_dark);
+    }
+
+    #[test]
+    fn theme_toggle_changes_to_dark() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::ThemeToggled);
+        assert!(app.theme.colors.is_dark);
+    }
+
+    #[test]
+    fn theme_toggle_back_to_light() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::ThemeToggled);
+        let _ = app.update(Message::ThemeToggled);
+        assert!(!app.theme.colors.is_dark);
+    }
+
+    #[test]
+    fn theme_changed_message_updates_theme() {
+        let mut app = Inboxly::default();
+        let dark = InboxlyTheme::dark();
+        let _ = app.update(Message::ThemeChanged(dark));
+        assert!(app.theme.colors.is_dark);
     }
 }
