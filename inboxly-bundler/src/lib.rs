@@ -33,8 +33,10 @@
 
 pub mod affinity;
 pub mod custom_bundle;
+pub mod engine;
 pub mod evaluator;
 pub mod heuristics;
+pub mod recategorise;
 pub mod rule_store;
 pub mod rules_toml;
 pub mod system_bundles;
