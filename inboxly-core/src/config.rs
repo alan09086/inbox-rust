@@ -4,22 +4,17 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 /// Authentication method for an email account.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthMethod {
     /// Plain username + password (IMAP LOGIN / STARTTLS).
+    #[default]
     Password,
     /// OAuth2 with XOAUTH2 SASL (Gmail, Microsoft, etc.).
     #[serde(rename = "oauth2")]
     OAuth2,
     /// App-specific password (Fastmail, etc.).
     AppPassword,
-}
-
-impl Default for AuthMethod {
-    fn default() -> Self {
-        Self::Password
-    }
 }
 
 /// Configuration for a single email account.
@@ -109,7 +104,7 @@ pub enum ThemePreference {
 /// Top-level application configuration.
 ///
 /// Serialized to/from `~/.config/inboxly/config.toml`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct AppConfig {
     /// List of configured email accounts.
     #[serde(default)]
@@ -126,18 +121,6 @@ pub struct AppConfig {
     /// Snooze time presets.
     #[serde(default)]
     pub snooze: SnoozePresets,
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            accounts: Vec::new(),
-            theme: ThemePreference::default(),
-            data_dir: None,
-            cache_dir: None,
-            snooze: SnoozePresets::default(),
-        }
-    }
 }
 
 /// Resolved filesystem paths for the application.
