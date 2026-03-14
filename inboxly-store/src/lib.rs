@@ -10,6 +10,7 @@ mod store;
 pub mod maildir_store;
 
 mod accounts;
+mod bundle_query;
 mod bundle_rules;
 mod bundles;
 mod contacts;
@@ -38,6 +39,7 @@ pub use maildir_store::{
 pub mod search;
 
 pub use accounts::AccountRow;
+pub use bundle_query::{BundleSummary, SenderPreview};
 pub use bundle_rules::BundleRuleRow;
 pub use bundles::BundleRow;
 pub use contacts::ContactRow;

@@ -82,6 +82,24 @@ pub fn for_category(category: &inboxly_core::BundleCategory) -> &'static BundleC
     }
 }
 
+/// Look up bundle category colours by category key string.
+///
+/// Maps lowercase string keys (as stored in the `bundles` table) to colours.
+/// Returns `LOW_PRIORITY` for unknown categories.
+pub fn for_category_str(category: &str) -> &'static BundleCategoryColor {
+    match category {
+        "social" => &SOCIAL,
+        "promos" => &PROMOS,
+        "updates" => &UPDATES,
+        "finance" => &FINANCE,
+        "purchases" => &PURCHASES,
+        "travel" => &TRAVEL,
+        "forums" => &FORUMS,
+        "low_priority" => &LOW_PRIORITY,
+        _ => &LOW_PRIORITY,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
