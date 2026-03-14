@@ -104,3 +104,37 @@ pub enum ThemePreference {
     /// Always use dark theme.
     Dark,
 }
+
+/// Top-level application configuration.
+///
+/// Serialized to/from `~/.config/inboxly/config.toml`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppConfig {
+    /// List of configured email accounts.
+    #[serde(default)]
+    pub accounts: Vec<AccountConfig>,
+    /// Theme preference (light, dark, or system). Default: system.
+    #[serde(default)]
+    pub theme: ThemePreference,
+    /// Override for the data directory.
+    #[serde(default)]
+    pub data_dir: Option<PathBuf>,
+    /// Override for the cache directory.
+    #[serde(default)]
+    pub cache_dir: Option<PathBuf>,
+    /// Snooze time presets.
+    #[serde(default)]
+    pub snooze: SnoozePresets,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            accounts: Vec::new(),
+            theme: ThemePreference::default(),
+            data_dir: None,
+            cache_dir: None,
+            snooze: SnoozePresets::default(),
+        }
+    }
+}
