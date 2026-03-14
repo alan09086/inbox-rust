@@ -46,15 +46,15 @@ Requires Rust edition 2024 (rustc 1.85+).
 
 ## Status
 
-**M17 complete** -- Inbox Feed + Email Rows (first data on screen):
-- Scrollable inbox feed with date-grouped section headers
-- Email rows: avatar circle, sender name (bold if unread), subject/snippet, timestamp, attachment indicator
-- Date grouping: Pinned / Today / Yesterday / This Week / This Month / Earlier
-- Relative timestamp formatting (time for today, "Yesterday", weekday, "Mar 12", "Mar 12, 2025")
-- Empty inbox state ("You're all done!") placeholder
-- Store query joining threads + thread_state + emails + contacts
-- Theme-aware rendering with InboxlyTheme colour tokens
-- 674 tests passing, 0 clippy warnings
+**M18 complete** -- Bundle Rows + Expand/Collapse:
+- Bundle row widget: collapsed summary with category icon, name, unread badge, sender previews, timestamp
+- Bundle icon widget: 40dp tinted circle with Unicode category symbols
+- Mixed feed rendering: email rows + bundle rows sorted by date within sections
+- Bundle summary query: aggregates threads by bundle_id with sender preview subquery
+- Bundle thread expansion query for detailed view
+- Unbundled thread filtering (only shows threads without bundle assignment individually)
+- ToggleBundle message wired for expand/collapse interaction
+- 678 tests passing, 0 clippy warnings
 
 ## Licence
 

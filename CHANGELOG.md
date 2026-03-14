@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.18.0] - 2026-03-14
+
+### Added
+
+- **Bundle row widget**: Collapsed summary row with category icon (40dp tinted circle, Unicode symbol), category name in category colour, unread count badge (pastel pill), up to 3 sender previews (bold if unread), and newest timestamp
+- **Bundle icon widget**: `category_icon_circle()` rendering 40dp circles with category-coloured background and Unicode symbols for all 10 categories
+- **Mixed feed rendering**: `FeedEntry` enum (Thread | Bundle) dispatching to email rows or bundle rows, sorted by date within sections
+- **Bundle summary query**: `query_bundle_summaries()` aggregating active threads by bundle_id with sender preview subquery (top 3 distinct senders)
+- **Bundle thread query**: `query_bundle_threads()` for expanded bundle view, reusing inbox thread summary format
+- **Unbundled thread filtering**: `query_inbox_threads()` now filters `bundle_id IS NULL` to avoid showing bundled threads individually
+- **String-based category colour lookup**: `for_category_str()` maps lowercase category keys to BigTop colour pairs
+- **ToggleBundle interaction**: `InboxViewMessage::ToggleBundle(bundle_id)` wired through app message dispatch (expand/collapse state deferred to polish)
+- 4 new tests (678 total): bundle summary aggregation (2), thread exclusion from bundle (1), ordering (1)
+
 ## [0.17.0] - 2026-03-14
 
 ### Added
