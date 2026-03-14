@@ -41,6 +41,7 @@ pub mod heuristics;
 pub mod recategorise;
 pub mod rule_store;
 pub mod rules_toml;
+pub mod scheduler;
 pub mod system_bundles;
 pub mod user_rules;
 
@@ -58,6 +59,7 @@ pub use custom_bundle::{
 pub use engine::{BundlerEngine, CategoriseResult, CategoriseSource, HeuristicMatch};
 pub use evaluator::{AffinityResult, RuleResult, evaluate_affinity, evaluate_rules};
 pub use recategorise::{MoveAction, MoveResult, process_move};
+pub use scheduler::{ThrottleEvent, ThrottleSchedulerConfig, spawn_throttle_scheduler};
 pub use rule_store::{
     CreateRuleParams, RuleStore, RuleStoreError, UpdateRuleParams, validate_rule,
 };
