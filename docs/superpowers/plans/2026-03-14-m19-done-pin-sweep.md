@@ -12,6 +12,8 @@
 
 ---
 
+> **⚠ Plan Correction (post-M13 review):** This plan defines standalone `ThreadStateRepository<'a>` and `OfflineQueueRepository<'a>` structs. The actual codebase uses `impl Store {}` blocks — all methods are added directly to `Store`. Existing methods in `inboxly-store/src/thread_state.rs`: `insert_thread_state()`, `get_thread_state()`, `get_or_create_thread_state()`, `set_thread_pinned()`, `set_thread_done()`, `set_thread_snoozed()`, `set_thread_bundle()`, `get_pinned_threads()`, `get_snoozed_threads()`, `get_threads_by_bundle()`, `get_uncategorised_thread_ids()`, `delete_thread_state()`. Existing methods in `inboxly-store/src/offline_queue.rs`: `enqueue_offline_action()`, `get_offline_queue()`, `dequeue_offline_action()`, `clear_offline_queue()`, `count_offline_queue()`. **Implementation should extend Store with any missing methods, not create new Repository structs.**
+
 ## Task 1: Add `ThreadStateRepository` to inboxly-store
 
 **File:** `/mnt/TempNVME/projects/inbox-rust/inboxly-store/src/thread_state.rs` (new file)

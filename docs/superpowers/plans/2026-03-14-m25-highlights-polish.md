@@ -16,6 +16,8 @@
 
 ---
 
+> **⚠ Plan Correction (post-M13 review):** `SyncManager` already exists in `inboxly-imap/src/sync_manager.rs` (built in M9) with `register()`, `stop()`, `stop_all()`, and `running_accounts()` methods. Multi-account sync orchestration is already implemented. **M25's multi-account work should focus on: (a) account CRUD in Store, (b) account switcher UI, (c) per-account nav drawer sections — not rebuilding SyncManager.**
+
 ## Sub-section Index
 
 | Section | Tasks | Scope |

@@ -19,6 +19,8 @@
 
 ---
 
+> **⚠ Plan Correction (post-M13 review):** This plan assumes a standalone `Reminder` struct in `inboxly-core`. Currently, reminders only exist as inline fields in `InboxItem::Reminder { id, title, due, done }` (core) and `ReminderRow` (store, with richer fields: `location_lat/lng/label`, `recurring`). **Task 1 should create a proper `Reminder` struct in `inboxly-core` that bridges these representations**, with fields matching the `reminders` table schema: `id`, `title`, `due_at`, `location` (lat/lng/label), `recurring`, `done`. Then update `InboxItem::Reminder` to wrap the new struct: `Reminder(Reminder)`.
+
 ## Task Overview
 
 | # | Task | Crate | Est. |

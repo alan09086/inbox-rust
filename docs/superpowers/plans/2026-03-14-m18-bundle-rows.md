@@ -19,6 +19,8 @@
 
 ---
 
+> **⚠ Plan Correction (post-M13 review):** This plan references a `FeedItem` enum. The codebase already has `InboxItem` in `inboxly-core/src/inbox.rs` with variants: `Thread(Thread)`, `Bundle(Bundle)`, `Reminder { id, title, due, done }`, `TripBundle(TripBundle)`. **Use the existing `InboxItem` enum instead of creating a new `FeedItem` type.** If additional variants are needed, extend `InboxItem`.
+
 ## Task 1: Add bundle feed query to inboxly-store
 
 **File:** `/mnt/TempNVME/projects/inbox-rust/inboxly-store/src/queries.rs` (new file, or append to existing store query module)
