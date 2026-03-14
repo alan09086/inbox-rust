@@ -46,15 +46,18 @@ Requires Rust edition 2024 (rustc 1.85+).
 
 ## Status
 
-**M12 complete** — Bundler Header Heuristics:
-- Automatic email categorisation using header-based heuristics (zero-config, 25 default rules)
-- 8 system bundles with BigTop colours: Social, Promos, Updates, Finance, Purchases, Travel, Forums, Low Priority
-- TOML-defined rules with user override support (`~/.config/inboxly/heuristics.toml`)
-- Priority-ordered matching: higher priority rules evaluated first, first match wins
-- Compiled regex engine for pattern matching (domain globs, header values, subject patterns)
-- Deterministic UUID v5 system bundle IDs (stable across reinstalls)
-- Batch `categorise_all()` and single `categorise_thread()` APIs for integration with sync pipeline
-- 437 tests passing, 0 clippy warnings
+**M13 complete** — Bundler User Rules + Sender Learning:
+- Four-layer categorisation pipeline: user rules > sender learning > header heuristics > uncategorised
+- User-defined rules with Contains, Equals, Matches (regex), and Domain operators across From, To, Subject, Header, and Body fields
+- Pre-compiled regex caching for efficient repeated evaluation
+- Sender affinity learning from user moves with exponential confidence decay (90-day half-life)
+- Confidence threshold (0.6): sender learning only fires with sufficient evidence
+- Override penalty: moving to a different bundle penalises the old affinity
+- Custom bundle creation with BundleStore trait (name, colour, visibility, throttle)
+- Re-categorisation on user move: updates both thread bundle and sender affinity
+- `BundlerEngine::categorise()` unifies all four layers with clear precedence
+- RuleStore and AffinityStore traits for testable persistence abstraction
+- 496 tests passing, 0 clippy warnings
 
 ## Licence
 

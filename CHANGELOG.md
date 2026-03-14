@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.13.0] - 2026-03-14
+
+### Added
+
+- **User-defined bundle rules**: `UserRuleField` (From, To, Subject, Header, Body), `UserRuleOp` (Contains, Equals, Matches, Domain), `BundleRule` struct with priority-ordered first-match evaluation in `inboxly-bundler/src/user_rules.rs`
+- **Pre-compiled regex caching**: `UserCompiledRule` wraps `BundleRule` with optional pre-compiled `Regex` for efficient repeated evaluation; invalid patterns gracefully return no-match
+- **RuleMatchable trait**: Abstract email field access for rule matching, enabling pure-function testing with `MockEmail` test doubles
+- **RuleStore trait**: CRUD abstraction for bundle rule persistence (create, get, list, list_by_bundle, update, delete) with regex validation on create/update; `MockRuleStore` for tests
+- **Sender affinity learning**: `SenderAffinity` struct with exponential confidence decay (90-day half-life), `reinforce()` (+0.2 per user action, 5 actions to max), `penalize()` (-0.3 on override), threshold at 0.6
+- **AffinityStore trait**: Persistence abstraction for sender learning (get, record with auto-reinforce/penalize, list, delete); `MockAffinityStore` for tests
+- **Custom bundle creation**: `BundleStore` trait with `CreateBundleParams`, `UpdateBundleParams`, `BundleInfo`; `BundleStoreError` with built-in bundle protection; re-uses `BundleVisibility`/`BundleThrottle` from `inboxly-core`
+- **Four-layer evaluation pipeline**: `BundlerEngine::categorise()` runs user rules > sender learning > header heuristics > uncategorised with `CategoriseResult` and `CategoriseSource` tracking which layer matched
+- **`HeuristicMatch` bridge type**: Connects M12's heuristic engine output into M13's unified pipeline
+- **Re-categorisation**: `process_move()` handles user manual moves, updating sender affinity and returning `MoveResult` with new/reinforced status
+- **Shared test utilities**: `test_utils::fixtures` module with `MockEmail` and `make_rule` helper for consistent test doubles across modules
+- 59 new tests (496 total): user rule matching (21), RuleStore CRUD (8), custom bundles (6), sender affinity (15), evaluation engine (6), pipeline integration (4), recategorise (3)
+
 ## [0.12.0] - 2026-03-14
 
 ### Added
