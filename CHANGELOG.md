@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.0] - 2026-03-14
+
+### Added
+
+- **Incremental sync**: UIDNEXT-based new message detection — fetches only what changed since last sync (`inboxly-imap/src/incremental.rs`)
+- **CONDSTORE flag sync**: CHANGEDSINCE-based flag updates (RFC 4551) — only fetches messages with changed flags
+- **Non-CONDSTORE fallback**: 30-day UID window for flag sync on servers without CONDSTORE
+- **Deleted message detection**: UID comparison to detect server-side deletions within 30-day window
+- **IDLE push sync**: Real-time server notifications with EXISTS/EXPUNGE/FETCH response parsing (`inboxly-imap/src/idle.rs`)
+- **IDLE reconnect loop**: Exponential backoff (5s to 5min), configurable max failures (default 10)
+- **Per-account sync loop**: IDLE on INBOX + 5-minute periodic catch-up for Sent/Drafts/Trash/Spam (`inboxly-imap/src/sync_loop.rs`)
+- **Polling fallback**: 60-second polling for servers without IDLE support
+- **SyncManager**: Multi-account lifecycle management (register/stop/stop_all) with master cancellation (`inboxly-imap/src/sync_manager.rs`)
+- **AccountSyncConfig**: Structured config for sync loop parameters (avoids argument-count lint)
+- **New SyncEvent variants**: `EmailsDeleted`, `IncrementalSyncComplete`, `SyncUpToDate`
+- **New ImapError variants**: `UidValidityChanged`, `IdleInterrupted`, `IdleNotSupported`, `SyncCancelled`, `SyncNotRunning`, `NoSyncState`, `Protocol`, `Store`
+- **Store extensions**: `get_uids_in_folder`, `get_uids_since`, `mark_email_deleted_by_uid`, `update_flags_by_uid`, `upsert_email`
+- 32 new tests (275 total): UID set formatting (9), SQLite helpers (4), IDLE parsing (10), folder resolution (2), SyncManager lifecycle (6), channel/struct tests (1)
+
 ## [0.8.0] - 2026-03-14
 
 ### Added

@@ -46,13 +46,18 @@ Requires Rust edition 2024 (rustc 1.85+).
 
 ## Status
 
-**M8 complete** — Initial sync Phase 2 (body download):
+**M9 complete** — Incremental sync + IDLE push notifications:
 - Phase 1 (M7): Batched header sync with crash recovery and progress events
 - Phase 2 (M8): Background RFC822 body download to Maildir with tantivy indexing
-- On-demand single-email fetch for immediate display before Phase 2 reaches it
-- Resume capability — restart picks up where it left off (no explicit checkpoint)
+- Incremental sync (M9): UIDNEXT-based new message detection, CONDSTORE flag sync (CHANGEDSINCE), non-CONDSTORE 30-day fallback, deleted message detection
+- IDLE push (M9): Real-time server notifications with 29-minute timeout, exponential backoff reconnect, cancellation support
+- Per-account sync loop with IDLE on INBOX + 5-minute periodic catch-up for other folders
+- Multi-account SyncManager with start/stop/stop_all lifecycle control
+- Polling fallback for servers without IDLE support
+- On-demand single-email fetch for immediate display
+- Resume capability — restart picks up where it left off
 - Offline action queue with 9 action types and IMAP replay on reconnect
-- 243 tests passing, 0 clippy warnings
+- 275 tests passing, 0 clippy warnings
 
 ## Licence
 
