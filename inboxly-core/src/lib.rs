@@ -25,3 +25,4 @@ pub use highlight::{Highlight, TripBundle};
 pub use inbox::{InboxItem, SnoozeInfo, SnoozeUntil, ThreadState};
 pub use error::{InboxlyError, Result};
 pub use traits::{Bundler, Extractor, Store};
+pub use config::{AccountConfig, AppConfig, AuthMethod, ConfigError, Paths, SnoozePresets, ThemePreference};
