@@ -63,6 +63,11 @@ pub enum Message {
     Undo,
     /// Undo timer expired -- commit the action.
     UndoExpired,
+    /// Snooze a thread until the given UTC timestamp.
+    SnoozeThread {
+        thread_id: String,
+        until: chrono::DateTime<chrono::Utc>,
+    },
 }
 
 impl Default for Inboxly {
@@ -219,6 +224,19 @@ impl Inboxly {
             }
             Message::UndoExpired => {
                 self.undo_state.clear();
+            }
+            Message::SnoozeThread { thread_id, until } => {
+                if let Some(ref store) = self.store {
+                    if let Err(e) = store.get_or_create_thread_state(&thread_id) {
+                        tracing::warn!("failed to ensure thread state for snooze: {e}");
+                    }
+                    if let Err(e) =
+                        store.set_thread_snoozed(&thread_id, Some(until.timestamp()), None)
+                    {
+                        tracing::warn!("failed to snooze thread: {e}");
+                    }
+                }
+                self.reload_feed();
             }
         }
         Task::none()

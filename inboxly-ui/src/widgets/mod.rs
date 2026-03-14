@@ -7,5 +7,6 @@ pub mod email_row;
 pub mod empty_state;
 pub mod hover_actions;
 pub mod section_header;
+pub mod snooze_picker;
 pub mod swipe_state;
 pub mod undo_snackbar;
