@@ -212,10 +212,7 @@ mod tests {
     fn bare_ids_without_angle_brackets() {
         let h = headers(&[("References", "a@example.com b@example.com")]);
         let th = extract_threading_headers(&h);
-        assert_eq!(
-            th.references,
-            vec!["a@example.com", "b@example.com"]
-        );
+        assert_eq!(th.references, vec!["a@example.com", "b@example.com"]);
     }
 
     #[test]

@@ -4,10 +4,10 @@
 //! the current threading algorithm. Used when the algorithm is updated
 //! or data integrity is suspect.
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
-use crate::error::Result;
 use super::batch::thread_unthreaded_emails;
+use crate::error::Result;
 
 /// Rebuild all threads for an account from scratch.
 ///
@@ -62,11 +62,12 @@ pub fn rebuild_threads(conn: &Connection, account_id: &str) -> Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rusqlite::{params, Connection};
+    use rusqlite::{Connection, params};
 
     fn test_db() -> Connection {
         let conn = Connection::open_in_memory().expect("open in-memory db");
-        conn.execute_batch("PRAGMA foreign_keys = ON;").expect("enable FK");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("enable FK");
         conn.execute_batch(
             "CREATE TABLE accounts (
                 id TEXT PRIMARY KEY NOT NULL,
@@ -189,8 +190,28 @@ mod tests {
             [],
         )
         .unwrap();
-        insert_email_with_thread(conn, "e1", "t1", "root1@ex.com", None, &[], "Thread 1", 1710000000, 1);
-        insert_email_with_thread(conn, "e2", "t1", "reply1@ex.com", Some("root1@ex.com"), &["root1@ex.com"], "Re: Thread 1", 1710001000, 2);
+        insert_email_with_thread(
+            conn,
+            "e1",
+            "t1",
+            "root1@ex.com",
+            None,
+            &[],
+            "Thread 1",
+            1710000000,
+            1,
+        );
+        insert_email_with_thread(
+            conn,
+            "e2",
+            "t1",
+            "reply1@ex.com",
+            Some("root1@ex.com"),
+            &["root1@ex.com"],
+            "Re: Thread 1",
+            1710001000,
+            2,
+        );
 
         // Thread 2: standalone (thread ID "t2").
         conn.execute(
@@ -199,7 +220,17 @@ mod tests {
             [],
         )
         .unwrap();
-        insert_email_with_thread(conn, "e3", "t2", "standalone@ex.com", None, &[], "Thread 2", 1710002000, 3);
+        insert_email_with_thread(
+            conn,
+            "e3",
+            "t2",
+            "standalone@ex.com",
+            None,
+            &[],
+            "Thread 2",
+            1710002000,
+            3,
+        );
 
         // Add thread_state for t1.
         conn.execute(
@@ -215,20 +246,40 @@ mod tests {
         setup_threaded_data(&conn);
 
         // Record which emails are grouped together (before rebuild).
-        let pre_t1: String = conn.query_row("SELECT thread_id FROM emails WHERE id = 'e1'", [], |row| row.get(0)).unwrap();
-        let pre_t2: String = conn.query_row("SELECT thread_id FROM emails WHERE id = 'e2'", [], |row| row.get(0)).unwrap();
+        let pre_t1: String = conn
+            .query_row("SELECT thread_id FROM emails WHERE id = 'e1'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let pre_t2: String = conn
+            .query_row("SELECT thread_id FROM emails WHERE id = 'e2'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
         assert_eq!(pre_t1, pre_t2); // e1 and e2 were in same thread.
 
         let count = rebuild_threads(&conn, "acct-1").unwrap();
         assert_eq!(count, 3);
 
         // After rebuild, e1 and e2 should still be in the same thread (different IDs).
-        let post_t1: String = conn.query_row("SELECT thread_id FROM emails WHERE id = 'e1'", [], |row| row.get(0)).unwrap();
-        let post_t2: String = conn.query_row("SELECT thread_id FROM emails WHERE id = 'e2'", [], |row| row.get(0)).unwrap();
+        let post_t1: String = conn
+            .query_row("SELECT thread_id FROM emails WHERE id = 'e1'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let post_t2: String = conn
+            .query_row("SELECT thread_id FROM emails WHERE id = 'e2'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
         assert_eq!(post_t1, post_t2);
 
         // e3 should be in a different thread.
-        let post_t3: String = conn.query_row("SELECT thread_id FROM emails WHERE id = 'e3'", [], |row| row.get(0)).unwrap();
+        let post_t3: String = conn
+            .query_row("SELECT thread_id FROM emails WHERE id = 'e3'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
         assert_ne!(post_t1, post_t3);
     }
 
@@ -260,7 +311,11 @@ mod tests {
         rebuild_threads(&conn, "acct-1").unwrap();
 
         // The thread containing e1+e2 should have email_count=2.
-        let t1: String = conn.query_row("SELECT thread_id FROM emails WHERE id = 'e1'", [], |row| row.get(0)).unwrap();
+        let t1: String = conn
+            .query_row("SELECT thread_id FROM emails WHERE id = 'e1'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
         let count: i64 = conn
             .query_row(
                 "SELECT email_count FROM threads WHERE id = ?1",

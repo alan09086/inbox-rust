@@ -3,7 +3,7 @@
 //! Recalculates thread aggregate fields (subject, dates, counts, snippet)
 //! from the emails in each thread. Called after thread membership changes.
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use crate::error::Result;
 
@@ -82,9 +82,7 @@ pub fn refresh_thread_metadata(conn: &Connection, thread_id: &str) -> Result<()>
 /// Returns `StoreError::Sqlite` on database errors.
 pub fn refresh_all_thread_metadata(conn: &Connection, account_id: &str) -> Result<u64> {
     // Get all thread IDs for the account.
-    let mut stmt = conn.prepare(
-        "SELECT id FROM threads WHERE account_id = ?1",
-    )?;
+    let mut stmt = conn.prepare("SELECT id FROM threads WHERE account_id = ?1")?;
     let thread_ids: Vec<String> = stmt
         .query_map(params![account_id], |row| row.get::<_, String>(0))?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -117,10 +115,7 @@ pub fn get_thread_participants(
     let mut contacts = Vec::new();
 
     let rows = stmt.query_map(params![thread_id], |row| {
-        Ok((
-            row.get::<_, Option<String>>(0)?,
-            row.get::<_, String>(1)?,
-        ))
+        Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?))
     })?;
 
     for row in rows {
@@ -143,7 +138,8 @@ mod tests {
 
     fn test_db() -> Connection {
         let conn = Connection::open_in_memory().expect("open in-memory db");
-        conn.execute_batch("PRAGMA foreign_keys = ON;").expect("enable FK");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("enable FK");
         conn.execute_batch(
             "CREATE TABLE accounts (
                 id TEXT PRIMARY KEY NOT NULL,
@@ -229,7 +225,18 @@ mod tests {
             "INSERT INTO emails (id, account_id, thread_id, from_name, from_address,
              subject, snippet, date, maildir_path, flags, imap_uid, imap_folder, has_attachments)
              VALUES (?1, 'acct-1', ?2, ?3, ?4, ?5, ?6, ?7, '', ?8, ?9, 'INBOX', ?10)",
-            params![id, thread_id, from_name, from_address, subject, snippet, date, flags, uid, has_attachments],
+            params![
+                id,
+                thread_id,
+                from_name,
+                from_address,
+                subject,
+                snippet,
+                date,
+                flags,
+                uid,
+                has_attachments
+            ],
         )
         .expect("insert email");
     }
@@ -238,7 +245,19 @@ mod tests {
     fn single_email_thread() {
         let conn = test_db();
         insert_thread(&conn, "t1");
-        insert_email_full(&conn, "e1", "t1", "Alice", "alice@ex.com", "Hello", "Hi there", 1710000000, 0, false, 1);
+        insert_email_full(
+            &conn,
+            "e1",
+            "t1",
+            "Alice",
+            "alice@ex.com",
+            "Hello",
+            "Hi there",
+            1710000000,
+            0,
+            false,
+            1,
+        );
 
         refresh_thread_metadata(&conn, "t1").unwrap();
 
@@ -269,9 +288,45 @@ mod tests {
     fn three_email_thread() {
         let conn = test_db();
         insert_thread(&conn, "t1");
-        insert_email_full(&conn, "e1", "t1", "Alice", "alice@ex.com", "Original", "First message", 1710000000, 0, false, 1);
-        insert_email_full(&conn, "e2", "t1", "Bob", "bob@ex.com", "Re: Original", "Reply 1", 1710001000, 0, false, 2);
-        insert_email_full(&conn, "e3", "t1", "Alice", "alice@ex.com", "Re: Original", "Reply 2", 1710002000, 0, true, 3);
+        insert_email_full(
+            &conn,
+            "e1",
+            "t1",
+            "Alice",
+            "alice@ex.com",
+            "Original",
+            "First message",
+            1710000000,
+            0,
+            false,
+            1,
+        );
+        insert_email_full(
+            &conn,
+            "e2",
+            "t1",
+            "Bob",
+            "bob@ex.com",
+            "Re: Original",
+            "Reply 1",
+            1710001000,
+            0,
+            false,
+            2,
+        );
+        insert_email_full(
+            &conn,
+            "e3",
+            "t1",
+            "Alice",
+            "alice@ex.com",
+            "Re: Original",
+            "Reply 2",
+            1710002000,
+            0,
+            true,
+            3,
+        );
 
         refresh_thread_metadata(&conn, "t1").unwrap();
 
@@ -301,14 +356,24 @@ mod tests {
         let conn = test_db();
         insert_thread(&conn, "t1");
         // flags=1 means READ
-        insert_email_full(&conn, "e1", "t1", "A", "a@ex.com", "S", "", 1710000000, 1, false, 1);
-        insert_email_full(&conn, "e2", "t1", "B", "b@ex.com", "S", "", 1710001000, 0, false, 2);
-        insert_email_full(&conn, "e3", "t1", "C", "c@ex.com", "S", "", 1710002000, 0, false, 3);
+        insert_email_full(
+            &conn, "e1", "t1", "A", "a@ex.com", "S", "", 1710000000, 1, false, 1,
+        );
+        insert_email_full(
+            &conn, "e2", "t1", "B", "b@ex.com", "S", "", 1710001000, 0, false, 2,
+        );
+        insert_email_full(
+            &conn, "e3", "t1", "C", "c@ex.com", "S", "", 1710002000, 0, false, 3,
+        );
 
         refresh_thread_metadata(&conn, "t1").unwrap();
 
         let unread: i64 = conn
-            .query_row("SELECT unread_count FROM threads WHERE id = 't1'", [], |row| row.get(0))
+            .query_row(
+                "SELECT unread_count FROM threads WHERE id = 't1'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(unread, 2);
     }
@@ -321,7 +386,11 @@ mod tests {
         refresh_thread_metadata(&conn, "t1").unwrap();
 
         let count: i64 = conn
-            .query_row("SELECT email_count FROM threads WHERE id = 't1'", [], |row| row.get(0))
+            .query_row(
+                "SELECT email_count FROM threads WHERE id = 't1'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(count, 0);
     }
@@ -331,19 +400,47 @@ mod tests {
         let conn = test_db();
         insert_thread(&conn, "t1");
         insert_thread(&conn, "t2");
-        insert_email_full(&conn, "e1", "t1", "A", "a@ex.com", "Thread 1", "Snippet 1", 1710000000, 0, false, 1);
-        insert_email_full(&conn, "e2", "t2", "B", "b@ex.com", "Thread 2", "Snippet 2", 1710001000, 0, false, 2);
+        insert_email_full(
+            &conn,
+            "e1",
+            "t1",
+            "A",
+            "a@ex.com",
+            "Thread 1",
+            "Snippet 1",
+            1710000000,
+            0,
+            false,
+            1,
+        );
+        insert_email_full(
+            &conn,
+            "e2",
+            "t2",
+            "B",
+            "b@ex.com",
+            "Thread 2",
+            "Snippet 2",
+            1710001000,
+            0,
+            false,
+            2,
+        );
 
         let updated = refresh_all_thread_metadata(&conn, "acct-1").unwrap();
         assert_eq!(updated, 2);
 
         let s1: String = conn
-            .query_row("SELECT subject FROM threads WHERE id = 't1'", [], |row| row.get(0))
+            .query_row("SELECT subject FROM threads WHERE id = 't1'", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(s1, "Thread 1");
 
         let s2: String = conn
-            .query_row("SELECT subject FROM threads WHERE id = 't2'", [], |row| row.get(0))
+            .query_row("SELECT subject FROM threads WHERE id = 't2'", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(s2, "Thread 2");
     }
@@ -352,9 +449,45 @@ mod tests {
     fn participants_unique_in_date_order() {
         let conn = test_db();
         insert_thread(&conn, "t1");
-        insert_email_full(&conn, "e1", "t1", "Alice", "alice@ex.com", "S", "", 1710000000, 0, false, 1);
-        insert_email_full(&conn, "e2", "t1", "Bob", "bob@ex.com", "S", "", 1710001000, 0, false, 2);
-        insert_email_full(&conn, "e3", "t1", "Alice", "alice@ex.com", "S", "", 1710002000, 0, false, 3);
+        insert_email_full(
+            &conn,
+            "e1",
+            "t1",
+            "Alice",
+            "alice@ex.com",
+            "S",
+            "",
+            1710000000,
+            0,
+            false,
+            1,
+        );
+        insert_email_full(
+            &conn,
+            "e2",
+            "t1",
+            "Bob",
+            "bob@ex.com",
+            "S",
+            "",
+            1710001000,
+            0,
+            false,
+            2,
+        );
+        insert_email_full(
+            &conn,
+            "e3",
+            "t1",
+            "Alice",
+            "alice@ex.com",
+            "S",
+            "",
+            1710002000,
+            0,
+            false,
+            3,
+        );
 
         let participants = get_thread_participants(&conn, "t1").unwrap();
         assert_eq!(participants.len(), 2);

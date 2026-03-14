@@ -6,10 +6,10 @@
 mod tests {
     use std::collections::HashMap;
 
-    use rusqlite::{params, Connection};
+    use rusqlite::{Connection, params};
 
     use crate::threading::assign::{assign_thread, is_placeholder_thread};
-    use crate::threading::headers::{extract_threading_headers, ThreadingHeaders};
+    use crate::threading::headers::{ThreadingHeaders, extract_threading_headers};
 
     fn headers(pairs: &[(&str, &str)]) -> HashMap<String, String> {
         pairs
@@ -158,10 +158,7 @@ mod tests {
     fn no_angle_brackets_bare_ids() {
         let h = headers(&[("References", "abc@example.com def@example.com")]);
         let th = extract_threading_headers(&h);
-        assert_eq!(
-            th.references,
-            vec!["abc@example.com", "def@example.com"]
-        );
+        assert_eq!(th.references, vec!["abc@example.com", "def@example.com"]);
     }
 
     #[test]
@@ -271,7 +268,13 @@ mod tests {
             [],
         )
         .unwrap();
-        insert_email(&conn, "email-first", "thread-first", Some("first@ex.com"), 10);
+        insert_email(
+            &conn,
+            "email-first",
+            "thread-first",
+            Some("first@ex.com"),
+            10,
+        );
 
         // Create thread with "last@ex.com".
         conn.execute(

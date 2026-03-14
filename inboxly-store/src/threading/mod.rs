@@ -24,9 +24,11 @@ pub mod unify;
 mod edge_case_tests;
 
 // Re-export public API.
-pub use assign::{assign_thread, is_placeholder_thread, list_placeholder_threads, ThreadAssignment};
+pub use assign::{
+    ThreadAssignment, assign_thread, is_placeholder_thread, list_placeholder_threads,
+};
 pub use batch::{thread_email_batch, thread_unthreaded_emails};
-pub use headers::{extract_threading_headers, threading_headers_from_fields, ThreadingHeaders};
+pub use headers::{ThreadingHeaders, extract_threading_headers, threading_headers_from_fields};
 pub use metadata::{get_thread_participants, refresh_all_thread_metadata, refresh_thread_metadata};
 pub use rebuild::rebuild_threads;
 pub use unify::try_unify_placeholder;

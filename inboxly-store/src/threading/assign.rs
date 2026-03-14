@@ -4,11 +4,11 @@
 //! email should belong to using a simplified JWZ algorithm based on
 //! `References` and `In-Reply-To` headers. No subject-based grouping.
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use uuid::Uuid;
 
-use crate::error::{Result, StoreError};
 use super::headers::ThreadingHeaders;
+use crate::error::{Result, StoreError};
 
 /// Result of thread assignment: the thread ID and whether a new thread was created.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -263,7 +263,8 @@ mod tests {
     /// Create an in-memory database with the full schema for testing.
     fn test_db() -> Connection {
         let conn = Connection::open_in_memory().expect("open in-memory db");
-        conn.execute_batch("PRAGMA foreign_keys = ON;").expect("enable FK");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("enable FK");
 
         // Minimal schema matching the real migrations.
         conn.execute_batch(
@@ -329,7 +330,13 @@ mod tests {
     }
 
     /// Insert a minimal email row for testing thread assignment lookups.
-    fn insert_email(conn: &Connection, id: &str, thread_id: &str, message_id: Option<&str>, uid: i64) {
+    fn insert_email(
+        conn: &Connection,
+        id: &str,
+        thread_id: &str,
+        message_id: Option<&str>,
+        uid: i64,
+    ) {
         conn.execute(
             "INSERT INTO emails (id, account_id, thread_id, from_address, subject, date,
              maildir_path, imap_uid, imap_folder, message_id_header)
@@ -484,7 +491,13 @@ mod tests {
             [],
         )
         .unwrap();
-        insert_email(&conn, "email-refs-root", "thread-refs", Some("refs-root@ex.com"), 3);
+        insert_email(
+            &conn,
+            "email-refs-root",
+            "thread-refs",
+            Some("refs-root@ex.com"),
+            3,
+        );
 
         conn.execute(
             "INSERT INTO threads (id, account_id, subject, newest_date, oldest_date)
@@ -492,7 +505,13 @@ mod tests {
             [],
         )
         .unwrap();
-        insert_email(&conn, "email-irt-parent", "thread-irt", Some("irt-parent@ex.com"), 4);
+        insert_email(
+            &conn,
+            "email-irt-parent",
+            "thread-irt",
+            Some("irt-parent@ex.com"),
+            4,
+        );
 
         // Email with References pointing to thread-refs and In-Reply-To pointing to thread-irt.
         let headers = ThreadingHeaders {

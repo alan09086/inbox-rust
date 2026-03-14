@@ -1,6 +1,6 @@
 //! Thread unification: merge placeholder threads when root emails arrive.
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 
 use crate::error::{Result, StoreError};
 
@@ -61,11 +61,7 @@ pub fn try_unify_placeholder(
 /// - Deletes the source thread row.
 ///
 /// Returns the number of emails moved.
-fn merge_threads(
-    conn: &Connection,
-    source_thread_id: &str,
-    target_thread_id: &str,
-) -> Result<u64> {
+fn merge_threads(conn: &Connection, source_thread_id: &str, target_thread_id: &str) -> Result<u64> {
     // Move all emails from source to target.
     let moved = conn.execute(
         "UPDATE emails SET thread_id = ?1 WHERE thread_id = ?2",
@@ -101,7 +97,8 @@ mod tests {
 
     fn test_db() -> Connection {
         let conn = Connection::open_in_memory().expect("open in-memory db");
-        conn.execute_batch("PRAGMA foreign_keys = ON;").expect("enable FK");
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("enable FK");
         conn.execute_batch(
             "CREATE TABLE accounts (
                 id TEXT PRIMARY KEY NOT NULL,
@@ -188,7 +185,13 @@ mod tests {
         conn
     }
 
-    fn insert_email(conn: &Connection, id: &str, thread_id: &str, message_id: Option<&str>, uid: i64) {
+    fn insert_email(
+        conn: &Connection,
+        id: &str,
+        thread_id: &str,
+        message_id: Option<&str>,
+        uid: i64,
+    ) {
         conn.execute(
             "INSERT INTO emails (id, account_id, thread_id, from_address, subject, date,
              maildir_path, imap_uid, imap_folder, message_id_header)

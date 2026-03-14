@@ -280,11 +280,51 @@ fn deep_reply_chain_out_of_order() {
 #[test]
 fn multiple_independent_threads() {
     let emails = vec![
-        make_email("e1", "standalone1@ex.com", None, &[], "Topic A", 1710000000, 1),
-        make_email("e2", "standalone2@ex.com", None, &[], "Topic B", 1710001000, 2),
-        make_email("e3", "standalone3@ex.com", None, &[], "Topic C", 1710002000, 3),
-        make_email("e4", "standalone4@ex.com", None, &[], "Topic D", 1710003000, 4),
-        make_email("e5", "standalone5@ex.com", None, &[], "Topic E", 1710004000, 5),
+        make_email(
+            "e1",
+            "standalone1@ex.com",
+            None,
+            &[],
+            "Topic A",
+            1710000000,
+            1,
+        ),
+        make_email(
+            "e2",
+            "standalone2@ex.com",
+            None,
+            &[],
+            "Topic B",
+            1710001000,
+            2,
+        ),
+        make_email(
+            "e3",
+            "standalone3@ex.com",
+            None,
+            &[],
+            "Topic C",
+            1710002000,
+            3,
+        ),
+        make_email(
+            "e4",
+            "standalone4@ex.com",
+            None,
+            &[],
+            "Topic D",
+            1710003000,
+            4,
+        ),
+        make_email(
+            "e5",
+            "standalone5@ex.com",
+            None,
+            &[],
+            "Topic E",
+            1710004000,
+            5,
+        ),
     ];
     let store = setup_and_thread(emails);
 
@@ -631,7 +671,15 @@ fn concurrent_account_threading() {
         .unwrap();
 
     // Account 1 emails.
-    let mut e1 = make_email("a1-e1", "a1-root@ex.com", None, &[], "Account 1", 1710000000, 1);
+    let mut e1 = make_email(
+        "a1-e1",
+        "a1-root@ex.com",
+        None,
+        &[],
+        "Account 1",
+        1710000000,
+        1,
+    );
     e1.account_id = "acct-001".into();
     store.insert_email(&e1).unwrap();
 
@@ -648,7 +696,15 @@ fn concurrent_account_threading() {
     store.insert_email(&e2).unwrap();
 
     // Account 2 emails.
-    let mut e3 = make_email("a2-e1", "a2-root@ex.com", None, &[], "Account 2", 1710000000, 1);
+    let mut e3 = make_email(
+        "a2-e1",
+        "a2-root@ex.com",
+        None,
+        &[],
+        "Account 2",
+        1710000000,
+        1,
+    );
     e3.account_id = "acct-002".into();
     store.insert_email(&e3).unwrap();
 
