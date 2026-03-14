@@ -46,14 +46,13 @@ Requires Rust edition 2024 (rustc 1.85+).
 
 ## Status
 
-**M7 complete** — Initial sync engine (Phase 1: headers only):
-- Batched UID FETCH with newest-first processing
-- UIDVALIDITY tracking with automatic invalidation on resets
-- Envelope-to-EmailRow conversion with RFC 2822 date parsing
-- Basic thread association via In-Reply-To/References headers
-- Crash-recoverable sync with per-batch state persistence
-- Progress events for UI feedback during sync
-- 224 tests passing
+**M8 complete** — Initial sync Phase 2 (body download):
+- Phase 1 (M7): Batched header sync with crash recovery and progress events
+- Phase 2 (M8): Background RFC822 body download to Maildir with tantivy indexing
+- On-demand single-email fetch for immediate display before Phase 2 reaches it
+- Resume capability — restart picks up where it left off (no explicit checkpoint)
+- Offline action queue with 9 action types and IMAP replay on reconnect
+- 243 tests passing, 0 clippy warnings
 
 ## Licence
 

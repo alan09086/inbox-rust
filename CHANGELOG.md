@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.0] - 2026-03-14
+
+### Added
+
+- **Phase 2 body download**: Background RFC822 fetch to Maildir with tantivy indexing (`inboxly-imap/src/phase2.rs`)
+- **Batch RFC822 FETCH**: Fetch bodies in batches of 500, newest-first for fastest UX (`inboxly-imap/src/body_fetch.rs`)
+- **Body processing pipeline**: Maildir write + body text extraction + SQLite update (`inboxly-imap/src/body_processor.rs`)
+- **On-demand body fetch**: Single-email fetch when user opens before Phase 2 reaches it (`inboxly-imap/src/on_demand.rs`)
+- **Progress reporting**: `SyncEvent::BodyDownloadProgress`, `BodyFetched`, `BodyDownloadComplete`, `BodyDownloadError`
+- **Resume capability**: `body_downloaded` column IS the checkpoint — restart picks up where it left off
+- **Offline action queue**: `OfflineAction` enum (9 variants) with serde JSON serialization in `inboxly-core`
+- **Offline replay**: Drain queue and replay actions against IMAP on reconnect (`inboxly-imap/src/offline_replay.rs`)
+- **`FetchBodyOnDemand` command**: UI can request single-email body fetch via `UiCommand`
+- **Schema migration v2**: `body_downloaded` column with partial index for efficient Phase 2 queries
+- **Store methods**: `mark_body_downloaded`, `is_body_downloaded`, `get_maildir_path`, `count_emails_without_body`, `get_uids_without_body`, `get_email_id_by_uid`
+- 19 new tests (243 total): body text extraction (7), offline action serde (3), offline queue integration (3), Phase 2 resume/ordering/progress (6)
+
 ## [0.7.0] - 2026-03-14
 
 ### Added
