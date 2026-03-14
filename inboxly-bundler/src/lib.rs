@@ -1,14 +1,30 @@
 //! # inboxly-bundler
 //!
-//! Email categorisation engine for Inboxly.  Implements a four-layer system:
+//! Email categorisation engine for Inboxly.
 //!
-//! 1. **User-defined rules** (highest priority) -- explicit pattern matching
-//! 2. **Sender learning** (medium priority) -- learns from user moves
-//! 3. **Header heuristics** (lowest priority) -- zero-config pattern matching
+//! ## Layers
+//!
+//! 1. **Header heuristics** (M12) -- zero-config pattern matching on email headers
+//! 2. **User rules + sender learning** (M13) -- explicit rules and learned sender affinity
+//! 3. **Bundle throttling** (M14) -- delivery window control for non-urgent bundles
+//!
+//! The four-layer evaluation pipeline (highest precedence first):
+//!
+//! 1. **User-defined rules** -- explicit pattern matching
+//! 2. **Sender learning** -- learns from user moves
+//! 3. **Header heuristics** -- zero-config pattern matching
 //! 4. **Uncategorised** -- email stays in primary inbox
 //!
-//! M12 introduced Layer 3 (header heuristics) and the [`Bundler`] struct.
-//! M13 adds Layers 1-2 via [`engine::BundlerEngine`] and the full pipeline.
+//! ## Throttling
+//!
+//! Bundles can be set to `Immediate`, `Daily`, or `Weekly` delivery. Throttled
+//! bundles suppress their emails from the inbox feed until the delivery window
+//! opens. The throttle scheduler runs as a background tokio task and emits
+//! [`ThrottleEvent::WindowOpened`] events when windows transition.
+//!
+//! Body-based rules are re-evaluated when Phase 2 sync delivers message bodies,
+//! ensuring categorisation catches up even when initial classification was
+//! headers-only.
 //!
 //! ## Quick Start
 //!
@@ -20,7 +36,7 @@
 //! # fn main() -> inboxly_bundler::Result<()> {
 //! let store = Store::open(Path::new("data.db"))?;
 //!
-//! // Create system bundles on first run
+//! // Create system bundles on first run (with default throttle presets)
 //! system_bundles::ensure_system_bundles(&store)?;
 //!
 //! // Create bundler with default rules
@@ -37,10 +53,12 @@ pub mod affinity;
 pub mod custom_bundle;
 pub mod engine;
 pub mod evaluator;
+pub mod events;
 pub mod heuristics;
 pub mod recategorise;
 pub mod rule_store;
 pub mod rules_toml;
+pub mod scheduler;
 pub mod system_bundles;
 pub mod user_rules;
 
@@ -57,10 +75,13 @@ pub use custom_bundle::{
 };
 pub use engine::{BundlerEngine, CategoriseResult, CategoriseSource, HeuristicMatch};
 pub use evaluator::{AffinityResult, RuleResult, evaluate_affinity, evaluate_rules};
+pub use events::BundlerEvent;
 pub use recategorise::{MoveAction, MoveResult, process_move};
 pub use rule_store::{
     CreateRuleParams, RuleStore, RuleStoreError, UpdateRuleParams, validate_rule,
 };
+pub use scheduler::{ThrottleEvent, ThrottleSchedulerConfig, spawn_throttle_scheduler};
+pub use system_bundles::default_throttle_for_category;
 pub use user_rules::{
     BundleRule, RuleId, RuleMatchable, UserCompiledRule, UserRuleField, UserRuleOp,
 };

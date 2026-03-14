@@ -11,6 +11,8 @@ inboxly-store = { path = "../inboxly-store" }
 
 chrono.workspace = true
 regex = "1"
+serde_json.workspace = true
+tokio = { workspace = true, features = ["time", "sync", "rt", "macros"] }
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"

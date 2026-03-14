@@ -12,6 +12,7 @@ pub mod id;
 pub mod inbox;
 pub mod offline;
 pub mod thread;
+pub mod throttle;
 pub mod traits;
 
 // Re-exports for convenience
@@ -32,4 +33,5 @@ pub use id::{AccountId, BundleId, EmailId, ThreadId};
 pub use inbox::{InboxItem, SnoozeInfo, SnoozeUntil, ThreadState};
 pub use offline::OfflineAction;
 pub use thread::Thread;
+pub use throttle::WeekdayWrapper;
 pub use traits::{Bundler, Extractor, Store};
