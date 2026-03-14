@@ -27,3 +27,4 @@ pub use store::Store;
 pub use accounts::AccountRow;
 pub use emails::{EmailRow, flags};
 pub use threads::ThreadRow;
+pub use thread_state::ThreadStateRow;
