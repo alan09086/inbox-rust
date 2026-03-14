@@ -32,6 +32,8 @@ pub use maildir_store::{
     parse_email_meta, parse_email_content, rebuild_emails_from_maildir,
 };
 
+pub mod search;
+
 pub use accounts::AccountRow;
 pub use bundles::BundleRow;
 pub use bundle_rules::BundleRuleRow;
