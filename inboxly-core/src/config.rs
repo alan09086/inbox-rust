@@ -138,3 +138,55 @@ impl Default for AppConfig {
         }
     }
 }
+
+/// Resolved filesystem paths for the application.
+#[derive(Debug, Clone)]
+pub struct Paths {
+    /// Config directory: `~/.config/inboxly/`
+    pub config_dir: PathBuf,
+    /// Data directory: `~/.local/share/inboxly/`
+    pub data_dir: PathBuf,
+    /// Cache directory: `~/.cache/inboxly/`
+    pub cache_dir: PathBuf,
+}
+
+const APP_NAME: &str = "inboxly";
+
+impl Paths {
+    /// Resolve paths using XDG defaults.
+    pub fn resolve() -> Option<Self> {
+        let config_dir = dirs::config_dir()?.join(APP_NAME);
+        let data_dir = dirs::data_dir()?.join(APP_NAME);
+        let cache_dir = dirs::cache_dir()?.join(APP_NAME);
+        Some(Self { config_dir, data_dir, cache_dir })
+    }
+
+    /// Resolve paths, applying overrides from an `AppConfig`.
+    pub fn resolve_with_config(config: &AppConfig) -> Option<Self> {
+        let mut paths = Self::resolve()?;
+        if let Some(ref data_dir) = config.data_dir {
+            paths.data_dir = data_dir.clone();
+        }
+        if let Some(ref cache_dir) = config.cache_dir {
+            paths.cache_dir = cache_dir.clone();
+        }
+        Some(paths)
+    }
+
+    /// Path to the TOML config file.
+    pub fn config_file(&self) -> PathBuf { self.config_dir.join("config.toml") }
+    /// Path to the SQLite database.
+    pub fn database_file(&self) -> PathBuf { self.data_dir.join("inboxly.db") }
+    /// Path to the Maildir root.
+    pub fn maildir_root(&self) -> PathBuf { self.data_dir.join("maildir") }
+    /// Path to the tantivy index directory.
+    pub fn search_index_dir(&self) -> PathBuf { self.data_dir.join("index") }
+
+    /// Ensure all directories exist, creating them if necessary.
+    pub fn ensure_dirs(&self) -> std::io::Result<()> {
+        std::fs::create_dir_all(&self.config_dir)?;
+        std::fs::create_dir_all(&self.data_dir)?;
+        std::fs::create_dir_all(&self.cache_dir)?;
+        Ok(())
+    }
+}
