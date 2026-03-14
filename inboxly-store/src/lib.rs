@@ -29,3 +29,4 @@ pub use emails::{EmailRow, flags};
 pub use threads::ThreadRow;
 pub use thread_state::ThreadStateRow;
 pub use sync_state::SyncStateRow;
+pub use contacts::ContactRow;
