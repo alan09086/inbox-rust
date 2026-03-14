@@ -642,4 +642,79 @@ mod tests {
         let err = config.validate().unwrap_err();
         assert!(err.to_string().contains("accounts[1]"));
     }
+
+    // === Task 18: XDG Paths resolver (8 tests) ===
+
+    #[test]
+    fn paths_resolve_returns_some() {
+        let paths = Paths::resolve();
+        assert!(paths.is_some());
+        let paths = paths.unwrap();
+        assert!(paths.config_dir.ends_with("inboxly"));
+        assert!(paths.data_dir.ends_with("inboxly"));
+        assert!(paths.cache_dir.ends_with("inboxly"));
+    }
+
+    #[test]
+    fn paths_config_file_path() {
+        let paths = Paths::resolve().unwrap();
+        assert!(paths.config_file().ends_with("config.toml"));
+    }
+
+    #[test]
+    fn paths_database_file_path() {
+        let paths = Paths::resolve().unwrap();
+        assert!(paths.database_file().ends_with("inboxly.db"));
+    }
+
+    #[test]
+    fn paths_maildir_root_path() {
+        let paths = Paths::resolve().unwrap();
+        assert!(paths.maildir_root().ends_with("maildir"));
+    }
+
+    #[test]
+    fn paths_search_index_dir_path() {
+        let paths = Paths::resolve().unwrap();
+        assert!(paths.search_index_dir().ends_with("index"));
+    }
+
+    #[test]
+    fn paths_with_config_overrides() {
+        let config = AppConfig {
+            data_dir: Some(PathBuf::from("/custom/data")),
+            cache_dir: Some(PathBuf::from("/custom/cache")),
+            ..Default::default()
+        };
+        let paths = Paths::resolve_with_config(&config).unwrap();
+        assert_eq!(paths.data_dir, PathBuf::from("/custom/data"));
+        assert_eq!(paths.cache_dir, PathBuf::from("/custom/cache"));
+        assert!(paths.config_dir.ends_with("inboxly"));
+    }
+
+    #[test]
+    fn paths_without_config_overrides() {
+        let config = AppConfig::default();
+        let paths_default = Paths::resolve().unwrap();
+        let paths_with = Paths::resolve_with_config(&config).unwrap();
+        assert_eq!(paths_default.data_dir, paths_with.data_dir);
+        assert_eq!(paths_default.cache_dir, paths_with.cache_dir);
+    }
+
+    #[test]
+    fn paths_ensure_dirs_creates_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths {
+            config_dir: dir.path().join("config").join("inboxly"),
+            data_dir: dir.path().join("data").join("inboxly"),
+            cache_dir: dir.path().join("cache").join("inboxly"),
+        };
+        assert!(!paths.config_dir.exists());
+        assert!(!paths.data_dir.exists());
+        assert!(!paths.cache_dir.exists());
+        paths.ensure_dirs().unwrap();
+        assert!(paths.config_dir.exists());
+        assert!(paths.data_dir.exists());
+        assert!(paths.cache_dir.exists());
+    }
 }
