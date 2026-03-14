@@ -4,6 +4,8 @@
 //! Purchases, Travel, Forums, Low Priority) and provides
 //! [`ensure_system_bundles`] for idempotent creation at startup.
 
+use chrono::{NaiveTime, Weekday};
+use inboxly_core::throttle::{BundleThrottle, WeekdayWrapper};
 use inboxly_core::{BundleCategory, BundleId};
 use inboxly_store::{BundleRow, Store};
 use uuid::Uuid;
@@ -196,6 +198,47 @@ fn default_throttle(category: &BundleCategory) -> &'static str {
     }
 }
 
+/// Default throttle presets for built-in bundle categories.
+///
+/// These match Google Inbox's behaviour: most bundles batch daily,
+/// Social/Finance/Travel/Purchases are immediate (time-sensitive),
+/// and Low Priority batches weekly.
+///
+/// | Category     | Throttle                  | Rationale                |
+/// |-------------|---------------------------|--------------------------|
+/// | Social      | Immediate                 | Users want social fast   |
+/// | Promos      | Daily @ 5 PM              | End-of-day batch         |
+/// | Updates     | Daily @ 9 AM              | Morning batch            |
+/// | Finance     | Immediate                 | Bank alerts urgent       |
+/// | Purchases   | Immediate                 | Order confirmations      |
+/// | Travel      | Immediate                 | Flight changes urgent    |
+/// | Forums      | Daily @ 12 PM             | Midday batch             |
+/// | Low Priority| Weekly @ Monday 8 AM      | Weekly digest            |
+/// | Saved       | Immediate                 | User-pinned              |
+/// | Custom(_)   | Immediate                 | Default for custom       |
+pub fn default_throttle_for_category(category: &BundleCategory) -> BundleThrottle {
+    match category {
+        BundleCategory::Social => BundleThrottle::Immediate,
+        BundleCategory::Promos => BundleThrottle::Daily {
+            delivery_time: NaiveTime::from_hms_opt(17, 0, 0).expect("valid time: 17:00"),
+        },
+        BundleCategory::Updates => BundleThrottle::Daily {
+            delivery_time: NaiveTime::from_hms_opt(9, 0, 0).expect("valid time: 09:00"),
+        },
+        BundleCategory::Finance => BundleThrottle::Immediate,
+        BundleCategory::Purchases => BundleThrottle::Immediate,
+        BundleCategory::Travel => BundleThrottle::Immediate,
+        BundleCategory::Forums => BundleThrottle::Daily {
+            delivery_time: NaiveTime::from_hms_opt(12, 0, 0).expect("valid time: 12:00"),
+        },
+        BundleCategory::LowPriority => BundleThrottle::Weekly {
+            delivery_day: WeekdayWrapper(Weekday::Mon),
+            delivery_time: NaiveTime::from_hms_opt(8, 0, 0).expect("valid time: 08:00"),
+        },
+        BundleCategory::Saved | BundleCategory::Custom(_) => BundleThrottle::Immediate,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -256,5 +299,64 @@ mod tests {
         // Social first, Low Priority last
         assert_eq!(SYSTEM_BUNDLES[0].sort_order, 0);
         assert_eq!(SYSTEM_BUNDLES[7].sort_order, 7);
+    }
+
+    // -- M14: Throttle preset tests ------------------------------------------
+
+    #[test]
+    fn promos_defaults_to_daily_5pm() {
+        let throttle = default_throttle_for_category(&BundleCategory::Promos);
+        match throttle {
+            BundleThrottle::Daily { delivery_time } => {
+                assert_eq!(
+                    delivery_time,
+                    NaiveTime::from_hms_opt(17, 0, 0).expect("valid time")
+                );
+            }
+            _ => panic!("expected Daily for Promos"),
+        }
+    }
+
+    #[test]
+    fn low_priority_defaults_to_weekly_monday() {
+        let throttle = default_throttle_for_category(&BundleCategory::LowPriority);
+        match throttle {
+            BundleThrottle::Weekly {
+                delivery_day,
+                delivery_time,
+            } => {
+                assert_eq!(delivery_day.0, Weekday::Mon);
+                assert_eq!(
+                    delivery_time,
+                    NaiveTime::from_hms_opt(8, 0, 0).expect("valid time")
+                );
+            }
+            _ => panic!("expected Weekly for LowPriority"),
+        }
+    }
+
+    #[test]
+    fn social_defaults_to_immediate() {
+        let throttle = default_throttle_for_category(&BundleCategory::Social);
+        assert_eq!(throttle, BundleThrottle::Immediate);
+    }
+
+    #[test]
+    fn custom_bundles_default_to_immediate() {
+        let throttle =
+            default_throttle_for_category(&BundleCategory::Custom("My Bundle".into()));
+        assert_eq!(throttle, BundleThrottle::Immediate);
+    }
+
+    #[test]
+    fn finance_and_travel_immediate_for_urgency() {
+        assert_eq!(
+            default_throttle_for_category(&BundleCategory::Finance),
+            BundleThrottle::Immediate
+        );
+        assert_eq!(
+            default_throttle_for_category(&BundleCategory::Travel),
+            BundleThrottle::Immediate
+        );
     }
 }
