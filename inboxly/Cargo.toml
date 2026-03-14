@@ -1,0 +1,9 @@
+[package]
+name = "inboxly"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "inboxly"
+path = "src/main.rs"

@@ -1,0 +1,36 @@
+[workspace]
+members = [
+    "inboxly",
+    "inboxly-core",
+    "inboxly-imap",
+    "inboxly-store",
+    "inboxly-bundler",
+    "inboxly-snooze",
+    "inboxly-extract",
+    "inboxly-ui",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+repository = "https://codeberg.org/alan090/inbox-rust"
+
+[workspace.dependencies]
+# Shared across crates — centralized versions
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+tokio = { version = "1", features = ["full"] }
+
+# Internal crates
+inboxly-core = { path = "inboxly-core" }
+inboxly-imap = { path = "inboxly-imap" }
+inboxly-store = { path = "inboxly-store" }
+inboxly-bundler = { path = "inboxly-bundler" }
+inboxly-snooze = { path = "inboxly-snooze" }
+inboxly-extract = { path = "inboxly-extract" }
+inboxly-ui = { path = "inboxly-ui" }
