@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0] - 2026-03-14
+
+### Added
+
+- **IMAP crate**: Full `inboxly-imap` crate with async connection, auth, and folder management
+- **TLS**: Implicit TLS (port 993) and STARTTLS upgrade with rustls + webpki roots
+- **Connection**: ImapConnection with capability detection (IDLE, CONDSTORE, COMPRESS, etc.)
+- **Password auth**: LOGIN command with credential redaction in Debug output
+- **OAuth2**: Gmail PKCE authorization code flow with loopback HTTP server, token refresh
+- **XOAUTH2**: SASL mechanism for IMAP AUTHENTICATE with base64-encoded bearer token
+- **Folder listing**: LIST with SPECIAL-USE attribute parsing (RFC 6154) and name-based fallback heuristics
+- **Auth dispatcher**: Routes Password/AppPassword to LOGIN, OAuth2 to XOAUTH2
+- **Connection pool**: Semaphore-gated concurrency (default 3), exponential backoff retry, NOOP health checks
+- **Sync channels**: SyncEvent (9 variants) and UiCommand (4 variants) via tokio mpsc
+- 35 new IMAP tests (TLS, connection, auth, OAuth2, XOAUTH2, folders, pool, channels, integration)
+
 ## [0.5.0] - 2026-03-14
 
 ### Added

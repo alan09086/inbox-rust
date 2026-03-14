@@ -46,13 +46,15 @@ Requires Rust edition 2024 (rustc 1.85+).
 
 ## Status
 
-**M5 complete** — Full-text search with Tantivy:
-- Indexed fields: from, to, subject, body, date, account_id, bundle_category, has_attachment
-- Multi-field search, faceted filtering, date range queries
-- BM25 ranking with recency boost (exponential decay, 60-day half-life)
-- Batch indexing, incremental updates, full rebuild from SQLite
-- SearchHit results with score, snippet, and metadata
-- 152 tests passing
+**M6 complete** — IMAP connection and authentication:
+- TLS connector with implicit TLS and STARTTLS upgrade
+- IMAP connection with capability detection
+- Password LOGIN and OAuth2 XOAUTH2 SASL authentication
+- Gmail OAuth2 with PKCE authorization code flow
+- Folder listing with RFC 6154 SPECIAL-USE attribute parsing
+- Connection pool with semaphore-based concurrency and exponential backoff
+- Sync event channels (tokio mpsc) for cross-task communication
+- 187 tests passing
 
 ## Licence
 
