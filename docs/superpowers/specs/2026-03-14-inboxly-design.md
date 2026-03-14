@@ -137,7 +137,8 @@ EmailMeta {
     attachments: Vec<AttachmentMeta>,  // name, mime, size (not content)
     flags: EmailFlags,       // read, starred, answered, draft
     size_bytes: u64,
-    imap_uid: u32,           // for sync tracking
+    imap_uid: u32,           // for sync tracking, scoped to (account_id, folder)
+    imap_folder: String,     // IMAP folder this UID belongs to (e.g., "INBOX", "Sent")
 }
 
 // Full email content — loaded on demand when user opens a message.
@@ -232,8 +233,9 @@ Simplified References-based threading (inspired by JWZ but without the full cont
 2. If `References` is present, the thread ID is determined by the **first** Message-ID in the References list (the original message that started the thread).
 3. If only `In-Reply-To` is present, look up the referenced message and join its thread.
 4. If neither header exists, the email starts a new thread with a fresh `ThreadId`.
-5. **No subject-based grouping** — this avoids false positives (e.g., multiple "Re: Hello" threads). Users can manually merge threads later if needed.
-6. When a reply arrives before its parent, a placeholder thread is created. When the parent arrives, the placeholder is resolved and the thread is unified.
+5. **No subject-based grouping** — this avoids false positives (e.g., multiple "Re: Hello" threads).
+6. When a reply arrives before its parent, a placeholder thread is created. When the parent arrives, the placeholder is resolved and the thread is unified. The `emails.thread_id` column is mutable — thread unification issues an `UPDATE` to reassign orphaned emails to the resolved thread.
+7. **Manual thread merging is deferred** — not in v1 scope. Listed in Deferred section.
 
 ### SQLite Schema
 
@@ -241,8 +243,9 @@ Simplified References-based threading (inspired by JWZ but without the full cont
 - id (TEXT PK), account_id, thread_id, from_name, from_address, to_json, cc_json
 - subject, snippet, date (INTEGER, unix epoch), maildir_path
 - flags (INTEGER, bitmask: read/starred/answered/draft/deleted)
-- size_bytes, imap_uid, has_attachments (BOOLEAN)
+- size_bytes, imap_uid, imap_folder, has_attachments (BOOLEAN)
 - message_id_header, in_reply_to, references_json
+- UNIQUE constraint on (account_id, imap_folder, imap_uid) — UIDs are scoped per folder
 
 **`threads`** — aggregated thread metadata:
 - id (TEXT PK), account_id, subject, newest_date, oldest_date
@@ -295,6 +298,20 @@ Simplified References-based threading (inspired by JWZ but without the full cont
 | Fastmail | App-specific password via IMAP LOGIN |
 | Generic IMAP | Username + password, STARTTLS or implicit TLS |
 | OAuth2 providers | Authorization code flow with PKCE, token refresh |
+
+### Synced Folders
+
+v1 syncs a fixed set of well-known IMAP folders per account:
+
+| Folder | IMAP Name | Gmail Mapping | Purpose |
+|--------|-----------|---------------|---------|
+| Inbox | `INBOX` | `INBOX` | Primary mail, bundling target |
+| Sent | `Sent` | `[Gmail]/Sent Mail` | Sent mail archive |
+| Drafts | `Drafts` | `[Gmail]/Drafts` | Draft messages |
+| Trash | `Trash` | `[Gmail]/Trash` | Deleted messages |
+| Spam | `Spam` / `Junk` | `[Gmail]/Spam` | Spam/junk |
+
+Folder names are resolved via IMAP `LIST` command with `SPECIAL-USE` attributes (RFC 6154) where supported, falling back to common name matching. Custom/nested user folders are not synced in v1 — only the 5 standard folders above.
 
 ### Design Decisions
 
@@ -370,6 +387,10 @@ User rules (highest priority) → Sender learning (if confidence > threshold) �
 - **Weekly** — same, once per week
 
 Throttled emails are synced and stored but don't surface in the inbox feed until their delivery window.
+
+### Known Limitation: Body-Based Rules and Initial Sync
+
+During initial sync Phase 1, only headers/envelopes are fetched. Rules using `RuleField::Body` and header heuristics that depend on body content will not fire until Phase 2 downloads the full message bodies. Emails are re-evaluated through the bundler as bodies arrive during Phase 2, so categorisation catches up automatically — but there may be a temporary window where some emails appear uncategorised in the inbox before their bodies are fetched.
 
 ## Snooze & Reminder System
 
@@ -526,11 +547,19 @@ Three primary views drive toolbar colour and content:
 - **FAB speed dial**: Main button rotates, options fly in from below with staggered fade+slide.
 - **View transitions**: Toolbar colour crossfade on view switch.
 
+### Undo Mechanism
+
+Destructive actions (Done, Sweep, Delete) show a snackbar at the bottom of the inbox view:
+- Snackbar displays for 8 seconds with the action description (e.g., "3 conversations marked done") and an **Undo** button
+- Undo reverses the action immediately (moves threads back to inbox, restores pin state)
+- Only the **last** action is undoable — performing a new action dismisses the previous snackbar
+- Implementation: the action is applied optimistically in the UI and SQLite, but the IMAP sync (e.g., setting `\Deleted` flag, moving to archive) is delayed until the snackbar expires. If undone, the IMAP operation is cancelled. This avoids network round-trips for undo.
+
 ### Communication
 
 - UI thread communicates with sync engine via `tokio::sync::mpsc` channels
 - Sync events: `NewEmail`, `EmailFlagsChanged`, `EmailDeleted`, `SyncProgress`, `SyncError`
-- UI actions: `MarkDone`, `Pin`, `Unpin`, `Snooze`, `MoveToBundle`, `Compose`, `Search`
+- UI actions: `MarkDone`, `Pin`, `Unpin`, `Snooze`, `MoveToBundle`, `Compose`, `Search`, `Undo`
 
 ## Theme System
 
@@ -690,6 +719,18 @@ The same engine/UI separation enables:
 - CLI client
 - Web frontend (WASM)
 
+### Manual Thread Merging
+
+Users may want to manually merge or split threads when the References-based algorithm doesn't group correctly. Deferred to post-v1.
+
+### Custom IMAP Folder Sync
+
+v1 syncs only the 5 standard folders (Inbox, Sent, Drafts, Trash, Spam). Syncing user-created folders/labels is deferred.
+
+### WYSIWYG Compose Editor
+
+v1 uses Markdown with preview. A full WYSIWYG rich text editor widget for Iced is deferred pending ecosystem maturity.
+
 ### Smart Reply
 
 Future integration with local LLM (e.g., llama.cpp) or Claude API for contextual quick-reply suggestions.
@@ -703,7 +744,7 @@ Future sync with Google Calendar and Google Keep for reminders interop.
 | Crate | Dependency | Purpose |
 |-------|-----------|---------|
 | `inboxly-core` | `serde`, `thiserror`, `chrono`, `uuid` | Serialisation, errors, datetime, IDs |
-| `inboxly-imap` | `async-imap`, `tokio`, `oauth2`, `lettre` | IMAP client, async runtime, OAuth, SMTP |
+| `inboxly-imap` | `async-imap`, `tokio`, `tokio-rustls`, `oauth2`, `lettre` | IMAP client, async runtime, TLS, OAuth, SMTP |
 | `inboxly-store` | `rusqlite`, `tantivy`, `maildir` | SQLite, full-text search, Maildir format |
 | `inboxly-bundler` | `regex` | Pattern matching for rules |
 | `inboxly-snooze` | `tokio`, `zbus` | Async scheduler, D-Bus (GeoClue2) |
