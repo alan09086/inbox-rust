@@ -272,6 +272,20 @@ pub fn parse_address_list(raw: &str) -> Vec<ParsedAddress> {
 mod tests {
     use super::*;
 
+    // --- Contact Display tests ---
+
+    #[test]
+    fn contact_display_with_name() {
+        let c = Contact::new("Alice", "alice@example.com");
+        assert_eq!(format!("{c}"), "Alice <alice@example.com>");
+    }
+
+    #[test]
+    fn contact_display_without_name() {
+        let c = Contact::new("", "bob@example.com");
+        assert_eq!(format!("{c}"), "bob@example.com");
+    }
+
     // --- Existing Contact tests (preserved) ---
 
     #[test]
