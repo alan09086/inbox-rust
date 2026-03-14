@@ -8,5 +8,6 @@ pub mod feed;
 pub mod nav;
 pub mod theme;
 pub mod toolbar;
+pub mod undo;
 pub mod views;
 pub mod widgets;

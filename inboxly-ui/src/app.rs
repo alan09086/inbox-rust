@@ -9,6 +9,7 @@ use inboxly_store::Store;
 use crate::feed::{self, FeedSection};
 use crate::nav::{NavBundleCategory, NavTarget, default_bundle_categories};
 use crate::theme::{ActiveView, InboxlyTheme};
+use crate::undo::{UndoAction, UndoState};
 use crate::views::inbox_view::{InboxViewMessage, inbox_view};
 
 /// Top-level application state.
@@ -31,6 +32,8 @@ pub struct Inboxly {
     pub store: Option<Store>,
     /// Pre-built feed sections for the inbox view.
     pub feed_sections: Vec<FeedSection>,
+    /// Undo state for timed undo of inbox actions.
+    pub undo_state: UndoState,
 }
 
 /// All messages the application can receive.
@@ -50,6 +53,16 @@ pub enum Message {
     ReloadFeed,
     /// Message from the inbox view (bundle toggle, etc.).
     InboxView(InboxViewMessage),
+    /// Mark a thread as Done (archive).
+    MarkDone(String),
+    /// Toggle pin state for a thread.
+    TogglePin(String),
+    /// Sweep: mark all unpinned threads in the current section as Done.
+    Sweep,
+    /// User pressed Undo on the snackbar.
+    Undo,
+    /// Undo timer expired -- commit the action.
+    UndoExpired,
 }
 
 impl Default for Inboxly {
@@ -64,6 +77,7 @@ impl Default for Inboxly {
             theme: InboxlyTheme::light(),
             store: None,
             feed_sections: Vec::new(),
+            undo_state: UndoState::new(),
         }
     }
 }
@@ -116,13 +130,95 @@ impl Inboxly {
             Message::ReloadFeed => {
                 self.reload_feed();
             }
-            Message::InboxView(inbox_msg) => {
-                match inbox_msg {
-                    InboxViewMessage::ToggleBundle(bundle_id) => {
-                        tracing::debug!("toggle bundle: {bundle_id}");
-                        // TODO(M18): expand/collapse bundle state tracking
+            Message::InboxView(inbox_msg) => match inbox_msg {
+                InboxViewMessage::ToggleBundle(bundle_id) => {
+                    tracing::debug!("toggle bundle: {bundle_id}");
+                }
+            },
+            Message::MarkDone(thread_id) => {
+                if let Some(ref store) = self.store {
+                    if let Err(e) = store.get_or_create_thread_state(&thread_id) {
+                        tracing::warn!("failed to ensure thread state: {e}");
+                    }
+                    if let Err(e) = store.set_thread_done(&thread_id, true) {
+                        tracing::warn!("failed to mark done: {e}");
                     }
                 }
+                self.undo_state.push(UndoAction::MarkDone { thread_id });
+                self.reload_feed();
+            }
+            Message::TogglePin(thread_id) => {
+                let was_pinned = self
+                    .store
+                    .as_ref()
+                    .and_then(|store| store.get_thread_state(&thread_id).ok().map(|s| s.pinned));
+                let was_pinned = was_pinned.unwrap_or(false);
+
+                if let Some(ref store) = self.store {
+                    if let Err(e) = store.get_or_create_thread_state(&thread_id) {
+                        tracing::warn!("failed to ensure thread state: {e}");
+                    }
+                    if let Err(e) = store.set_thread_pinned(&thread_id, !was_pinned) {
+                        tracing::warn!("failed to toggle pin: {e}");
+                    }
+                }
+                self.undo_state.push(UndoAction::TogglePin {
+                    thread_id,
+                    was_pinned,
+                });
+                self.reload_feed();
+            }
+            Message::Sweep => {
+                // Mark all unpinned, non-done threads as done.
+                let mut swept = Vec::new();
+                if let Some(ref store) = self.store
+                    && let Ok(threads) = store.query_inbox_threads()
+                {
+                        for thread in threads {
+                            if !thread.pinned {
+                                if let Err(e) = store.get_or_create_thread_state(&thread.id) {
+                                    tracing::warn!("sweep: failed to ensure state: {e}");
+                                    continue;
+                                }
+                                if let Err(e) = store.set_thread_done(&thread.id, true) {
+                                    tracing::warn!("sweep: failed to mark done: {e}");
+                                    continue;
+                                }
+                                swept.push(thread.id);
+                            }
+                        }
+                }
+                if !swept.is_empty() {
+                    self.undo_state
+                        .push(UndoAction::Sweep { thread_ids: swept });
+                }
+                self.reload_feed();
+            }
+            Message::Undo => {
+                if let Some(action) = self.undo_state.take() {
+                    if let Some(ref store) = self.store {
+                        match action {
+                            UndoAction::MarkDone { thread_id } => {
+                                let _ = store.set_thread_done(&thread_id, false);
+                            }
+                            UndoAction::TogglePin {
+                                thread_id,
+                                was_pinned,
+                            } => {
+                                let _ = store.set_thread_pinned(&thread_id, was_pinned);
+                            }
+                            UndoAction::Sweep { thread_ids } => {
+                                for tid in &thread_ids {
+                                    let _ = store.set_thread_done(tid, false);
+                                }
+                            }
+                        }
+                    }
+                    self.reload_feed();
+                }
+            }
+            Message::UndoExpired => {
+                self.undo_state.clear();
             }
         }
         Task::none()
@@ -173,10 +269,22 @@ impl Inboxly {
             None => content_area,
         };
 
-        column![toolbar, body]
+        let mut main_column = column![toolbar, body]
             .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+            .height(Length::Fill);
+
+        // Undo snackbar at the bottom.
+        if let Some(desc) = self.undo_state.description() {
+            main_column = main_column.push(crate::widgets::undo_snackbar::undo_snackbar(
+                &desc,
+                Message::Undo,
+                self.theme.colors.surface,
+                self.theme.colors.text_primary,
+                self.theme.colors.toolbar_inbox,
+            ));
+        }
+
+        main_column.into()
     }
 
     /// Window title.
