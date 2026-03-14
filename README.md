@@ -46,14 +46,13 @@ Requires Rust edition 2024 (rustc 1.85+).
 
 ## Status
 
-**M14 complete** — Bundle Throttling (final backend milestone):
-- Throttle non-urgent bundles: Immediate, Daily (with delivery time), Weekly (with day + time)
-- Inbox feed filtering: suppressed bundles hidden until delivery window opens
-- Background scheduler: tokio task checks windows every 60s, emits events on transition
-- Body re-evaluation: Phase 2 catch-up re-runs pipeline when message bodies arrive
-- Default presets: Promos 5PM, Updates 9AM, Forums noon, Low Priority Mon 8AM
-- Schema migration v3->v4: existing throttle values converted to JSON
-- 557 tests passing, 0 clippy warnings
+**M15 complete** -- Iced Shell + Nav Drawer (first visual milestone):
+- Desktop window with Iced 0.14 elm-architecture
+- Nav drawer: account switcher, Inbox/Snoozed/Done, folder nav, 8 bundle categories with coloured dots
+- Toolbar: hamburger toggle, view title, search placeholder, avatar circle
+- View switching: toolbar colour changes (blue/orange/green) by active view
+- Theme system with BigTop APK colour palette and layout constants
+- 576 tests passing, 0 clippy warnings
 
 ## Licence
 

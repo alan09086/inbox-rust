@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.15.0] - 2026-03-14
+
+### Added
+
+- **Iced desktop shell**: Application window using Iced 0.14 with elm-architecture (Model -> Message -> Update -> View)
+- **Navigation drawer**: 264dp white sidebar with account switcher (avatar + email + account count), primary nav (Inbox/Snoozed/Done), secondary nav (Drafts/Sent/Reminders/Trash/Spam), and 8 bundle categories with BigTop coloured dots
+- **Toolbar**: 56dp coloured bar with hamburger toggle, view title, search placeholder, and account avatar circle. Colour changes by view: blue (Inbox), orange (Snoozed), green (Done)
+- **View switching**: NavTarget routing system -- primary views change toolbar colour, secondary nav and bundle categories update content without changing toolbar
+- **Theme system**: `ActiveView` enum, `color_from_hex()`, `category_color()`, layout constants (from BigTop APK), and typography sizes
+- **Nav types**: `NavSection`, `NavBundleCategory`, `NavTarget` for unified navigation handling
+- **Iced 0.14 workspace dependency**: Added to workspace Cargo.toml with `advanced` feature
+- 19 new tests (576 total): state management (11), theme colours and layout constants (8)
+
 ## [0.14.0] - 2026-03-14
 
 ### Added
