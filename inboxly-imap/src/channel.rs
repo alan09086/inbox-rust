@@ -1,1 +1,113 @@
-// Channels — implemented in Task 11
+use tokio::sync::mpsc;
+
+use crate::folders::ImapFolder;
+
+/// Events sent from the IMAP sync engine to the UI.
+///
+/// Sent via `tokio::sync::mpsc::Sender<SyncEvent>`.
+#[derive(Debug, Clone)]
+pub enum SyncEvent {
+    /// Successfully connected and authenticated to an IMAP account.
+    Connected {
+        account_id: String,
+    },
+
+    /// Disconnected from an account (intentional or error).
+    Disconnected {
+        account_id: String,
+        reason: String,
+    },
+
+    /// Authentication is required (token expired, password changed, etc.).
+    /// The UI should prompt the user to re-authenticate.
+    AuthRequired {
+        account_id: String,
+    },
+
+    /// Sync progress update for a folder.
+    SyncProgress {
+        account_id: String,
+        folder: String,
+        current: u64,
+        total: u64,
+        /// Phase name: "headers", "bodies", or "flags".
+        phase: String,
+    },
+
+    /// Sync completed for a folder.
+    SyncComplete {
+        account_id: String,
+        folder: String,
+    },
+
+    /// An error occurred during sync.
+    Error {
+        account_id: String,
+        message: String,
+    },
+
+    /// New emails arrived in a folder.
+    NewEmails {
+        account_id: String,
+        folder: String,
+        count: u64,
+    },
+
+    /// Email flags changed in a folder (read, starred, etc.).
+    FlagsChanged {
+        account_id: String,
+        folder: String,
+        count: u64,
+    },
+
+    /// Folder list retrieved for an account.
+    FolderList {
+        account_id: String,
+        folders: Vec<ImapFolder>,
+    },
+}
+
+/// Commands sent from the UI to the IMAP sync engine.
+///
+/// Sent via `tokio::sync::mpsc::Sender<UiCommand>`.
+#[derive(Debug, Clone)]
+pub enum UiCommand {
+    /// Start syncing an account.
+    StartSync {
+        account_id: String,
+    },
+
+    /// Stop syncing an account.
+    StopSync {
+        account_id: String,
+    },
+
+    /// Force a full resync of a specific folder.
+    ForceResync {
+        account_id: String,
+        folder: String,
+    },
+
+    /// Gracefully shut down all sync tasks.
+    Shutdown,
+}
+
+/// Create the bidirectional channel pair for sync engine <-> UI communication.
+///
+/// - `event_tx` / `event_rx`: Sync engine sends events, UI receives.
+/// - `cmd_tx` / `cmd_rx`: UI sends commands, sync engine receives.
+///
+/// `buffer_size` controls the channel buffer (recommended: 64 or higher for
+/// burst handling during initial sync).
+pub fn create_sync_channels(
+    buffer_size: usize,
+) -> (
+    mpsc::Sender<SyncEvent>,
+    mpsc::Receiver<SyncEvent>,
+    mpsc::Sender<UiCommand>,
+    mpsc::Receiver<UiCommand>,
+) {
+    let (event_tx, event_rx) = mpsc::channel(buffer_size);
+    let (cmd_tx, cmd_rx) = mpsc::channel(buffer_size);
+    (event_tx, event_rx, cmd_tx, cmd_rx)
+}
