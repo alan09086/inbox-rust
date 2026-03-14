@@ -3,6 +3,7 @@ pub mod envelope;
 pub mod error;
 pub mod progress;
 pub mod store;
+pub mod threading;
 pub mod uid_state;
 
 pub use error::{SyncError, SyncResult};
