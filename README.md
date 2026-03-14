@@ -46,15 +46,14 @@ Requires Rust edition 2024 (rustc 1.85+).
 
 ## Status
 
-**M6 complete** — IMAP connection and authentication:
-- TLS connector with implicit TLS and STARTTLS upgrade
-- IMAP connection with capability detection
-- Password LOGIN and OAuth2 XOAUTH2 SASL authentication
-- Gmail OAuth2 with PKCE authorization code flow
-- Folder listing with RFC 6154 SPECIAL-USE attribute parsing
-- Connection pool with semaphore-based concurrency and exponential backoff
-- Sync event channels (tokio mpsc) for cross-task communication
-- 187 tests passing
+**M7 complete** — Initial sync engine (Phase 1: headers only):
+- Batched UID FETCH with newest-first processing
+- UIDVALIDITY tracking with automatic invalidation on resets
+- Envelope-to-EmailRow conversion with RFC 2822 date parsing
+- Basic thread association via In-Reply-To/References headers
+- Crash-recoverable sync with per-batch state persistence
+- Progress events for UI feedback during sync
+- 224 tests passing
 
 ## Licence
 

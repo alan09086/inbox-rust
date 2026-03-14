@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.0] - 2026-03-14
+
+### Added
+
+- **Sync engine**: Phase 1 initial sync in `inboxly-imap/src/sync/`
+- **Batch processing**: Newest-first UID range splitting with configurable batch size
+- **UIDVALIDITY**: State persistence, staleness detection, automatic folder invalidation on reset
+- **Envelope parsing**: IMAP ENVELOPE to EmailRow conversion with RFC 2822 date handling
+- **Batch insert**: Transactional SQLite insertion with ON CONFLICT IGNORE dedup
+- **Threading**: Basic thread association via In-Reply-To/References header chains
+- **Sync orchestrator**: `run_phase1_sync()` — full async pipeline (SELECT → batch FETCH → parse → insert → thread → persist state)
+- **Crash recovery**: Per-batch state persistence enables resume from last completed batch
+- **Progress events**: SyncEvent channel for real-time UI feedback (header count, batch progress)
+- 37 new sync tests (batching, UID state, envelope parsing, store operations, threading, engine integration)
+
 ## [0.6.0] - 2026-03-14
 
 ### Added
