@@ -3,3 +3,11 @@ name = "inboxly-ui"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+
+[dependencies]
+inboxly-core.workspace = true
+inboxly-imap.workspace = true
+inboxly-store.workspace = true
+inboxly-bundler.workspace = true
+inboxly-snooze.workspace = true
+inboxly-extract.workspace = true

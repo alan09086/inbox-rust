@@ -7,3 +7,6 @@ license.workspace = true
 [[bin]]
 name = "inboxly"
 path = "src/main.rs"
+
+[dependencies]
+inboxly-ui.workspace = true
