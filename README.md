@@ -46,14 +46,15 @@ Requires Rust edition 2024 (rustc 1.85+).
 
 ## Status
 
-**M11 complete** — Contacts + Avatar System:
-- 26-colour BigTop APK avatar palette for consistent sender identification (A-Z mapped to unique colours)
-- RFC 2822 address header parsing (`From`, `To`, `Cc`) with quoted-name and comma-list support
-- Automatic avatar letter derivation from display name or email local part
-- Contact extraction from email ingest pipeline (runs on every new email)
-- Batch backfill for populating contacts from existing emails in the database
-- Contact deduplication by lowercase email address with display name resolution (most recent wins)
-- 392 tests passing, 0 clippy warnings
+**M12 complete** — Bundler Header Heuristics:
+- Automatic email categorisation using header-based heuristics (zero-config, 25 default rules)
+- 8 system bundles with BigTop colours: Social, Promos, Updates, Finance, Purchases, Travel, Forums, Low Priority
+- TOML-defined rules with user override support (`~/.config/inboxly/heuristics.toml`)
+- Priority-ordered matching: higher priority rules evaluated first, first match wins
+- Compiled regex engine for pattern matching (domain globs, header values, subject patterns)
+- Deterministic UUID v5 system bundle IDs (stable across reinstalls)
+- Batch `categorise_all()` and single `categorise_thread()` APIs for integration with sync pipeline
+- 437 tests passing, 0 clippy warnings
 
 ## Licence
 

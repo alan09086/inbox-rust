@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.12.0] - 2026-03-14
+
+### Added
+
+- **Bundler header heuristics**: Automatic email categorisation using header-based pattern matching in new `inboxly-bundler` crate
+- **25 default heuristic rules** covering 8 categories: Social, Promos, Updates, Finance, Purchases, Travel, Forums, Low Priority
+- **TOML rule engine**: `HeuristicRule`, `RuleField`, `RuleOp` types with `parse_rules()` and `load_rules()` for user overrides at `~/.config/inboxly/heuristics.toml`
+- **Compiled regex matching**: `CompiledRule` pre-compiles regex patterns at construction; domain glob-to-regex conversion; priority-ordered first-match-wins evaluation
+- **System bundles**: 8 default bundles with BigTop colour palette, deterministic UUID v5 IDs (stable across reinstalls), idempotent `ensure_system_bundles()` for startup
+- **`Bundler` struct**: Public API with `new()`, `categorise()`, `categorise_all()`, `categorise_thread()`, `bundle_id_for_category()`, `rule_count()`
+- **`Contact` Display impl**: Formats as `"Name <address>"` or bare `"address"` when name is empty
+- **`EmailMeta::test_default()`**: Test fixture constructor behind `test-helpers` feature flag
+- **Store methods for bundler**: `get_uncategorised_thread_ids()`, `get_newest_email_in_thread()`, `load_email_headers()` for batch categorisation
+- 45 new tests (437 total): TOML parsing (6), system bundles (6), heuristic matching (19), integration (11), core Display (2), doctest (1)
+
 ## [0.11.0] - 2026-03-14
 
 ### Added
