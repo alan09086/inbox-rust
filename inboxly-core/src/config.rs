@@ -334,4 +334,58 @@ mod tests {
         assert_eq!(presets.evening_hour, 18);
         assert_eq!(presets.weekend_day, 5);
     }
+
+    // === Task 14: AccountConfig (3 tests) ===
+
+    #[test]
+    fn account_config_default_ports() {
+        let toml_str = r#"
+            email = "test@example.com"
+            imap_host = "imap.example.com"
+            smtp_host = "smtp.example.com"
+        "#;
+        let account: AccountConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(account.imap_port, 993);
+        assert_eq!(account.smtp_port, 587);
+        assert_eq!(account.provider, "generic");
+        assert_eq!(account.auth_method, AuthMethod::Password);
+        assert_eq!(account.display_name, "");
+    }
+
+    #[test]
+    fn account_config_explicit_ports() {
+        let toml_str = r#"
+            email = "user@gmail.com"
+            display_name = "Test User"
+            provider = "gmail"
+            auth_method = "oauth2"
+            imap_host = "imap.gmail.com"
+            imap_port = 993
+            smtp_host = "smtp.gmail.com"
+            smtp_port = 465
+        "#;
+        let account: AccountConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(account.email, "user@gmail.com");
+        assert_eq!(account.display_name, "Test User");
+        assert_eq!(account.provider, "gmail");
+        assert_eq!(account.auth_method, AuthMethod::OAuth2);
+        assert_eq!(account.smtp_port, 465);
+    }
+
+    #[test]
+    fn account_config_round_trip() {
+        let account = AccountConfig {
+            email: "test@fastmail.com".to_string(),
+            display_name: "Alan".to_string(),
+            provider: "fastmail".to_string(),
+            auth_method: AuthMethod::AppPassword,
+            imap_host: "imap.fastmail.com".to_string(),
+            imap_port: 993,
+            smtp_host: "smtp.fastmail.com".to_string(),
+            smtp_port: 587,
+        };
+        let serialized = toml::to_string_pretty(&account).unwrap();
+        let deserialized: AccountConfig = toml::from_str(&serialized).unwrap();
+        assert_eq!(account, deserialized);
+    }
 }
