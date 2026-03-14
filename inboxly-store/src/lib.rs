@@ -25,3 +25,4 @@ mod threads;
 pub use error::StoreError;
 pub use store::Store;
 pub use accounts::AccountRow;
+pub use emails::{EmailRow, flags};

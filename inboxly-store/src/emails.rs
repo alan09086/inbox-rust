@@ -1,1 +1,215 @@
-// TODO: implement in subsequent tasks
+use rusqlite::params;
+
+use crate::error::{Result, StoreError};
+use crate::store::Store;
+
+/// Row representation for the emails table.
+///
+/// JSON fields (`to_json`, `cc_json`, `references_json`) are stored as
+/// serialised JSON strings. Callers use `serde_json` to parse them into
+/// `Vec<Contact>` or `Vec<String>` as needed.
+#[derive(Debug, Clone)]
+pub struct EmailRow {
+    pub id: String,
+    pub account_id: String,
+    pub thread_id: String,
+    pub from_name: Option<String>,
+    pub from_address: String,
+    pub to_json: String,
+    pub cc_json: String,
+    pub subject: String,
+    pub snippet: String,
+    pub date: i64,
+    pub maildir_path: String,
+    pub flags: i64,
+    pub size_bytes: i64,
+    pub imap_uid: i64,
+    pub imap_folder: String,
+    pub has_attachments: bool,
+    pub message_id_header: Option<String>,
+    pub in_reply_to: Option<String>,
+    pub references_json: Option<String>,
+}
+
+/// Bitmask constants for `EmailRow::flags`.
+pub mod flags {
+    pub const READ: i64 = 1;
+    pub const STARRED: i64 = 2;
+    pub const ANSWERED: i64 = 4;
+    pub const DRAFT: i64 = 8;
+    pub const DELETED: i64 = 16;
+}
+
+impl Store {
+    pub fn insert_email(&self, email: &EmailRow) -> Result<()> {
+        self.conn().execute(
+            "INSERT INTO emails (id, account_id, thread_id, from_name, from_address, to_json, cc_json,
+             subject, snippet, date, maildir_path, flags, size_bytes, imap_uid, imap_folder,
+             has_attachments, message_id_header, in_reply_to, references_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+            params![
+                email.id,
+                email.account_id,
+                email.thread_id,
+                email.from_name,
+                email.from_address,
+                email.to_json,
+                email.cc_json,
+                email.subject,
+                email.snippet,
+                email.date,
+                email.maildir_path,
+                email.flags,
+                email.size_bytes,
+                email.imap_uid,
+                email.imap_folder,
+                email.has_attachments,
+                email.message_id_header,
+                email.in_reply_to,
+                email.references_json,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_email(&self, id: &str) -> Result<EmailRow> {
+        self.conn()
+            .query_row(
+                "SELECT id, account_id, thread_id, from_name, from_address, to_json, cc_json,
+                 subject, snippet, date, maildir_path, flags, size_bytes, imap_uid, imap_folder,
+                 has_attachments, message_id_header, in_reply_to, references_json
+                 FROM emails WHERE id = ?1",
+                params![id],
+                Self::row_to_email,
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => {
+                    StoreError::NotFound(format!("email {id}"))
+                }
+                other => StoreError::Sqlite(other),
+            })
+    }
+
+    /// Get all emails for a thread, ordered by date ascending.
+    pub fn get_emails_by_thread(&self, thread_id: &str) -> Result<Vec<EmailRow>> {
+        let mut stmt = self.conn().prepare(
+            "SELECT id, account_id, thread_id, from_name, from_address, to_json, cc_json,
+             subject, snippet, date, maildir_path, flags, size_bytes, imap_uid, imap_folder,
+             has_attachments, message_id_header, in_reply_to, references_json
+             FROM emails WHERE thread_id = ?1 ORDER BY date ASC",
+        )?;
+        let rows = stmt
+            .query_map(params![thread_id], Self::row_to_email)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Get all emails for an account in a folder, ordered by date descending.
+    pub fn get_emails_by_folder(
+        &self,
+        account_id: &str,
+        folder: &str,
+    ) -> Result<Vec<EmailRow>> {
+        let mut stmt = self.conn().prepare(
+            "SELECT id, account_id, thread_id, from_name, from_address, to_json, cc_json,
+             subject, snippet, date, maildir_path, flags, size_bytes, imap_uid, imap_folder,
+             has_attachments, message_id_header, in_reply_to, references_json
+             FROM emails WHERE account_id = ?1 AND imap_folder = ?2 ORDER BY date DESC",
+        )?;
+        let rows = stmt
+            .query_map(params![account_id, folder], Self::row_to_email)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Look up an email by IMAP UID (unique within account + folder).
+    pub fn get_email_by_uid(
+        &self,
+        account_id: &str,
+        folder: &str,
+        uid: i64,
+    ) -> Result<Option<EmailRow>> {
+        let result = self.conn().query_row(
+            "SELECT id, account_id, thread_id, from_name, from_address, to_json, cc_json,
+             subject, snippet, date, maildir_path, flags, size_bytes, imap_uid, imap_folder,
+             has_attachments, message_id_header, in_reply_to, references_json
+             FROM emails WHERE account_id = ?1 AND imap_folder = ?2 AND imap_uid = ?3",
+            params![account_id, folder, uid],
+            Self::row_to_email,
+        );
+        match result {
+            Ok(row) => Ok(Some(row)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(StoreError::Sqlite(e)),
+        }
+    }
+
+    /// Update flags for an email.
+    pub fn update_email_flags(&self, id: &str, flags: i64) -> Result<()> {
+        let changed = self.conn().execute(
+            "UPDATE emails SET flags = ?2 WHERE id = ?1",
+            params![id, flags],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound(format!("email {id}")));
+        }
+        Ok(())
+    }
+
+    /// Reassign an email to a different thread (used during thread unification).
+    pub fn update_email_thread(&self, email_id: &str, new_thread_id: &str) -> Result<()> {
+        let changed = self.conn().execute(
+            "UPDATE emails SET thread_id = ?2 WHERE id = ?1",
+            params![email_id, new_thread_id],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound(format!("email {email_id}")));
+        }
+        Ok(())
+    }
+
+    pub fn delete_email(&self, id: &str) -> Result<()> {
+        let changed = self.conn().execute(
+            "DELETE FROM emails WHERE id = ?1",
+            params![id],
+        )?;
+        if changed == 0 {
+            return Err(StoreError::NotFound(format!("email {id}")));
+        }
+        Ok(())
+    }
+
+    /// Get the highest IMAP UID stored for a given account + folder.
+    pub fn get_max_uid(&self, account_id: &str, folder: &str) -> Result<Option<i64>> {
+        let result = self.conn().query_row(
+            "SELECT MAX(imap_uid) FROM emails WHERE account_id = ?1 AND imap_folder = ?2",
+            params![account_id, folder],
+            |row| row.get::<_, Option<i64>>(0),
+        )?;
+        Ok(result)
+    }
+
+    fn row_to_email(row: &rusqlite::Row<'_>) -> rusqlite::Result<EmailRow> {
+        Ok(EmailRow {
+            id: row.get(0)?,
+            account_id: row.get(1)?,
+            thread_id: row.get(2)?,
+            from_name: row.get(3)?,
+            from_address: row.get(4)?,
+            to_json: row.get(5)?,
+            cc_json: row.get(6)?,
+            subject: row.get(7)?,
+            snippet: row.get(8)?,
+            date: row.get(9)?,
+            maildir_path: row.get(10)?,
+            flags: row.get(11)?,
+            size_bytes: row.get(12)?,
+            imap_uid: row.get(13)?,
+            imap_folder: row.get(14)?,
+            has_attachments: row.get(15)?,
+            message_id_header: row.get(16)?,
+            in_reply_to: row.get(17)?,
+            references_json: row.get(18)?,
+        })
+    }
+}
