@@ -31,6 +31,7 @@
 //! # }
 //! ```
 
+pub mod affinity;
 pub mod custom_bundle;
 pub mod heuristics;
 pub mod rule_store;
