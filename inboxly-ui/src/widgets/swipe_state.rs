@@ -73,9 +73,7 @@ pub struct SwipeStates {
 impl SwipeStates {
     /// Get or create a swipe state for a row.
     pub fn get_mut(&mut self, row_id: &str) -> &mut SwipeState {
-        self.states
-            .entry(row_id.to_owned())
-            .or_default()
+        self.states.entry(row_id.to_owned()).or_default()
     }
 
     /// Reset swipe state for a row.
