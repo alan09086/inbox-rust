@@ -91,3 +91,16 @@ impl Default for SnoozePresets {
         }
     }
 }
+
+/// User's preferred theme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ThemePreference {
+    /// Follow system theme via freedesktop portal.
+    #[default]
+    System,
+    /// Always use light theme.
+    Light,
+    /// Always use dark theme.
+    Dark,
+}
