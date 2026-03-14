@@ -9,3 +9,7 @@ pub use id::{AccountId, BundleId, EmailId, ThreadId};
 pub use contact::Contact;
 pub use attachment::{Attachment, AttachmentMeta};
 pub use flags::EmailFlags;
+
+pub mod email;
+
+pub use email::{EmailContent, EmailMeta};
