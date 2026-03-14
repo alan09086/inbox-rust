@@ -174,19 +174,19 @@ impl Inboxly {
                 if let Some(ref store) = self.store
                     && let Ok(threads) = store.query_inbox_threads()
                 {
-                        for thread in threads {
-                            if !thread.pinned {
-                                if let Err(e) = store.get_or_create_thread_state(&thread.id) {
-                                    tracing::warn!("sweep: failed to ensure state: {e}");
-                                    continue;
-                                }
-                                if let Err(e) = store.set_thread_done(&thread.id, true) {
-                                    tracing::warn!("sweep: failed to mark done: {e}");
-                                    continue;
-                                }
-                                swept.push(thread.id);
+                    for thread in threads {
+                        if !thread.pinned {
+                            if let Err(e) = store.get_or_create_thread_state(&thread.id) {
+                                tracing::warn!("sweep: failed to ensure state: {e}");
+                                continue;
                             }
+                            if let Err(e) = store.set_thread_done(&thread.id, true) {
+                                tracing::warn!("sweep: failed to mark done: {e}");
+                                continue;
+                            }
+                            swept.push(thread.id);
                         }
+                    }
                 }
                 if !swept.is_empty() {
                     self.undo_state
