@@ -224,4 +224,20 @@ impl AppConfig {
             Err(e) => Err(ConfigError::Io(e)),
         }
     }
+
+    /// Save to default XDG path.
+    pub fn save(&self) -> Result<(), ConfigError> {
+        let paths = Paths::resolve().ok_or(ConfigError::NoHomeDir)?;
+        self.save_to(&paths.config_file())
+    }
+
+    /// Save to specific path. Creates parent directories.
+    pub fn save_to(&self, path: &std::path::Path) -> Result<(), ConfigError> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let contents = toml::to_string_pretty(self)?;
+        std::fs::write(path, contents)?;
+        Ok(())
+    }
 }
