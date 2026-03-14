@@ -25,3 +25,7 @@ pub use bundle::{Bundle, BundleCategory, BundleIcon, BundleThrottle, BundleVisib
 pub mod highlight;
 
 pub use highlight::{Highlight, TripBundle};
+
+pub mod inbox;
+
+pub use inbox::{InboxItem, SnoozeInfo, SnoozeUntil, ThreadState};
