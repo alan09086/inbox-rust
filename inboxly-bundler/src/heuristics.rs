@@ -17,9 +17,6 @@ pub(crate) struct CompiledRule {
     pub name: String,
     /// Category to assign when this rule matches.
     pub category: BundleCategory,
-    /// Priority (higher = evaluated first).
-    #[allow(dead_code)]
-    pub priority: i32,
     /// Which email field to evaluate.
     pub field: RuleField,
     /// How to compare.
@@ -67,7 +64,6 @@ fn compile_one(rule: HeuristicRule) -> crate::Result<CompiledRule> {
     Ok(CompiledRule {
         name: rule.name,
         category: rule.category,
-        priority: rule.priority,
         field: rule.field,
         operator: rule.operator,
         value: rule.value,

@@ -50,6 +50,10 @@ pub enum BundleVisibility {
 }
 
 /// Controls delivery frequency for bundle notifications.
+///
+// NOTE(M14): This simple enum will be replaced by a richer tagged enum with
+// delivery_time/weekday. M14 must include a v3->v4 migration for existing
+// SQLite rows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BundleThrottle {
     /// Emails appear as they arrive.

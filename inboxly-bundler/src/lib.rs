@@ -68,8 +68,8 @@ pub use user_rules::{
 use std::collections::HashMap;
 use std::path::Path;
 
-use inboxly_core::{BundleCategory, BundleId, Contact, EmailMeta};
-use inboxly_store::{EmailRow, Store};
+use inboxly_core::{BundleCategory, BundleId, EmailMeta};
+use inboxly_store::Store;
 use thiserror::Error;
 
 use crate::heuristics::CompiledRule;
@@ -191,7 +191,7 @@ impl Bundler {
             };
 
             // Convert EmailRow to a minimal EmailMeta for evaluation
-            let email_meta = email_row_to_meta(&email_row);
+            let email_meta = EmailMeta::from(&email_row);
 
             // Load headers from the .eml file on disk
             let headers = store.load_email_headers(&email_row.id)?;
@@ -231,7 +231,7 @@ impl Bundler {
             return Ok(None);
         };
 
-        let email_meta = email_row_to_meta(&email_row);
+        let email_meta = EmailMeta::from(&email_row);
         let headers = store.load_email_headers(&email_row.id)?;
 
         if let Some((category, bundle_id)) = self.categorise(&email_meta, &headers) {
@@ -251,38 +251,5 @@ impl Bundler {
     /// Return the number of compiled heuristic rules.
     pub fn rule_count(&self) -> usize {
         self.rules.len()
-    }
-}
-
-/// Convert an [`EmailRow`] (store layer) to an [`EmailMeta`] (core layer)
-/// with just the fields needed for heuristic evaluation.
-///
-/// Only `from` (name + address) and `subject` are used by the heuristic
-/// engine. Other fields are set to defaults.
-fn email_row_to_meta(row: &EmailRow) -> EmailMeta {
-    let from = Contact::new(row.from_name.as_deref().unwrap_or(""), &row.from_address);
-
-    EmailMeta {
-        id: inboxly_core::EmailId::new(&row.id),
-        account_id: inboxly_core::AccountId(
-            row.account_id.parse().unwrap_or_else(|_| uuid::Uuid::nil()),
-        ),
-        thread_id: inboxly_core::ThreadId(
-            row.thread_id.parse().unwrap_or_else(|_| uuid::Uuid::nil()),
-        ),
-        from,
-        to: vec![],
-        cc: vec![],
-        subject: row.subject.clone(),
-        snippet: String::new(),
-        date: chrono::DateTime::from_timestamp(row.date, 0)
-            .unwrap_or_default()
-            .to_utc(),
-        maildir_path: std::path::PathBuf::from(&row.maildir_path),
-        attachments: vec![],
-        flags: inboxly_core::EmailFlags::from_bitmask(row.flags as u32),
-        size_bytes: row.size_bytes as u64,
-        imap_uid: row.imap_uid as u32,
-        imap_folder: row.imap_folder.clone(),
     }
 }

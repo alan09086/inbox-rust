@@ -10,6 +10,10 @@ use crate::migrations;
 ///
 /// Wraps a single `rusqlite::Connection`. Not `Send` — callers must
 /// ensure single-threaded access or wrap in a `Mutex` if shared.
+///
+// NOTE(M15): Store wraps a raw rusqlite::Connection (!Send). When the UI
+// thread needs DB access alongside sync threads, introduce a connection
+// pool or dedicated DB thread.
 pub struct Store {
     conn: Connection,
 }

@@ -31,6 +31,9 @@
 //! No explicit checkpoint needed — `body_downloaded` column IS the resume
 //! state. On restart, `get_uids_without_body()` returns exactly the
 //! emails that still need fetching.
+//!
+// TODO(M15): Add notification channel from incremental sync so Phase 2
+// re-checks for new body_downloaded=false emails after new arrivals.
 
 use std::fmt::Debug;
 use std::sync::Arc;

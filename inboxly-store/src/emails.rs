@@ -3,6 +3,8 @@ use std::path::Path;
 
 use rusqlite::params;
 
+use inboxly_core::{AccountId, Contact, EmailFlags, EmailId, EmailMeta, ThreadId};
+
 use crate::error::{Result, StoreError};
 use crate::store::Store;
 
@@ -484,5 +486,122 @@ impl Store {
             ],
         )?;
         Ok(())
+    }
+}
+
+/// Convert an [`EmailRow`] (store layer) to an [`EmailMeta`] (core layer).
+///
+/// Populates all fields available from the row. Fields that are stored as
+/// JSON (to, cc) are deserialized; invalid JSON falls back to empty vectors.
+/// Invalid UUIDs for `account_id` and `thread_id` fall back to `Uuid::nil()`.
+impl From<&EmailRow> for EmailMeta {
+    fn from(row: &EmailRow) -> Self {
+        let from = Contact::new(row.from_name.as_deref().unwrap_or(""), &row.from_address);
+
+        let account_id = AccountId(row.account_id.parse().unwrap_or_else(|_| uuid::Uuid::nil()));
+
+        let thread_id = ThreadId(row.thread_id.parse().unwrap_or_else(|_| uuid::Uuid::nil()));
+
+        let date = chrono::DateTime::from_timestamp(row.date, 0)
+            .unwrap_or_default()
+            .to_utc();
+
+        let flags = EmailFlags::from_bitmask(row.flags as u32);
+
+        let to: Vec<Contact> = serde_json::from_str(&row.to_json).unwrap_or_default();
+        let cc: Vec<Contact> = serde_json::from_str(&row.cc_json).unwrap_or_default();
+
+        EmailMeta {
+            id: EmailId::new(&row.id),
+            account_id,
+            thread_id,
+            from,
+            to,
+            cc,
+            subject: row.subject.clone(),
+            snippet: row.snippet.clone(),
+            date,
+            maildir_path: std::path::PathBuf::from(&row.maildir_path),
+            attachments: vec![],
+            flags,
+            size_bytes: row.size_bytes as u64,
+            imap_uid: row.imap_uid as u32,
+            imap_folder: row.imap_folder.clone(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod email_row_conversion_tests {
+    use super::*;
+
+    fn sample_row() -> EmailRow {
+        let account_uuid = uuid::Uuid::new_v4();
+        let thread_uuid = uuid::Uuid::new_v4();
+
+        EmailRow {
+            id: "<test@example.com>".to_string(),
+            account_id: account_uuid.to_string(),
+            thread_id: thread_uuid.to_string(),
+            from_name: Some("Alice".to_string()),
+            from_address: "alice@example.com".to_string(),
+            to_json: r#"[{"name":"Bob","address":"bob@example.com"}]"#.to_string(),
+            cc_json: "[]".to_string(),
+            subject: "Hello World".to_string(),
+            snippet: "First few words...".to_string(),
+            date: 1_700_000_000,
+            maildir_path: "/tmp/mail/cur/test:2,S".to_string(),
+            flags: 1, // READ
+            size_bytes: 4096,
+            imap_uid: 42,
+            imap_folder: "INBOX".to_string(),
+            has_attachments: false,
+            body_downloaded: true,
+            message_id_header: Some("<test@example.com>".to_string()),
+            in_reply_to: None,
+            references_json: None,
+        }
+    }
+
+    #[test]
+    fn valid_conversion() {
+        let row = sample_row();
+        let meta: EmailMeta = EmailMeta::from(&row);
+
+        assert_eq!(meta.id.0, "<test@example.com>");
+        assert_eq!(meta.from.address, "alice@example.com");
+        assert_eq!(meta.from.name, "Alice");
+        assert_eq!(meta.subject, "Hello World");
+        assert_eq!(meta.snippet, "First few words...");
+        assert_eq!(meta.imap_folder, "INBOX");
+        assert_eq!(meta.imap_uid, 42);
+        assert_eq!(meta.size_bytes, 4096);
+        assert!(meta.flags.read);
+        assert!(!meta.flags.starred);
+        assert_eq!(meta.to.len(), 1);
+        assert_eq!(meta.to[0].address, "bob@example.com");
+        assert!(meta.cc.is_empty());
+        assert!(meta.attachments.is_empty());
+    }
+
+    #[test]
+    fn missing_optional_fields() {
+        let mut row = sample_row();
+        row.from_name = None;
+        row.to_json = "invalid json".to_string();
+        row.cc_json = "also invalid".to_string();
+        row.account_id = "not-a-uuid".to_string();
+        row.thread_id = "also-not-a-uuid".to_string();
+
+        let meta: EmailMeta = EmailMeta::from(&row);
+
+        // from_name falls back to empty string
+        assert_eq!(meta.from.name, "");
+        // Invalid JSON falls back to empty vectors
+        assert!(meta.to.is_empty());
+        assert!(meta.cc.is_empty());
+        // Invalid UUIDs fall back to nil
+        assert_eq!(meta.account_id.0, uuid::Uuid::nil());
+        assert_eq!(meta.thread_id.0, uuid::Uuid::nil());
     }
 }

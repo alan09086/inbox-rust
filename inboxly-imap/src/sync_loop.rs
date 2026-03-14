@@ -316,6 +316,9 @@ where
             return Ok(());
         }
 
+        // TODO(M19): On reconnect, drain offline_queue via
+        // offline_replay::replay_offline_actions()
+
         // Create a new session for IDLE
         let mut session = match session_factory().await {
             Ok(s) => s,

@@ -161,7 +161,11 @@ impl BundleRule {
     /// Returns `true` if the rule's field/operator/value match the email.
     /// Returns `false` if the required field is not available (e.g., body
     /// during Phase 1 sync, or a header that doesn't exist).
-    pub fn matches(&self, email: &dyn RuleMatchable) -> bool {
+    ///
+    /// Note: this recompiles regex on every call for `Matches` rules.
+    /// External callers should use [`UserCompiledRule::matches()`] instead,
+    /// which caches the compiled regex.
+    pub(crate) fn matches(&self, email: &dyn RuleMatchable) -> bool {
         match &self.field {
             UserRuleField::From => self.test_value(email.sender_address()),
             UserRuleField::To => email
@@ -253,73 +257,7 @@ impl UserCompiledRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
-
-    // -- Test double ---------------------------------------------------------
-
-    struct MockEmail {
-        from: String,
-        to: Vec<String>,
-        subject: String,
-        headers: HashMap<String, String>,
-        body: Option<String>,
-    }
-
-    impl MockEmail {
-        fn new(from: &str, subject: &str) -> Self {
-            Self {
-                from: from.into(),
-                to: vec![],
-                subject: subject.into(),
-                headers: HashMap::new(),
-                body: None,
-            }
-        }
-
-        fn with_to(mut self, to: &[&str]) -> Self {
-            self.to = to.iter().map(|s| (*s).to_owned()).collect();
-            self
-        }
-
-        fn with_header(mut self, name: &str, value: &str) -> Self {
-            self.headers.insert(name.to_owned(), value.to_owned());
-            self
-        }
-
-        fn with_body(mut self, body: &str) -> Self {
-            self.body = Some(body.to_owned());
-            self
-        }
-    }
-
-    impl RuleMatchable for MockEmail {
-        fn sender_address(&self) -> &str {
-            &self.from
-        }
-        fn to_addresses(&self) -> &[String] {
-            &self.to
-        }
-        fn subject(&self) -> &str {
-            &self.subject
-        }
-        fn header(&self, name: &str) -> Option<&str> {
-            self.headers.get(name).map(String::as_str)
-        }
-        fn body_text(&self) -> Option<&str> {
-            self.body.as_deref()
-        }
-    }
-
-    fn make_rule(field: UserRuleField, op: UserRuleOp, value: &str) -> BundleRule {
-        BundleRule {
-            id: Uuid::new_v4(),
-            bundle_id: Uuid::new_v4(),
-            field,
-            operator: op,
-            value: value.to_owned(),
-            priority: 0,
-        }
-    }
+    use crate::test_utils::fixtures::{MockEmail, make_rule};
 
     // -- RuleField / RuleOp round-trips --------------------------------------
 
