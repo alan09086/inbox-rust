@@ -4,7 +4,7 @@ use crate::error::{Result, StoreError};
 use crate::store::Store;
 
 /// Current schema version. Bump this when adding a new migration.
-const CURRENT_VERSION: u32 = 3;
+const CURRENT_VERSION: u32 = 4;
 
 /// Run all pending migrations.
 pub fn run(store: &mut Store) -> Result<()> {
@@ -27,6 +27,10 @@ pub fn run(store: &mut Store) -> Result<()> {
 
     if version < 3 {
         migrate_v2_to_v3(store)?;
+    }
+
+    if version < 4 {
+        migrate_v3_to_v4(store)?;
     }
 
     set_version(store, CURRENT_VERSION)?;
@@ -123,7 +127,7 @@ fn migrate_v0_to_v1(store: &mut Store) -> Result<()> {
             color             TEXT NOT NULL DEFAULT '#000000',
             badge_color       TEXT NOT NULL DEFAULT '#eeeeee',
             visibility        TEXT NOT NULL DEFAULT 'Bundled',
-            throttle          TEXT NOT NULL DEFAULT 'Immediate',
+            throttle          TEXT NOT NULL DEFAULT '{\"mode\":\"Immediate\"}',
             sort_order        INTEGER NOT NULL DEFAULT 0
         );
 
@@ -278,6 +282,29 @@ fn migrate_v2_to_v3(store: &mut Store) -> Result<()> {
 
     store.conn().execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_threads_root_message_id ON threads(root_message_id);",
+    )?;
+
+    Ok(())
+}
+
+/// M14: Convert plain-string throttle values to JSON format.
+///
+/// Previous schema stored throttle as bare strings: "Immediate", "Daily", "Weekly".
+/// New schema stores JSON-tagged enums: `{"mode":"Immediate"}`, etc.
+/// Daily and Weekly get default delivery times since the old format had no time info.
+fn migrate_v3_to_v4(store: &mut Store) -> Result<()> {
+    info!("Running migration v3 -> v4: convert throttle column to JSON format");
+
+    // Skip rows that already contain JSON (idempotency: starts with '{')
+    store.conn().execute_batch(
+        "UPDATE bundles SET throttle = '{\"mode\":\"Immediate\"}'
+         WHERE throttle = 'Immediate' AND throttle NOT LIKE '{%}';
+
+         UPDATE bundles SET throttle = '{\"mode\":\"Daily\",\"delivery_time\":\"17:00:00\"}'
+         WHERE throttle = 'Daily' AND throttle NOT LIKE '{%}';
+
+         UPDATE bundles SET throttle = '{\"mode\":\"Weekly\",\"delivery_day\":\"monday\",\"delivery_time\":\"08:00:00\"}'
+         WHERE throttle = 'Weekly' AND throttle NOT LIKE '{%}';",
     )?;
 
     Ok(())

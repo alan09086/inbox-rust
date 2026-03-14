@@ -23,6 +23,7 @@ mod sync_state;
 mod thread_state;
 pub mod threading;
 mod threads;
+mod throttle;
 
 pub use error::{Result, StoreError};
 pub use store::Store;

@@ -176,12 +176,23 @@ fn category_label(category: &BundleCategory) -> String {
     }
 }
 
-/// Return the default throttle setting for a category.
+/// Return the default throttle setting for a category as JSON.
+///
+/// These defaults match the throttle presets described in M14:
+/// - Promos: daily at 5 PM
+/// - Updates: daily at 9 AM
+/// - Forums: daily at noon
+/// - Low Priority: weekly Monday 8 AM
+/// - All others: immediate
 fn default_throttle(category: &BundleCategory) -> &'static str {
     match category {
-        BundleCategory::Promos | BundleCategory::Forums => "Daily",
-        BundleCategory::LowPriority => "Weekly",
-        _ => "Immediate",
+        BundleCategory::Promos => r#"{"mode":"Daily","delivery_time":"17:00:00"}"#,
+        BundleCategory::Updates => r#"{"mode":"Daily","delivery_time":"09:00:00"}"#,
+        BundleCategory::Forums => r#"{"mode":"Daily","delivery_time":"12:00:00"}"#,
+        BundleCategory::LowPriority => {
+            r#"{"mode":"Weekly","delivery_day":"monday","delivery_time":"08:00:00"}"#
+        }
+        _ => r#"{"mode":"Immediate"}"#,
     }
 }
 
