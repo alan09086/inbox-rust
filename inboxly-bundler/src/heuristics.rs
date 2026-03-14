@@ -47,21 +47,17 @@ pub(crate) fn compile_rules(rules: Vec<HeuristicRule>) -> crate::Result<Vec<Comp
 fn compile_one(rule: HeuristicRule) -> crate::Result<CompiledRule> {
     let regex = match &rule.operator {
         RuleOp::Matches => {
-            let re = Regex::new(&rule.value).map_err(|e| {
-                crate::BundlerError::InvalidRegex {
-                    rule_name: rule.name.clone(),
-                    source: e,
-                }
+            let re = Regex::new(&rule.value).map_err(|e| crate::BundlerError::InvalidRegex {
+                rule_name: rule.name.clone(),
+                source: e,
             })?;
             Some(re)
         }
         RuleOp::DomainGlob => {
             let pattern = glob_to_regex(&rule.value);
-            let re = Regex::new(&pattern).map_err(|e| {
-                crate::BundlerError::InvalidRegex {
-                    rule_name: rule.name.clone(),
-                    source: e,
-                }
+            let re = Regex::new(&pattern).map_err(|e| crate::BundlerError::InvalidRegex {
+                rule_name: rule.name.clone(),
+                source: e,
             })?;
             Some(re)
         }
@@ -146,28 +142,20 @@ pub(crate) fn evaluate(
 }
 
 /// Check whether a single rule matches the given email.
-fn matches_rule(
-    rule: &CompiledRule,
-    email: &EmailMeta,
-    headers: &HashMap<String, String>,
-) -> bool {
+fn matches_rule(rule: &CompiledRule, email: &EmailMeta, headers: &HashMap<String, String>) -> bool {
     match &rule.field {
         RuleField::From => {
             // Format as "Name <address>" or bare "address"
             let from_str = format!("{}", email.from);
             match_value(&from_str, &rule.operator, &rule.value, rule.regex.as_ref())
         }
-        RuleField::Header(header_name) => {
-            match_header(rule, header_name, headers)
-        }
-        RuleField::Subject => {
-            match_value(
-                &email.subject,
-                &rule.operator,
-                &rule.value,
-                rule.regex.as_ref(),
-            )
-        }
+        RuleField::Header(header_name) => match_header(rule, header_name, headers),
+        RuleField::Subject => match_value(
+            &email.subject,
+            &rule.operator,
+            &rule.value,
+            rule.regex.as_ref(),
+        ),
         RuleField::SenderDomain => {
             // Extract domain from the from address
             if let Some(domain) = extract_domain(&email.from.address) {
@@ -180,11 +168,7 @@ fn matches_rule(
 }
 
 /// Match against a specific email header.
-fn match_header(
-    rule: &CompiledRule,
-    header_name: &str,
-    headers: &HashMap<String, String>,
-) -> bool {
+fn match_header(rule: &CompiledRule, header_name: &str, headers: &HashMap<String, String>) -> bool {
     match &rule.operator {
         RuleOp::Present => {
             // Case-insensitive header presence check
@@ -193,12 +177,8 @@ fn match_header(
         RuleOp::PresentWithout => {
             // Value format: "present_header|absent_header"
             if let Some((present, absent)) = rule.value.split_once('|') {
-                let has_present = headers
-                    .keys()
-                    .any(|k| k.eq_ignore_ascii_case(present));
-                let has_absent = headers
-                    .keys()
-                    .any(|k| k.eq_ignore_ascii_case(absent));
+                let has_present = headers.keys().any(|k| k.eq_ignore_ascii_case(present));
+                let has_absent = headers.keys().any(|k| k.eq_ignore_ascii_case(absent));
                 has_present && !has_absent
             } else {
                 false

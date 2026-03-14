@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
 
-use inboxly_bundler::{system_bundles, Bundler};
+use inboxly_bundler::{Bundler, system_bundles};
 use inboxly_core::{BundleCategory, Contact, EmailMeta};
 use inboxly_store::{AccountRow, EmailRow, Store, ThreadRow, ThreadStateRow};
 
@@ -39,12 +39,7 @@ fn insert_test_account(store: &Store) -> String {
 
 /// Insert a test thread and its thread_state, then an email row.
 /// Returns the thread ID.
-fn insert_test_email(
-    store: &Store,
-    account_id: &str,
-    from_address: &str,
-    subject: &str,
-) -> String {
+fn insert_test_email(store: &Store, account_id: &str, from_address: &str, subject: &str) -> String {
     let thread_id = uuid::Uuid::new_v4().to_string();
     let email_id = format!("<{}@test>", uuid::Uuid::new_v4());
     let now = chrono::Utc::now().timestamp();
@@ -188,7 +183,10 @@ fn categorise_personal_email_returns_none() {
     let headers = HashMap::new();
 
     let result = bundler.categorise(&email, &headers);
-    assert!(result.is_none(), "personal emails should not be categorised");
+    assert!(
+        result.is_none(),
+        "personal emails should not be categorised"
+    );
 }
 
 // ----- Bundler::categorise_all Tests -----
@@ -214,12 +212,8 @@ fn categorise_all_assigns_bundles_in_store() {
         "ship-confirm@ship.amazon.ca",
         "Your package has shipped",
     );
-    let _personal_tid = insert_test_email(
-        &store,
-        &account_id,
-        "friend@personal.com",
-        "Dinner plans",
-    );
+    let _personal_tid =
+        insert_test_email(&store, &account_id, "friend@personal.com", "Dinner plans");
 
     // Headers are empty (no .eml files for in-memory test), but domain-based
     // rules should still match github.com (Social) and *.amazon.* (Purchases).

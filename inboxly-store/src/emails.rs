@@ -431,13 +431,11 @@ impl Store {
             return Ok(HashMap::new());
         }
 
-        let data = std::fs::read(path).map_err(|e| {
-            StoreError::Maildir(format!("failed to read {}: {e}", path.display()))
-        })?;
+        let data = std::fs::read(path)
+            .map_err(|e| StoreError::Maildir(format!("failed to read {}: {e}", path.display())))?;
 
-        let parsed = mailparse::parse_mail(&data).map_err(|e| {
-            StoreError::Parse(format!("failed to parse email headers: {e}"))
-        })?;
+        let parsed = mailparse::parse_mail(&data)
+            .map_err(|e| StoreError::Parse(format!("failed to parse email headers: {e}")))?;
 
         let mut headers = HashMap::new();
         for header in &parsed.headers {

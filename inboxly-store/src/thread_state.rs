@@ -156,9 +156,9 @@ impl Store {
     /// Used by the bundler's `categorise_all()` to find threads that need
     /// automatic categorisation.
     pub fn get_uncategorised_thread_ids(&self) -> Result<Vec<String>> {
-        let mut stmt = self.conn().prepare(
-            "SELECT thread_id FROM thread_state WHERE bundle_id IS NULL",
-        )?;
+        let mut stmt = self
+            .conn()
+            .prepare("SELECT thread_id FROM thread_state WHERE bundle_id IS NULL")?;
         let ids = stmt
             .query_map([], |row| row.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;

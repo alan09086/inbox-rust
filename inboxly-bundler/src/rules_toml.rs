@@ -95,18 +95,18 @@ pub fn parse_rules(toml_str: &str) -> crate::Result<Vec<HeuristicRule>> {
 pub fn load_rules(user_config_path: Option<&Path>) -> crate::Result<Vec<HeuristicRule>> {
     let mut rules = parse_rules(DEFAULT_RULES_TOML)?;
 
-    if let Some(path) = user_config_path {
-        if path.exists() {
-            let user_toml = std::fs::read_to_string(path)?;
-            let user_rules = parse_rules(&user_toml)?;
+    if let Some(path) = user_config_path
+        && path.exists()
+    {
+        let user_toml = std::fs::read_to_string(path)?;
+        let user_rules = parse_rules(&user_toml)?;
 
-            // Replace defaults with same name, append new ones
-            for user_rule in user_rules {
-                if let Some(existing) = rules.iter_mut().find(|r| r.name == user_rule.name) {
-                    *existing = user_rule;
-                } else {
-                    rules.push(user_rule);
-                }
+        // Replace defaults with same name, append new ones
+        for user_rule in user_rules {
+            if let Some(existing) = rules.iter_mut().find(|r| r.name == user_rule.name) {
+                *existing = user_rule;
+            } else {
+                rules.push(user_rule);
             }
         }
     }

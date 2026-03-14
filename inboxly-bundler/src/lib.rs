@@ -230,22 +230,15 @@ impl Bundler {
 /// Only `from` (name + address) and `subject` are used by the heuristic
 /// engine. Other fields are set to defaults.
 fn email_row_to_meta(row: &EmailRow) -> EmailMeta {
-    let from = Contact::new(
-        row.from_name.as_deref().unwrap_or(""),
-        &row.from_address,
-    );
+    let from = Contact::new(row.from_name.as_deref().unwrap_or(""), &row.from_address);
 
-    let meta = EmailMeta {
+    EmailMeta {
         id: inboxly_core::EmailId::new(&row.id),
         account_id: inboxly_core::AccountId(
-            row.account_id
-                .parse()
-                .unwrap_or_else(|_| uuid::Uuid::nil()),
+            row.account_id.parse().unwrap_or_else(|_| uuid::Uuid::nil()),
         ),
         thread_id: inboxly_core::ThreadId(
-            row.thread_id
-                .parse()
-                .unwrap_or_else(|_| uuid::Uuid::nil()),
+            row.thread_id.parse().unwrap_or_else(|_| uuid::Uuid::nil()),
         ),
         from,
         to: vec![],
@@ -261,6 +254,5 @@ fn email_row_to_meta(row: &EmailRow) -> EmailMeta {
         size_bytes: row.size_bytes as u64,
         imap_uid: row.imap_uid as u32,
         imap_folder: row.imap_folder.clone(),
-    };
-    meta
+    }
 }
