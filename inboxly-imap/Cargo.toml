@@ -9,7 +9,8 @@ inboxly-core = { path = "../inboxly-core" }
 async-imap = "0.11"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time"] }
 tokio-rustls = "0.26"
-rustls = "0.23"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+ring = "0.17"
 webpki-roots = "1"
 rustls-pki-types = "1"
 oauth2 = "5"
