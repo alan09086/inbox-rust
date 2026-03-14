@@ -1,9 +1,9 @@
 // Task 2: Standard Maildir folders and initialization
 use std::path::{Path, PathBuf};
 
-use maildir::Maildir;
-use mailparse::{addrparse, dateparse, parse_mail, DispositionType, MailAddr, MailHeaderMap};
 use chrono::{TimeZone, Utc};
+use maildir::Maildir;
+use mailparse::{DispositionType, MailAddr, MailHeaderMap, addrparse, dateparse, parse_mail};
 
 use inboxly_core::{
     AccountId, Attachment, AttachmentMeta, Contact, EmailContent, EmailFlags, EmailId, EmailMeta,
@@ -106,8 +106,7 @@ impl MaildirStore {
     /// Get a `maildir::Maildir` handle for a folder by IMAP name.
     /// Returns None if the IMAP name doesn't map to a standard folder.
     pub fn maildir_for_imap(&self, imap_folder: &str) -> Option<Maildir> {
-        StandardFolder::from_imap_name(imap_folder)
-            .map(|f| self.maildir_for(&f))
+        StandardFolder::from_imap_name(imap_folder).map(|f| self.maildir_for(&f))
     }
 }
 
@@ -254,12 +253,11 @@ impl MaildirStore {
         maildir_id: &str,
     ) -> Result<(), StoreError> {
         let md = self.maildir_for(folder);
-        md.move_new_to_cur(maildir_id)
-            .map_err(|e| {
-                StoreError::Maildir(format!(
-                    "deliver (move new->cur) failed for {maildir_id}: {e}"
-                ))
-            })
+        md.move_new_to_cur(maildir_id).map_err(|e| {
+            StoreError::Maildir(format!(
+                "deliver (move new->cur) failed for {maildir_id}: {e}"
+            ))
+        })
     }
 }
 
@@ -277,9 +275,7 @@ impl MaildirStore {
         let md = self.maildir_for(folder);
         let suffix = flags_to_suffix(flags);
         md.set_flags(maildir_id, &suffix)
-            .map_err(|e| {
-                StoreError::Maildir(format!("set_flags failed for {maildir_id}: {e}"))
-            })
+            .map_err(|e| StoreError::Maildir(format!("set_flags failed for {maildir_id}: {e}")))
     }
 
     /// Add flags to a message without clearing existing ones.
@@ -291,9 +287,7 @@ impl MaildirStore {
     ) -> Result<(), StoreError> {
         let md = self.maildir_for(folder);
         md.add_flags(maildir_id, flags)
-            .map_err(|e| {
-                StoreError::Maildir(format!("add_flags failed for {maildir_id}: {e}"))
-            })
+            .map_err(|e| StoreError::Maildir(format!("add_flags failed for {maildir_id}: {e}")))
     }
 
     /// Remove specific flags from a message.
@@ -305,9 +299,7 @@ impl MaildirStore {
     ) -> Result<(), StoreError> {
         let md = self.maildir_for(folder);
         md.remove_flags(maildir_id, flags)
-            .map_err(|e| {
-                StoreError::Maildir(format!("remove_flags failed for {maildir_id}: {e}"))
-            })
+            .map_err(|e| StoreError::Maildir(format!("remove_flags failed for {maildir_id}: {e}")))
     }
 }
 
@@ -334,8 +326,8 @@ pub fn parse_email_meta(
     imap_uid: u32,
     imap_folder: String,
 ) -> Result<EmailMeta, StoreError> {
-    let parsed = parse_mail(data)
-        .map_err(|e| StoreError::Parse(format!("Failed to parse email: {e}")))?;
+    let parsed =
+        parse_mail(data).map_err(|e| StoreError::Parse(format!("Failed to parse email: {e}")))?;
 
     let headers = &parsed.headers;
 
@@ -545,10 +537,7 @@ fn extract_attachment_meta(parsed: &mailparse::ParsedMail) -> Vec<AttachmentMeta
     attachments
 }
 
-fn collect_attachment_meta(
-    parsed: &mailparse::ParsedMail,
-    out: &mut Vec<AttachmentMeta>,
-) {
+fn collect_attachment_meta(parsed: &mailparse::ParsedMail, out: &mut Vec<AttachmentMeta>) {
     let disposition = parsed.get_content_disposition();
 
     let is_attachment = disposition.disposition == DispositionType::Attachment
@@ -564,10 +553,7 @@ fn collect_attachment_meta(
             .cloned()
             .unwrap_or_else(|| "unnamed".to_string());
 
-        let size_bytes = parsed
-            .get_body_raw()
-            .map(|b| b.len() as u64)
-            .unwrap_or(0);
+        let size_bytes = parsed.get_body_raw().map(|b| b.len() as u64).unwrap_or(0);
 
         out.push(AttachmentMeta {
             filename,
@@ -589,15 +575,9 @@ impl MaildirStore {
     /// in the conversation view. The `maildir_path` comes from `EmailMeta`.
     ///
     /// Returns body text, body HTML, all headers, and full attachment content.
-    pub fn read_email_content(
-        &self,
-        maildir_path: &Path,
-    ) -> Result<EmailContent, StoreError> {
+    pub fn read_email_content(&self, maildir_path: &Path) -> Result<EmailContent, StoreError> {
         let data = std::fs::read(maildir_path).map_err(|e| {
-            StoreError::Maildir(format!(
-                "Failed to read {}: {e}",
-                maildir_path.display()
-            ))
+            StoreError::Maildir(format!("Failed to read {}: {e}", maildir_path.display()))
         })?;
 
         parse_email_content(&data)
@@ -607,8 +587,8 @@ impl MaildirStore {
 /// Parse raw .eml bytes into full EmailContent.
 /// Extracts body (text + HTML), all headers, and full attachment content.
 pub fn parse_email_content(data: &[u8]) -> Result<EmailContent, StoreError> {
-    let parsed = parse_mail(data)
-        .map_err(|e| StoreError::Parse(format!("Failed to parse email: {e}")))?;
+    let parsed =
+        parse_mail(data).map_err(|e| StoreError::Parse(format!("Failed to parse email: {e}")))?;
 
     // Extract Message-ID for the EmailId
     let message_id = parsed
@@ -650,10 +630,7 @@ fn extract_full_attachments(parsed: &mailparse::ParsedMail) -> Vec<Attachment> {
     attachments
 }
 
-fn collect_full_attachments(
-    parsed: &mailparse::ParsedMail,
-    out: &mut Vec<Attachment>,
-) {
+fn collect_full_attachments(parsed: &mailparse::ParsedMail, out: &mut Vec<Attachment>) {
     let disposition = parsed.get_content_disposition();
 
     let is_attachment = disposition.disposition == DispositionType::Attachment
@@ -706,10 +683,7 @@ impl MaildirStore {
     /// List all messages in a folder (both `new/` and `cur/`).
     /// Returns lightweight entries with ID, path, and flags — no parsing.
     /// Messages in `new/` have `is_new = true`.
-    pub fn list_messages(
-        &self,
-        folder: &StandardFolder,
-    ) -> Result<Vec<MaildirEntry>, StoreError> {
+    pub fn list_messages(&self, folder: &StandardFolder) -> Result<Vec<MaildirEntry>, StoreError> {
         let md = self.maildir_for(folder);
         let mut entries = Vec::new();
 
@@ -967,6 +941,7 @@ pub fn rebuild_emails_from_maildir(
             imap_uid: meta.imap_uid as i64,
             imap_folder: meta.imap_folder.clone(),
             has_attachments: !meta.attachments.is_empty(),
+            body_downloaded: true, // Rebuilding from Maildir means body is on disk
             message_id_header: None,
             in_reply_to: None,
             references_json: None,

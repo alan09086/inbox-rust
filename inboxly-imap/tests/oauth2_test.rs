@@ -6,9 +6,16 @@ fn gmail_oauth2_config_has_correct_endpoints() {
         "test-client-id".to_string(),
         Some("test-client-secret".to_string()),
     );
-    assert_eq!(config.auth_url, "https://accounts.google.com/o/oauth2/v2/auth");
+    assert_eq!(
+        config.auth_url,
+        "https://accounts.google.com/o/oauth2/v2/auth"
+    );
     assert_eq!(config.token_url, "https://oauth2.googleapis.com/token");
-    assert!(config.scopes.contains(&"https://mail.google.com/".to_string()));
+    assert!(
+        config
+            .scopes
+            .contains(&"https://mail.google.com/".to_string())
+    );
 }
 
 #[test]

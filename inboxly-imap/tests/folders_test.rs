@@ -1,6 +1,6 @@
 use inboxly_imap::folders::{
-    FolderRole, ImapFolder, map_well_known_folders,
-    parse_special_use_attr, resolve_folder_role_by_name,
+    FolderRole, ImapFolder, map_well_known_folders, parse_special_use_attr,
+    resolve_folder_role_by_name,
 };
 
 #[test]
@@ -35,38 +35,77 @@ fn parse_special_use_unknown() {
 
 #[test]
 fn resolve_role_by_name_inbox() {
-    assert_eq!(resolve_folder_role_by_name("INBOX"), Some(FolderRole::Inbox));
-    assert_eq!(resolve_folder_role_by_name("Inbox"), Some(FolderRole::Inbox));
+    assert_eq!(
+        resolve_folder_role_by_name("INBOX"),
+        Some(FolderRole::Inbox)
+    );
+    assert_eq!(
+        resolve_folder_role_by_name("Inbox"),
+        Some(FolderRole::Inbox)
+    );
 }
 
 #[test]
 fn resolve_role_by_name_sent_variations() {
     assert_eq!(resolve_folder_role_by_name("Sent"), Some(FolderRole::Sent));
-    assert_eq!(resolve_folder_role_by_name("Sent Items"), Some(FolderRole::Sent));
-    assert_eq!(resolve_folder_role_by_name("Sent Messages"), Some(FolderRole::Sent));
-    assert_eq!(resolve_folder_role_by_name("[Gmail]/Sent Mail"), Some(FolderRole::Sent));
+    assert_eq!(
+        resolve_folder_role_by_name("Sent Items"),
+        Some(FolderRole::Sent)
+    );
+    assert_eq!(
+        resolve_folder_role_by_name("Sent Messages"),
+        Some(FolderRole::Sent)
+    );
+    assert_eq!(
+        resolve_folder_role_by_name("[Gmail]/Sent Mail"),
+        Some(FolderRole::Sent)
+    );
 }
 
 #[test]
 fn resolve_role_by_name_drafts() {
-    assert_eq!(resolve_folder_role_by_name("Drafts"), Some(FolderRole::Drafts));
-    assert_eq!(resolve_folder_role_by_name("[Gmail]/Drafts"), Some(FolderRole::Drafts));
+    assert_eq!(
+        resolve_folder_role_by_name("Drafts"),
+        Some(FolderRole::Drafts)
+    );
+    assert_eq!(
+        resolve_folder_role_by_name("[Gmail]/Drafts"),
+        Some(FolderRole::Drafts)
+    );
 }
 
 #[test]
 fn resolve_role_by_name_trash_variations() {
-    assert_eq!(resolve_folder_role_by_name("Trash"), Some(FolderRole::Trash));
-    assert_eq!(resolve_folder_role_by_name("Deleted Items"), Some(FolderRole::Trash));
-    assert_eq!(resolve_folder_role_by_name("[Gmail]/Trash"), Some(FolderRole::Trash));
-    assert_eq!(resolve_folder_role_by_name("Deleted Messages"), Some(FolderRole::Trash));
+    assert_eq!(
+        resolve_folder_role_by_name("Trash"),
+        Some(FolderRole::Trash)
+    );
+    assert_eq!(
+        resolve_folder_role_by_name("Deleted Items"),
+        Some(FolderRole::Trash)
+    );
+    assert_eq!(
+        resolve_folder_role_by_name("[Gmail]/Trash"),
+        Some(FolderRole::Trash)
+    );
+    assert_eq!(
+        resolve_folder_role_by_name("Deleted Messages"),
+        Some(FolderRole::Trash)
+    );
 }
 
 #[test]
 fn resolve_role_by_name_spam_variations() {
     assert_eq!(resolve_folder_role_by_name("Spam"), Some(FolderRole::Spam));
     assert_eq!(resolve_folder_role_by_name("Junk"), Some(FolderRole::Spam));
-    assert_eq!(resolve_folder_role_by_name("Junk E-mail"), Some(FolderRole::Spam));
-    assert_eq!(resolve_folder_role_by_name("[Gmail]/Spam"), Some(FolderRole::Spam));
+    assert_eq!(
+        resolve_folder_role_by_name("Junk E-mail"),
+        Some(FolderRole::Spam)
+    );
+    assert_eq!(
+        resolve_folder_role_by_name("[Gmail]/Spam"),
+        Some(FolderRole::Spam)
+    );
 }
 
 #[test]

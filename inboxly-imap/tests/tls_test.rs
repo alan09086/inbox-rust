@@ -14,5 +14,8 @@ async fn connect_tls_rejects_empty_hostname() {
     let result = inboxly_imap::tls::connect_tls("", 993, &config).await;
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert!(matches!(err, inboxly_imap::error::ImapError::InvalidServerName(_)));
+    assert!(matches!(
+        err,
+        inboxly_imap::error::ImapError::InvalidServerName(_)
+    ));
 }

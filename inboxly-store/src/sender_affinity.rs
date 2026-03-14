@@ -61,7 +61,11 @@ impl Store {
         Ok(rows)
     }
 
-    pub fn delete_sender_affinity(&self, sender_address: &str, bundle_category: &str) -> Result<()> {
+    pub fn delete_sender_affinity(
+        &self,
+        sender_address: &str,
+        bundle_category: &str,
+    ) -> Result<()> {
         self.conn().execute(
             "DELETE FROM sender_affinity WHERE sender_address = ?1 AND bundle_category = ?2",
             params![sender_address, bundle_category],

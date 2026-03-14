@@ -5,7 +5,7 @@ use crate::store::Store;
 
 #[derive(Debug, Clone)]
 pub struct OfflineQueueRow {
-    pub id: Option<i64>,     // AUTOINCREMENT, None on insert
+    pub id: Option<i64>, // AUTOINCREMENT, None on insert
     pub action: String,
     pub payload_json: String,
     pub created_at: i64,
@@ -42,10 +42,9 @@ impl Store {
 
     /// Remove a successfully replayed action from the queue.
     pub fn dequeue_offline_action(&self, id: i64) -> Result<()> {
-        let changed = self.conn().execute(
-            "DELETE FROM offline_queue WHERE id = ?1",
-            params![id],
-        )?;
+        let changed = self
+            .conn()
+            .execute("DELETE FROM offline_queue WHERE id = ?1", params![id])?;
         if changed == 0 {
             return Err(StoreError::NotFound(format!("offline_queue {id}")));
         }
@@ -60,11 +59,9 @@ impl Store {
 
     /// Count pending offline actions.
     pub fn count_offline_queue(&self) -> Result<i64> {
-        let count: i64 = self.conn().query_row(
-            "SELECT COUNT(*) FROM offline_queue",
-            [],
-            |row| row.get(0),
-        )?;
+        let count: i64 =
+            self.conn()
+                .query_row("SELECT COUNT(*) FROM offline_queue", [], |row| row.get(0))?;
         Ok(count)
     }
 }

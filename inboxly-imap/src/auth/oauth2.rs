@@ -3,8 +3,8 @@ use std::time::{Duration, Instant};
 
 use oauth2::basic::BasicClient;
 use oauth2::{
-    AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken,
-    PkceCodeChallenge, RedirectUrl, RefreshToken, Scope, TokenResponse, TokenUrl,
+    AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge, RedirectUrl,
+    RefreshToken, Scope, TokenResponse, TokenUrl,
 };
 use tracing::{debug, info, warn};
 
@@ -86,8 +86,10 @@ pub async fn authorize(config: &GmailOAuth2Config) -> Result<OAuth2Token> {
         reason: format!("Invalid token URL: {e}"),
     })?;
     let redirect_url =
-        RedirectUrl::new(format!("http://127.0.0.1:{port}/callback")).map_err(|e| ImapError::OAuth2 {
-            reason: format!("Invalid redirect URL: {e}"),
+        RedirectUrl::new(format!("http://127.0.0.1:{port}/callback")).map_err(|e| {
+            ImapError::OAuth2 {
+                reason: format!("Invalid redirect URL: {e}"),
+            }
         })?;
 
     let client = {
@@ -111,9 +113,7 @@ pub async fn authorize(config: &GmailOAuth2Config) -> Result<OAuth2Token> {
         auth_request = auth_request.add_scope(Scope::new(scope.clone()));
     }
 
-    let (auth_url, csrf_state) = auth_request
-        .set_pkce_challenge(pkce_challenge)
-        .url();
+    let (auth_url, csrf_state) = auth_request.set_pkce_challenge(pkce_challenge).url();
 
     info!("Opening browser for OAuth2 authorization");
     debug!(url = %auth_url, "Authorization URL");
@@ -174,8 +174,10 @@ pub async fn refresh_token(
         reason: format!("Invalid token URL: {e}"),
     })?;
     let redirect_url =
-        RedirectUrl::new(format!("http://127.0.0.1:{port}/callback")).map_err(|e| ImapError::OAuth2 {
-            reason: format!("Invalid redirect URL: {e}"),
+        RedirectUrl::new(format!("http://127.0.0.1:{port}/callback")).map_err(|e| {
+            ImapError::OAuth2 {
+                reason: format!("Invalid redirect URL: {e}"),
+            }
         })?;
 
     let client = {

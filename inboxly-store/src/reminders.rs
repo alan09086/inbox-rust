@@ -120,10 +120,9 @@ impl Store {
     }
 
     pub fn delete_reminder(&self, id: &str) -> Result<()> {
-        let changed = self.conn().execute(
-            "DELETE FROM reminders WHERE id = ?1",
-            params![id],
-        )?;
+        let changed = self
+            .conn()
+            .execute("DELETE FROM reminders WHERE id = ?1", params![id])?;
         if changed == 0 {
             return Err(StoreError::NotFound(format!("reminder {id}")));
         }

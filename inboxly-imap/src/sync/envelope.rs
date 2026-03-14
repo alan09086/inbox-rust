@@ -1,5 +1,5 @@
-use chrono::{DateTime, Utc};
 use super::error::{SyncError, SyncResult};
+use chrono::{DateTime, Utc};
 
 /// Parsed envelope data ready for SQLite insertion.
 ///
@@ -142,10 +142,12 @@ pub fn parse_fetch_to_envelope(
         field: "UID".to_string(),
     })?;
 
-    let envelope = fetch.envelope().ok_or_else(|| SyncError::MalformedEnvelope {
-        uid,
-        field: "ENVELOPE".to_string(),
-    })?;
+    let envelope = fetch
+        .envelope()
+        .ok_or_else(|| SyncError::MalformedEnvelope {
+            uid,
+            field: "ENVELOPE".to_string(),
+        })?;
 
     // Message-ID
     let message_id = envelope
@@ -176,9 +178,15 @@ pub fn parse_fetch_to_envelope(
         .and_then(|addrs| addrs.first())
         .map(|addr| {
             extract_address_string(
-                addr.name.as_ref().map(|b| std::str::from_utf8(b).unwrap_or("")),
-                addr.mailbox.as_ref().map(|b| std::str::from_utf8(b).unwrap_or("")),
-                addr.host.as_ref().map(|b| std::str::from_utf8(b).unwrap_or("")),
+                addr.name
+                    .as_ref()
+                    .map(|b| std::str::from_utf8(b).unwrap_or("")),
+                addr.mailbox
+                    .as_ref()
+                    .map(|b| std::str::from_utf8(b).unwrap_or("")),
+                addr.host
+                    .as_ref()
+                    .map(|b| std::str::from_utf8(b).unwrap_or("")),
             )
         })
         .unwrap_or_default();
@@ -192,9 +200,15 @@ pub fn parse_fetch_to_envelope(
                 .iter()
                 .map(|addr| {
                     extract_address_string(
-                        addr.name.as_ref().map(|b| std::str::from_utf8(b).unwrap_or("")),
-                        addr.mailbox.as_ref().map(|b| std::str::from_utf8(b).unwrap_or("")),
-                        addr.host.as_ref().map(|b| std::str::from_utf8(b).unwrap_or("")),
+                        addr.name
+                            .as_ref()
+                            .map(|b| std::str::from_utf8(b).unwrap_or("")),
+                        addr.mailbox
+                            .as_ref()
+                            .map(|b| std::str::from_utf8(b).unwrap_or("")),
+                        addr.host
+                            .as_ref()
+                            .map(|b| std::str::from_utf8(b).unwrap_or("")),
                     )
                 })
                 .collect()
@@ -210,9 +224,15 @@ pub fn parse_fetch_to_envelope(
                 .iter()
                 .map(|addr| {
                     extract_address_string(
-                        addr.name.as_ref().map(|b| std::str::from_utf8(b).unwrap_or("")),
-                        addr.mailbox.as_ref().map(|b| std::str::from_utf8(b).unwrap_or("")),
-                        addr.host.as_ref().map(|b| std::str::from_utf8(b).unwrap_or("")),
+                        addr.name
+                            .as_ref()
+                            .map(|b| std::str::from_utf8(b).unwrap_or("")),
+                        addr.mailbox
+                            .as_ref()
+                            .map(|b| std::str::from_utf8(b).unwrap_or("")),
+                        addr.host
+                            .as_ref()
+                            .map(|b| std::str::from_utf8(b).unwrap_or("")),
                     )
                 })
                 .collect()

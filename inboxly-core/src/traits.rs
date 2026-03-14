@@ -74,9 +74,7 @@ pub trait Store: Send + Sync {
     // --- Bundle operations ---
 
     /// List all bundles.
-    fn list_bundles(
-        &self,
-    ) -> impl std::future::Future<Output = Result<Vec<Bundle>>> + Send;
+    fn list_bundles(&self) -> impl std::future::Future<Output = Result<Vec<Bundle>>> + Send;
 
     /// Get a bundle by ID.
     fn get_bundle(

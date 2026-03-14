@@ -44,6 +44,22 @@ pub enum ImapError {
 
     #[error("Timeout after {0:?}")]
     Timeout(std::time::Duration),
+
+    // -- Phase 2 (M8) error variants --
+    #[error("Maildir write failed: {0}")]
+    MaildirWrite(String),
+
+    #[error("search index error: {0}")]
+    IndexError(String),
+
+    #[error("database error: {0}")]
+    DatabaseError(String),
+
+    #[error("email not found: {0}")]
+    EmailNotFound(String),
+
+    #[error("Maildir read failed: {0}")]
+    MaildirRead(String),
 }
 
 pub type Result<T> = std::result::Result<T, ImapError>;

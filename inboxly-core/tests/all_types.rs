@@ -11,23 +11,42 @@ use uuid::Uuid;
 
 use inboxly_core::{
     // Identity types
-    AccountId, BundleId, EmailId, ThreadId,
+    AccountId,
     // Contact and attachment
-    Attachment, AttachmentMeta, Contact, EmailFlags,
+    Attachment,
+    AttachmentMeta,
+    // Bundle types
+    Bundle,
+    BundleCategory,
+    BundleIcon,
+    BundleId,
+    BundleThrottle,
+    BundleVisibility,
+    // Trait types (verify they're importable)
+    Bundler,
+    Color,
+    Contact,
     // Email types
-    EmailContent, EmailMeta,
+    EmailContent,
+    EmailFlags,
+    EmailId,
+    EmailMeta,
+    Extractor,
+    // Highlight types
+    Highlight,
+    // Inbox types
+    InboxItem,
+    // Error types
+    InboxlyError,
+    Result,
+    SnoozeInfo,
+    SnoozeUntil,
+    Store,
     // Thread
     Thread,
-    // Bundle types
-    Bundle, BundleCategory, BundleIcon, BundleThrottle, BundleVisibility, Color,
-    // Inbox types
-    InboxItem, SnoozeInfo, SnoozeUntil, ThreadState,
-    // Highlight types
-    Highlight, TripBundle,
-    // Error types
-    InboxlyError, Result,
-    // Trait types (verify they're importable)
-    Bundler, Extractor, Store,
+    ThreadId,
+    ThreadState,
+    TripBundle,
 };
 
 #[test]
@@ -151,13 +170,11 @@ fn full_snooze_lifecycle() {
             original_date: Utc::now(),
         }),
         bundle_id: Some(BundleId::new()),
-        highlights: vec![
-            Highlight::TrackingNumber {
-                carrier: "UPS".into(),
-                number: "1Z999".into(),
-                url: None,
-            },
-        ],
+        highlights: vec![Highlight::TrackingNumber {
+            carrier: "UPS".into(),
+            number: "1Z999".into(),
+            url: None,
+        }],
     };
 
     assert!(state.pinned);
@@ -202,7 +219,9 @@ fn trip_bundle_assembly() {
 #[test]
 fn error_types_usable() {
     fn failing_operation() -> Result<()> {
-        Err(InboxlyError::EmailNotFound(EmailId::new("<missing@mail.com>")))
+        Err(InboxlyError::EmailNotFound(EmailId::new(
+            "<missing@mail.com>",
+        )))
     }
 
     let err = failing_operation().unwrap_err();
@@ -237,7 +256,9 @@ fn location_snooze() {
         label: "Home".into(),
     };
     match &snooze {
-        SnoozeUntil::Location { label, radius_m, .. } => {
+        SnoozeUntil::Location {
+            label, radius_m, ..
+        } => {
             assert_eq!(label, "Home");
             assert!(*radius_m > 0.0);
         }

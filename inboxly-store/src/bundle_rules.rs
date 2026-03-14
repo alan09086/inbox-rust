@@ -7,8 +7,8 @@ use crate::store::Store;
 pub struct BundleRuleRow {
     pub id: String,
     pub bundle_id: String,
-    pub field: String,      // "From", "To", "Subject", "Header", "Body"
-    pub operator: String,   // "Contains", "Equals", "Matches", "Domain"
+    pub field: String,    // "From", "To", "Subject", "Header", "Body"
+    pub operator: String, // "Contains", "Equals", "Matches", "Domain"
     pub value: String,
     pub priority: i64,
 }
@@ -91,10 +91,9 @@ impl Store {
     }
 
     pub fn delete_bundle_rule(&self, id: &str) -> Result<()> {
-        let changed = self.conn().execute(
-            "DELETE FROM bundle_rules WHERE id = ?1",
-            params![id],
-        )?;
+        let changed = self
+            .conn()
+            .execute("DELETE FROM bundle_rules WHERE id = ?1", params![id])?;
         if changed == 0 {
             return Err(StoreError::NotFound(format!("bundle_rule {id}")));
         }

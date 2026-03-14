@@ -112,10 +112,9 @@ impl Store {
     }
 
     pub fn delete_account(&self, id: &str) -> Result<()> {
-        let changed = self.conn().execute(
-            "DELETE FROM accounts WHERE id = ?1",
-            params![id],
-        )?;
+        let changed = self
+            .conn()
+            .execute("DELETE FROM accounts WHERE id = ?1", params![id])?;
         if changed == 0 {
             return Err(StoreError::NotFound(format!("account {id}")));
         }

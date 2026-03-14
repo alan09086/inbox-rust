@@ -96,16 +96,10 @@ mod tests {
     #[test]
     fn error_display_messages() {
         let err = InboxlyError::Database("connection pool exhausted".into());
-        assert_eq!(
-            err.to_string(),
-            "database error: connection pool exhausted"
-        );
+        assert_eq!(err.to_string(), "database error: connection pool exhausted");
 
         let err = InboxlyError::EmailNotFound(EmailId::new("<missing@mail.com>"));
-        assert_eq!(
-            err.to_string(),
-            "email not found: <missing@mail.com>"
-        );
+        assert_eq!(err.to_string(), "email not found: <missing@mail.com>");
     }
 
     #[test]

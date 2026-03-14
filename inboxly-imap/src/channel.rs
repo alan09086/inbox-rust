@@ -8,21 +8,14 @@ use crate::folders::ImapFolder;
 #[derive(Debug, Clone)]
 pub enum SyncEvent {
     /// Successfully connected and authenticated to an IMAP account.
-    Connected {
-        account_id: String,
-    },
+    Connected { account_id: String },
 
     /// Disconnected from an account (intentional or error).
-    Disconnected {
-        account_id: String,
-        reason: String,
-    },
+    Disconnected { account_id: String, reason: String },
 
     /// Authentication is required (token expired, password changed, etc.).
     /// The UI should prompt the user to re-authenticate.
-    AuthRequired {
-        account_id: String,
-    },
+    AuthRequired { account_id: String },
 
     /// Sync progress update for a folder.
     SyncProgress {
@@ -35,16 +28,10 @@ pub enum SyncEvent {
     },
 
     /// Sync completed for a folder.
-    SyncComplete {
-        account_id: String,
-        folder: String,
-    },
+    SyncComplete { account_id: String, folder: String },
 
     /// An error occurred during sync.
-    Error {
-        account_id: String,
-        message: String,
-    },
+    Error { account_id: String, message: String },
 
     /// New emails arrived in a folder.
     NewEmails {
@@ -65,6 +52,24 @@ pub enum SyncEvent {
         account_id: String,
         folders: Vec<ImapFolder>,
     },
+
+    // -- Phase 2 (M8): body download events --
+    /// Phase 2 body download progress update for a folder.
+    BodyDownloadProgress {
+        account_id: String,
+        folder: String,
+        downloaded: u64,
+        total: u64,
+    },
+
+    /// A single email body was fetched and indexed (on-demand fetch completion).
+    BodyFetched { email_id: String },
+
+    /// Phase 2 body download completed for a folder.
+    BodyDownloadComplete { account_id: String, folder: String },
+
+    /// Phase 2 body download encountered a non-fatal error on a single email.
+    BodyDownloadError { email_id: String, error: String },
 }
 
 /// Commands sent from the UI to the IMAP sync engine.
@@ -73,23 +78,24 @@ pub enum SyncEvent {
 #[derive(Debug, Clone)]
 pub enum UiCommand {
     /// Start syncing an account.
-    StartSync {
-        account_id: String,
-    },
+    StartSync { account_id: String },
 
     /// Stop syncing an account.
-    StopSync {
-        account_id: String,
-    },
+    StopSync { account_id: String },
 
     /// Force a full resync of a specific folder.
-    ForceResync {
-        account_id: String,
-        folder: String,
-    },
+    ForceResync { account_id: String, folder: String },
 
     /// Gracefully shut down all sync tasks.
     Shutdown,
+
+    /// Fetch a single email's body on demand (user opened it before Phase 2 reached it).
+    FetchBodyOnDemand {
+        email_id: String,
+        account_id: String,
+        folder: String,
+        imap_uid: u32,
+    },
 }
 
 /// Create the bidirectional channel pair for sync engine <-> UI communication.

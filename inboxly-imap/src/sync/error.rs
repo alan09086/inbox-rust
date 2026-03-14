@@ -10,11 +10,7 @@ pub enum SyncError {
     Sqlite(#[from] rusqlite::Error),
 
     #[error("UIDVALIDITY changed: folder={folder}, old={old}, new={new}")]
-    UidValidityChanged {
-        folder: String,
-        old: u32,
-        new: u32,
-    },
+    UidValidityChanged { folder: String, old: u32, new: u32 },
 
     #[error("mailbox SELECT returned no UIDVALIDITY for folder: {0}")]
     MissingUidValidity(String),

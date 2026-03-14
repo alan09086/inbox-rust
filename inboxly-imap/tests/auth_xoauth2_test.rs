@@ -1,4 +1,4 @@
-use inboxly_imap::auth::xoauth2::{build_xoauth2_string, XOAuth2Credentials};
+use inboxly_imap::auth::xoauth2::{XOAuth2Credentials, build_xoauth2_string};
 
 #[test]
 fn xoauth2_string_format() {

@@ -13,8 +13,9 @@ fn setup_db() -> Connection {
             last_sync TEXT NOT NULL,
             last_synced_uid INTEGER,
             PRIMARY KEY (account_id, folder_name)
-        );"
-    ).unwrap();
+        );",
+    )
+    .unwrap();
     conn
 }
 

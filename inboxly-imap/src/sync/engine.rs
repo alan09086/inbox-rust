@@ -1,7 +1,7 @@
-use std::sync::Arc;
-use rusqlite::Connection;
-use tokio::sync::Mutex;
 use futures::TryStreamExt;
+use rusqlite::Connection;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use super::batch::{BatchIterator, batch_to_sequence};
 use super::envelope::parse_fetch_to_envelope;
@@ -211,7 +211,9 @@ where
                 Err(e) => {
                     // Log warning but continue — one bad envelope shouldn't kill the sync
                     let _ = event_tx
-                        .send(SyncEvent::Warning(format!("Skipped malformed envelope: {e}")))
+                        .send(SyncEvent::Warning(format!(
+                            "Skipped malformed envelope: {e}"
+                        )))
                         .await;
                 }
             }

@@ -23,6 +23,7 @@ pub fn test_db() -> Connection {
             imap_uid INTEGER NOT NULL,
             imap_folder TEXT NOT NULL,
             has_attachments INTEGER NOT NULL DEFAULT 0,
+            body_downloaded INTEGER NOT NULL DEFAULT 0,
             message_id_header TEXT,
             in_reply_to TEXT,
             references_json TEXT,

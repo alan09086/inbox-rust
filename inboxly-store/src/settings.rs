@@ -30,18 +30,16 @@ impl Store {
 
     /// Delete a setting.
     pub fn delete_setting(&self, key: &str) -> Result<()> {
-        self.conn().execute(
-            "DELETE FROM settings WHERE key = ?1",
-            params![key],
-        )?;
+        self.conn()
+            .execute("DELETE FROM settings WHERE key = ?1", params![key])?;
         Ok(())
     }
 
     /// Get all settings as key-value pairs.
     pub fn get_all_settings(&self) -> Result<Vec<(String, String)>> {
-        let mut stmt = self.conn().prepare(
-            "SELECT key, value FROM settings ORDER BY key",
-        )?;
+        let mut stmt = self
+            .conn()
+            .prepare("SELECT key, value FROM settings ORDER BY key")?;
         let rows = stmt
             .query_map([], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))

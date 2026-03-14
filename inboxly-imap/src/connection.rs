@@ -160,14 +160,17 @@ pub async fn detect_capabilities(
     session: &mut async_imap::Session<TlsStream<TcpStream>>,
 ) -> Result<ImapCapabilities> {
     let caps = session.capabilities().await?;
-    let raw: Vec<String> = caps.iter().map(|c| {
-        use async_imap::types::Capability;
-        match c {
-            Capability::Imap4rev1 => "IMAP4rev1".to_string(),
-            Capability::Auth(s) => format!("AUTH={s}"),
-            Capability::Atom(s) => s.to_string(),
-        }
-    }).collect();
+    let raw: Vec<String> = caps
+        .iter()
+        .map(|c| {
+            use async_imap::types::Capability;
+            match c {
+                Capability::Imap4rev1 => "IMAP4rev1".to_string(),
+                Capability::Auth(s) => format!("AUTH={s}"),
+                Capability::Atom(s) => s.to_string(),
+            }
+        })
+        .collect();
     debug!(capabilities = ?raw, "Server capabilities detected");
     Ok(parse_capabilities(&raw))
 }
