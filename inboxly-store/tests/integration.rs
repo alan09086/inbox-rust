@@ -566,3 +566,140 @@ fn test_rebuild() {
     store.insert_account(&sample_account()).unwrap();
     assert_eq!(store.list_accounts().unwrap().len(), 1);
 }
+
+// === Phase 2 (M8) integration tests ===
+
+/// Helper to insert a minimal test email for Phase 2 testing.
+fn insert_test_email(store: &Store, account_id: &str, folder: &str, uid: i64, body_downloaded: bool) {
+    let email_id = format!("<test-{}-{}-{}@example.com>", account_id, folder, uid);
+    let email = EmailRow {
+        id: email_id,
+        account_id: account_id.into(),
+        thread_id: "thread-001".into(),
+        from_name: Some("Test".into()),
+        from_address: "test@example.com".into(),
+        to_json: "[]".into(),
+        cc_json: "[]".into(),
+        subject: format!("Test {uid}"),
+        snippet: "".into(),
+        date: 1710000000 + uid,
+        maildir_path: "".into(),
+        flags: 0,
+        size_bytes: 1024,
+        imap_uid: uid,
+        imap_folder: folder.into(),
+        has_attachments: false,
+        body_downloaded,
+        message_id_header: None,
+        in_reply_to: None,
+        references_json: None,
+    };
+    store.insert_email(&email).unwrap();
+}
+
+#[test]
+fn test_phase2_resume_after_interruption() {
+    let store = test_store();
+    store.insert_account(&sample_account()).unwrap();
+    store.insert_thread(&sample_thread("acct-001")).unwrap();
+
+    // Insert 5 emails with body_downloaded = false (simulating Phase 1 output).
+    for uid in 1..=5 {
+        insert_test_email(&store, "acct-001", "INBOX", uid, false);
+    }
+
+    // Mark 3 as downloaded (simulating partial Phase 2 run).
+    for uid in 3..=5 {
+        let email_id = store.get_email_id_by_uid("acct-001", "INBOX", uid).unwrap().unwrap();
+        store.mark_body_downloaded(&email_id, &format!("/tmp/{uid}.eml")).unwrap();
+    }
+
+    // Query remaining — should be UIDs 1 and 2.
+    let remaining = store.get_uids_without_body("acct-001", "INBOX", 500).unwrap();
+    assert_eq!(remaining.len(), 2);
+    assert!(remaining.contains(&1));
+    assert!(remaining.contains(&2));
+}
+
+#[test]
+fn test_phase2_fetches_newest_first() {
+    let store = test_store();
+    store.insert_account(&sample_account()).unwrap();
+    store.insert_thread(&sample_thread("acct-001")).unwrap();
+
+    // Insert 10 emails.
+    for uid in 1..=10 {
+        insert_test_email(&store, "acct-001", "INBOX", uid, false);
+    }
+
+    // Get first batch — should be in descending UID order.
+    let batch = store.get_uids_without_body("acct-001", "INBOX", 5).unwrap();
+    assert_eq!(batch, vec![10, 9, 8, 7, 6]);
+}
+
+#[test]
+fn test_phase2_progress_count() {
+    let store = test_store();
+    store.insert_account(&sample_account()).unwrap();
+    store.insert_thread(&sample_thread("acct-001")).unwrap();
+
+    for uid in 1..=100 {
+        insert_test_email(&store, "acct-001", "INBOX", uid, false);
+    }
+
+    let total = store.count_emails_without_body("acct-001", "INBOX").unwrap();
+    assert_eq!(total, 100);
+
+    // Mark 40 as downloaded.
+    for uid in 61..=100 {
+        let email_id = store.get_email_id_by_uid("acct-001", "INBOX", uid).unwrap().unwrap();
+        store.mark_body_downloaded(&email_id, &format!("/tmp/{uid}.eml")).unwrap();
+    }
+
+    let remaining = store.count_emails_without_body("acct-001", "INBOX").unwrap();
+    assert_eq!(remaining, 60);
+}
+
+#[test]
+fn test_is_body_downloaded() {
+    let store = test_store();
+    store.insert_account(&sample_account()).unwrap();
+    store.insert_thread(&sample_thread("acct-001")).unwrap();
+
+    insert_test_email(&store, "acct-001", "INBOX", 42, false);
+    let email_id = store.get_email_id_by_uid("acct-001", "INBOX", 42).unwrap().unwrap();
+
+    assert!(!store.is_body_downloaded(&email_id).unwrap());
+
+    store.mark_body_downloaded(&email_id, "/tmp/42.eml").unwrap();
+
+    assert!(store.is_body_downloaded(&email_id).unwrap());
+}
+
+#[test]
+fn test_get_maildir_path() {
+    let store = test_store();
+    store.insert_account(&sample_account()).unwrap();
+    store.insert_thread(&sample_thread("acct-001")).unwrap();
+
+    insert_test_email(&store, "acct-001", "INBOX", 42, false);
+    let email_id = store.get_email_id_by_uid("acct-001", "INBOX", 42).unwrap().unwrap();
+
+    // Before body download, maildir_path is empty.
+    let path = store.get_maildir_path(&email_id).unwrap();
+    assert!(path.is_none());
+
+    // After body download, maildir_path is set.
+    store.mark_body_downloaded(&email_id, "/mail/cur/42.eml").unwrap();
+    let path = store.get_maildir_path(&email_id).unwrap();
+    assert_eq!(path.unwrap(), "/mail/cur/42.eml");
+}
+
+#[test]
+fn test_get_email_id_by_uid_not_found() {
+    let store = test_store();
+    store.insert_account(&sample_account()).unwrap();
+
+    let result = store.get_email_id_by_uid("acct-001", "INBOX", 999).unwrap();
+    assert!(result.is_none());
+}
