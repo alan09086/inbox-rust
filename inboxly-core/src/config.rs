@@ -190,3 +190,38 @@ impl Paths {
         Ok(())
     }
 }
+
+/// Errors that can occur during config operations.
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    #[error("config I/O error: {0}")]
+    Io(#[from] io::Error),
+    #[error("config parse error: {0}")]
+    Parse(#[from] toml::de::Error),
+    #[error("config serialize error: {0}")]
+    Serialize(#[from] toml::ser::Error),
+    #[error("config validation error: {0}")]
+    Validation(String),
+    #[error("could not determine home directory")]
+    NoHomeDir,
+}
+
+impl AppConfig {
+    /// Load from default XDG path. Returns default if file missing.
+    pub fn load() -> Result<Self, ConfigError> {
+        let paths = Paths::resolve().ok_or(ConfigError::NoHomeDir)?;
+        Self::load_from(&paths.config_file())
+    }
+
+    /// Load from specific path. Returns default if file missing.
+    pub fn load_from(path: &std::path::Path) -> Result<Self, ConfigError> {
+        match std::fs::read_to_string(path) {
+            Ok(contents) => {
+                let config: AppConfig = toml::from_str(&contents)?;
+                Ok(config)
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(AppConfig::default()),
+            Err(e) => Err(ConfigError::Io(e)),
+        }
+    }
+}
