@@ -260,17 +260,31 @@ impl InboxlyTheme {
     /// - The portal doesn't support the setting
     /// - The system reports "no preference"
     pub async fn from_system() -> Self {
-        match system::query_system_color_scheme().await {
-            Ok(SystemColorScheme::Dark) => {
+        // zbus requires a Tokio runtime, but Iced's Task::perform runs on its
+        // own executor (not Tokio). We spawn a std thread with its own
+        // single-threaded Tokio runtime so zbus gets the reactor it needs.
+        let handle = std::thread::spawn(|| {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build();
+            match rt {
+                Ok(rt) => rt.block_on(system::query_system_color_scheme()).ok(),
+                Err(_) => None,
+            }
+        });
+
+        // Await the thread result via a blocking join (fine in Task::perform context).
+        let scheme = handle.join().ok().flatten();
+
+        match scheme {
+            Some(SystemColorScheme::Dark) => {
                 tracing::info!("system theme detected: dark");
                 Self::dark()
             }
-            Ok(SystemColorScheme::Light | SystemColorScheme::NoPreference) => {
-                tracing::info!("system theme detected: light (or no preference)");
-                Self::light()
-            }
-            Err(e) => {
-                tracing::warn!("system theme detection failed ({e}), defaulting to light");
+            Some(SystemColorScheme::Light | SystemColorScheme::NoPreference) | None => {
+                if scheme.is_none() {
+                    tracing::warn!("system theme detection failed, defaulting to light");
+                }
                 Self::light()
             }
         }
