@@ -46,13 +46,13 @@ Requires Rust edition 2024 (rustc 1.85+).
 
 ## Status
 
-**M3 complete** — SQLite storage backend with full schema and CRUD:
-- 13 tables (accounts, emails, threads, thread_state, sync_state, contacts, bundles, bundle_rules, sender_affinity, reminders, highlights, settings, offline_queue)
-- WAL mode, foreign keys, schema versioning via PRAGMA user_version
-- Full CRUD for all tables with typed Row structs
-- Transaction support with commit/rollback
-- Database rebuild capability for Maildir recovery
-- 106 tests passing
+**M4 complete** — Maildir filesystem operations:
+- Maildir++ folder structure with standard IMAP folder mapping
+- Atomic email storage (tmp → new → cur), flag encoding/decoding
+- .eml parsing to EmailMeta (lightweight) and EmailContent (lazy-loaded)
+- Message listing, deletion, move, copy operations
+- Disaster recovery: rebuild SQLite from Maildir scan
+- 126 tests passing
 
 ## Licence
 

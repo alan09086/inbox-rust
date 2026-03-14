@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2026-03-14
+
+### Added
+
+- **Maildir operations**: Full Maildir++ filesystem layer in `inboxly-store`
+- **MaildirStore**: Folder initialization with standard IMAP folder mapping (INBOX, Sent, Drafts, Trash, Jstrk, Archive)
+- **Flag encoding**: Bidirectional IMAP ↔ Maildir flag conversion (DFPRST suffix format)
+- **Atomic writes**: store_new (tmp→new), deliver (new→cur), store_cur with flag suffixes
+- **Flag updates**: set_flags, add_flags, remove_flags via filename rename
+- **Email parsing**: parse_email_meta (lightweight headers+snippet) and read_email_content (full body+attachments)
+- **Message operations**: list_messages, count_messages, delete_message, move_message, copy_message
+- **Disaster recovery**: scan_folder, scan_all, rebuild_emails_from_maildir for SQLite reconstruction
+- **Test fixtures**: 4 RFC 5322 .eml files (simple, multipart, attachment, reply)
+- 20 new tests (5 flag unit tests + 15 maildir integration tests)
+
 ## [0.3.0] - 2026-03-14
 
 ### Added
