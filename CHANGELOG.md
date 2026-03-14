@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.19.0] - 2026-03-14
+
+### Added
+
+- **Mark Done**: `MarkDone(thread_id)` message marks a thread as done in SQLite, pushes undo action, reloads feed
+- **Toggle Pin**: `TogglePin(thread_id)` reads current pin state, toggles it, pushes undo with previous state
+- **Sweep**: `Sweep` message marks all unpinned non-done threads as done in a single batch, pushes bulk undo
+- **Undo system**: `UndoAction` enum (MarkDone, TogglePin, Sweep) with human-readable descriptions; `UndoState` with 7-second timed window, push/take/clear, expiry tracking
+- **Undo handler**: Reverses the pending action -- unmarks done, restores pin state, or unmarks all swept threads
+- **Undo snackbar widget**: Bottom-of-content notification showing action description and "Undo" button styled with accent colour
+- **UndoExpired handler**: Clears undo state when timer expires (action committed)
+- 10 new tests (688 total): undo state lifecycle (5), action descriptions (4), push/take/clear/expiry (1)
+
 ## [0.18.0] - 2026-03-14
 
 ### Added

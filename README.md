@@ -46,15 +46,13 @@ Requires Rust edition 2024 (rustc 1.85+).
 
 ## Status
 
-**M18 complete** -- Bundle Rows + Expand/Collapse:
-- Bundle row widget: collapsed summary with category icon, name, unread badge, sender previews, timestamp
-- Bundle icon widget: 40dp tinted circle with Unicode category symbols
-- Mixed feed rendering: email rows + bundle rows sorted by date within sections
-- Bundle summary query: aggregates threads by bundle_id with sender preview subquery
-- Bundle thread expansion query for detailed view
-- Unbundled thread filtering (only shows threads without bundle assignment individually)
-- ToggleBundle message wired for expand/collapse interaction
-- 678 tests passing, 0 clippy warnings
+**M19 complete** -- Done + Pin + Sweep + Undo:
+- Mark Done, Toggle Pin, Sweep inbox triage actions
+- Timed undo system (7-second window, matching Google Inbox)
+- Undo snackbar widget at bottom of content area
+- Optimistic local updates with undo reversal
+- Sweep marks all unpinned threads as done in one action
+- 688 tests passing, 0 clippy warnings
 
 ## Licence
 
