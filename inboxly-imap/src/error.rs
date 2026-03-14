@@ -60,6 +60,33 @@ pub enum ImapError {
 
     #[error("Maildir read failed: {0}")]
     MaildirRead(String),
+
+    // -- M9: Incremental sync + IDLE error variants --
+    #[error(
+        "UIDVALIDITY changed for folder '{folder}' (was {old}, now {new}) — full re-sync required"
+    )]
+    UidValidityChanged { folder: String, old: u32, new: u32 },
+
+    #[error("IDLE interrupted: {0}")]
+    IdleInterrupted(String),
+
+    #[error("IDLE not supported by server")]
+    IdleNotSupported,
+
+    #[error("sync task cancelled")]
+    SyncCancelled,
+
+    #[error("sync not running for account {0}")]
+    SyncNotRunning(String),
+
+    #[error("no sync state found for account {account_id} folder {folder}")]
+    NoSyncState { account_id: String, folder: String },
+
+    #[error("protocol violation: {0}")]
+    Protocol(String),
+
+    #[error("store error: {0}")]
+    Store(String),
 }
 
 pub type Result<T> = std::result::Result<T, ImapError>;
