@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.16.0] - 2026-03-14
+
+### Added
+
+- **Theme system**: `InboxlyTheme` struct wrapping `ThemeColors` with light/dark constructors and Iced `Theme::Custom` integration
+- **Light/dark colour tokens**: `ThemeColors` with 11 BigTop colour tokens (background, surface, text, divider, 3 toolbar colours), `const fn` constructors
+- **System theme detection**: `query_system_color_scheme()` queries freedesktop portal D-Bus (`org.freedesktop.appearance.color-scheme`) with fallback to light
+- **Theme resolution**: `from_preference()`, `from_settings()`, `from_system()` -- respects `ThemePreference` (System/Light/Dark) from config or settings store
+- **Settings abstraction**: `SettingsReader`/`SettingsWriter` traits for theme persistence without direct SQLite dependency
+- **Theme toggle**: `toggle()`, `save_preference()`, `reset_to_system()` on `InboxlyTheme`
+- **Bundle category colours**: 8 `BundleCategoryColor` constants with title+badge pairs, `for_category()` typed lookup using `BundleCategory`
+- **Avatar letter tile palette**: 27-colour `AVATAR_COLORS` array (A-Z + default), `for_letter()` lookup
+- **Expanded dimensions**: 16 constants from BigTop APK (toolbar, nav drawer, avatar, list items, section headers, FAB, snooze picker, compose, dividers)
+- **Expanded typography**: 20 constants (sizes + weights for toolbar, email title, author, snippet, timestamp, section header, badge, nav item, compose)
+- **Async startup detection**: `Task::perform` fires D-Bus query on startup when preference is System
+- **App integration**: `ThemeToggled` and `ThemeChanged(InboxlyTheme)` messages, theme field on `Inboxly` app struct
+- **Theme module restructure**: Converted `theme.rs` flat file to `theme/` directory with 7 submodules (colors, bundle_colors, avatar_colors, dimensions, typography, system, mod)
+- **Backward-compatible API**: All M15 exports preserved (`ActiveView`, `color_from_hex`, layout constants, `category_color`)
+- 79 new tests (655 total): colour tokens (23), bundle colours (11), avatar colours (7), dimensions (9), typography (9), InboxlyTheme (12), app integration (4), backward compat (4)
+
+### Dependencies
+
+- Added `zbus 5` (D-Bus system theme detection)
+- Added `tracing 0.1` (theme detection logging)
+- Added `thiserror` and `tokio` to `inboxly-ui`
+
 ## [0.15.0] - 2026-03-14
 
 ### Added

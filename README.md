@@ -46,13 +46,15 @@ Requires Rust edition 2024 (rustc 1.85+).
 
 ## Status
 
-**M15 complete** -- Iced Shell + Nav Drawer (first visual milestone):
-- Desktop window with Iced 0.14 elm-architecture
-- Nav drawer: account switcher, Inbox/Snoozed/Done, folder nav, 8 bundle categories with coloured dots
-- Toolbar: hamburger toggle, view title, search placeholder, avatar circle
-- View switching: toolbar colour changes (blue/orange/green) by active view
-- Theme system with BigTop APK colour palette and layout constants
-- 576 tests passing, 0 clippy warnings
+**M16 complete** -- Theme System:
+- Light and dark themes with full BigTop colour tokens
+- System theme detection via freedesktop D-Bus portal
+- InboxlyTheme with Iced Theme::Custom integration
+- Bundle category colours (8 categories), avatar A-Z palette (27 colours)
+- Comprehensive dimensions (16) and typography (20) constants
+- Theme toggle, persistence via SettingsReader/Writer traits
+- Async system detection on startup, falls back to light
+- 655 tests passing, 0 clippy warnings
 
 ## Licence
 
