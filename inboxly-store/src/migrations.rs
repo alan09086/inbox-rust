@@ -4,7 +4,7 @@ use crate::error::{Result, StoreError};
 use crate::store::Store;
 
 /// Current schema version. Bump this when adding a new migration.
-const CURRENT_VERSION: u32 = 2;
+const CURRENT_VERSION: u32 = 3;
 
 /// Run all pending migrations.
 pub fn run(store: &mut Store) -> Result<()> {
@@ -23,6 +23,10 @@ pub fn run(store: &mut Store) -> Result<()> {
 
     if version < 2 {
         migrate_v1_to_v2(store)?;
+    }
+
+    if version < 3 {
+        migrate_v2_to_v3(store)?;
     }
 
     set_version(store, CURRENT_VERSION)?;
@@ -104,10 +108,12 @@ fn migrate_v0_to_v1(store: &mut Store) -> Result<()> {
             email_count       INTEGER NOT NULL DEFAULT 0,
             unread_count      INTEGER NOT NULL DEFAULT 0,
             has_attachments   INTEGER NOT NULL DEFAULT 0,
-            snippet           TEXT NOT NULL DEFAULT ''
+            snippet           TEXT NOT NULL DEFAULT '',
+            root_message_id   TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_threads_account_id ON threads(account_id);
         CREATE INDEX IF NOT EXISTS idx_threads_newest_date ON threads(newest_date DESC);
+        CREATE INDEX IF NOT EXISTS idx_threads_root_message_id ON threads(root_message_id);
 
         -- Bundles (defined before thread_state since thread_state references it)
         CREATE TABLE IF NOT EXISTS bundles (
@@ -241,6 +247,37 @@ fn migrate_v1_to_v2(store: &mut Store) -> Result<()> {
         "CREATE INDEX IF NOT EXISTS idx_emails_body_downloaded
              ON emails(account_id, imap_folder, body_downloaded)
              WHERE body_downloaded = 0;",
+    )?;
+
+    Ok(())
+}
+
+/// M10: Add root_message_id column to threads for placeholder thread tracking.
+///
+/// Placeholder threads have `root_message_id` set to the Message-ID of the
+/// awaited root email. Once the root arrives, the column is cleared.
+fn migrate_v2_to_v3(store: &mut Store) -> Result<()> {
+    info!("Running migration v2 -> v3: add root_message_id to threads");
+
+    // Check if column already exists (fresh installs get it in v0->v1 if
+    // we update the base schema, but upgrades need the ALTER TABLE).
+    let has_column: bool = {
+        let mut stmt = store.conn().prepare("PRAGMA table_info(threads)")?;
+        let columns: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(1))?
+            .filter_map(|r| r.ok())
+            .collect();
+        columns.iter().any(|c| c == "root_message_id")
+    };
+
+    if !has_column {
+        store
+            .conn()
+            .execute_batch("ALTER TABLE threads ADD COLUMN root_message_id TEXT;")?;
+    }
+
+    store.conn().execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_threads_root_message_id ON threads(root_message_id);",
     )?;
 
     Ok(())

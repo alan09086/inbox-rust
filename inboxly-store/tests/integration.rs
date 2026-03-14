@@ -29,6 +29,7 @@ fn sample_thread(account_id: &str) -> ThreadRow {
         unread_count: 1,
         has_attachments: false,
         snippet: "Hey there...".into(),
+        root_message_id: None,
     }
 }
 

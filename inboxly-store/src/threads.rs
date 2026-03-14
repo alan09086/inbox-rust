@@ -14,13 +14,17 @@ pub struct ThreadRow {
     pub unread_count: i64,
     pub has_attachments: bool,
     pub snippet: String,
+    /// Message-ID of the root email for placeholder threads.
+    /// `None` for threads that already contain their root email or standalone threads.
+    pub root_message_id: Option<String>,
 }
 
 impl Store {
     pub fn insert_thread(&self, thread: &ThreadRow) -> Result<()> {
         self.conn().execute(
-            "INSERT INTO threads (id, account_id, subject, newest_date, oldest_date, email_count, unread_count, has_attachments, snippet)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO threads (id, account_id, subject, newest_date, oldest_date,
+             email_count, unread_count, has_attachments, snippet, root_message_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 thread.id,
                 thread.account_id,
@@ -31,6 +35,7 @@ impl Store {
                 thread.unread_count,
                 thread.has_attachments,
                 thread.snippet,
+                thread.root_message_id,
             ],
         )?;
         Ok(())
@@ -39,7 +44,8 @@ impl Store {
     pub fn get_thread(&self, id: &str) -> Result<ThreadRow> {
         self.conn()
             .query_row(
-                "SELECT id, account_id, subject, newest_date, oldest_date, email_count, unread_count, has_attachments, snippet
+                "SELECT id, account_id, subject, newest_date, oldest_date,
+                 email_count, unread_count, has_attachments, snippet, root_message_id
                  FROM threads WHERE id = ?1",
                 params![id],
                 Self::row_to_thread,
@@ -61,7 +67,8 @@ impl Store {
         offset: i64,
     ) -> Result<Vec<ThreadRow>> {
         let mut stmt = self.conn().prepare(
-            "SELECT id, account_id, subject, newest_date, oldest_date, email_count, unread_count, has_attachments, snippet
+            "SELECT id, account_id, subject, newest_date, oldest_date,
+             email_count, unread_count, has_attachments, snippet, root_message_id
              FROM threads WHERE account_id = ?1 ORDER BY newest_date DESC LIMIT ?2 OFFSET ?3",
         )?;
         let rows = stmt
@@ -107,8 +114,9 @@ impl Store {
     /// may create a thread or update an existing one.
     pub fn upsert_thread(&self, thread: &ThreadRow) -> Result<()> {
         self.conn().execute(
-            "INSERT INTO threads (id, account_id, subject, newest_date, oldest_date, email_count, unread_count, has_attachments, snippet)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            "INSERT INTO threads (id, account_id, subject, newest_date, oldest_date,
+             email_count, unread_count, has_attachments, snippet, root_message_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
              ON CONFLICT(id) DO UPDATE SET
                 subject = excluded.subject,
                 newest_date = excluded.newest_date,
@@ -127,6 +135,7 @@ impl Store {
                 thread.unread_count,
                 thread.has_attachments,
                 thread.snippet,
+                thread.root_message_id,
             ],
         )?;
         Ok(())
@@ -143,6 +152,7 @@ impl Store {
             unread_count: row.get(6)?,
             has_attachments: row.get(7)?,
             snippet: row.get(8)?,
+            root_message_id: row.get(9)?,
         })
     }
 }
