@@ -419,6 +419,94 @@ fn test_offline_queue() {
     assert_eq!(store.count_offline_queue().unwrap(), 0);
 }
 
+// === Offline queue with OfflineAction integration ===
+
+#[test]
+fn test_offline_action_roundtrip_via_store() {
+    use inboxly_core::OfflineAction;
+
+    let store = test_store();
+
+    let action = OfflineAction::MarkRead {
+        account_id: "acc-1".into(),
+        folder: "INBOX".into(),
+        imap_uid: 42,
+    };
+
+    let payload = serde_json::to_string(&action).unwrap();
+    let id = store.enqueue_offline_action(action.variant_name(), &payload).unwrap();
+    assert!(id > 0);
+
+    let queue = store.get_offline_queue().unwrap();
+    assert_eq!(queue.len(), 1);
+    assert_eq!(queue[0].action, "mark_read");
+
+    // Deserialize back
+    let back: OfflineAction = serde_json::from_str(&queue[0].payload_json).unwrap();
+    assert_eq!(back.variant_name(), "mark_read");
+}
+
+#[test]
+fn test_offline_queue_fifo_order() {
+    use inboxly_core::OfflineAction;
+
+    let store = test_store();
+
+    let actions = vec![
+        OfflineAction::MarkRead { account_id: "a".into(), folder: "I".into(), imap_uid: 1 },
+        OfflineAction::Star { account_id: "a".into(), folder: "I".into(), imap_uid: 2 },
+        OfflineAction::MarkDone { account_id: "a".into(), folder: "I".into(), imap_uid: 3 },
+    ];
+
+    for action in &actions {
+        let payload = serde_json::to_string(action).unwrap();
+        store.enqueue_offline_action(action.variant_name(), &payload).unwrap();
+    }
+
+    let queue = store.get_offline_queue().unwrap();
+    assert_eq!(queue.len(), 3);
+    assert_eq!(queue[0].action, "mark_read");
+    assert_eq!(queue[1].action, "star");
+    assert_eq!(queue[2].action, "mark_done");
+}
+
+#[test]
+fn test_all_offline_action_variants_via_store() {
+    use inboxly_core::OfflineAction;
+
+    let store = test_store();
+
+    let variants = vec![
+        OfflineAction::MarkRead { account_id: "a".into(), folder: "I".into(), imap_uid: 1 },
+        OfflineAction::MarkUnread { account_id: "a".into(), folder: "I".into(), imap_uid: 2 },
+        OfflineAction::Star { account_id: "a".into(), folder: "I".into(), imap_uid: 3 },
+        OfflineAction::Unstar { account_id: "a".into(), folder: "I".into(), imap_uid: 4 },
+        OfflineAction::MarkDone { account_id: "a".into(), folder: "I".into(), imap_uid: 5 },
+        OfflineAction::MoveToTrash { account_id: "a".into(), folder: "I".into(), imap_uid: 6 },
+        OfflineAction::MoveToFolder {
+            account_id: "a".into(), from_folder: "I".into(), to_folder: "A".into(), imap_uid: 7,
+        },
+        OfflineAction::MarkAnswered { account_id: "a".into(), folder: "I".into(), imap_uid: 8 },
+        OfflineAction::SendDraft { account_id: "a".into(), draft_maildir_path: "/tmp/d.eml".into() },
+    ];
+
+    for action in &variants {
+        let payload = serde_json::to_string(action).unwrap();
+        store.enqueue_offline_action(action.variant_name(), &payload).unwrap();
+    }
+
+    let queue = store.get_offline_queue().unwrap();
+    assert_eq!(queue.len(), 9);
+
+    let expected = ["mark_read", "mark_unread", "star", "unstar", "mark_done",
+                    "move_to_trash", "move_to_folder", "mark_answered", "send_draft"];
+    for (i, row) in queue.iter().enumerate() {
+        assert_eq!(row.action, expected[i], "mismatch at index {i}");
+        // Verify deserialization works
+        let _: OfflineAction = serde_json::from_str(&row.payload_json).unwrap();
+    }
+}
+
 // === Transaction tests ===
 
 #[test]
