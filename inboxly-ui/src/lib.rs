@@ -4,6 +4,9 @@
 //! Model (app state) -> Message (events) -> Update (state changes) -> View (render).
 
 pub mod app;
+pub mod feed;
 pub mod nav;
 pub mod theme;
 pub mod toolbar;
+pub mod views;
+pub mod widgets;

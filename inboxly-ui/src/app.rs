@@ -4,9 +4,12 @@ use iced::widget::{column, container, row, text};
 use iced::{Element, Length, Task, Theme};
 
 use inboxly_core::config::ThemePreference;
+use inboxly_store::Store;
 
+use crate::feed::{self, FeedSection};
 use crate::nav::{NavBundleCategory, NavTarget, default_bundle_categories};
 use crate::theme::{ActiveView, InboxlyTheme};
+use crate::views::inbox_view::inbox_view;
 
 /// Top-level application state.
 pub struct Inboxly {
@@ -24,6 +27,10 @@ pub struct Inboxly {
     pub account_count: u32,
     /// Active theme (light or dark, with full BigTop tokens).
     pub theme: InboxlyTheme,
+    /// SQLite store for querying threads (None until wired from binary).
+    pub store: Option<Store>,
+    /// Pre-built feed sections for the inbox view.
+    pub feed_sections: Vec<FeedSection>,
 }
 
 /// All messages the application can receive.
@@ -39,6 +46,8 @@ pub enum Message {
     ThemeToggled,
     /// Async system theme detection completed.
     ThemeChanged(InboxlyTheme),
+    /// Reload the inbox feed from the store.
+    ReloadFeed,
 }
 
 impl Default for Inboxly {
@@ -51,6 +60,8 @@ impl Default for Inboxly {
             account_email: "user@example.com".into(),
             account_count: 1,
             theme: InboxlyTheme::light(),
+            store: None,
+            feed_sections: Vec::new(),
         }
     }
 }
@@ -62,8 +73,19 @@ impl Inboxly {
     /// is `ThemePreference::System` (the default). The initial render uses
     /// light theme until D-Bus responds.
     pub fn new() -> (Self, Task<Message>) {
-        let app = Self::default();
-        // Default ThemePreference is System, so fire async detection.
+        let mut app = Self::default();
+        app.reload_feed();
+        let task = Self::startup_theme_task(ThemePreference::System);
+        (app, task)
+    }
+
+    /// Create the app with a store instance (called from binary crate).
+    pub fn with_store(store: Store) -> (Self, Task<Message>) {
+        let mut app = Self {
+            store: Some(store),
+            ..Self::default()
+        };
+        app.reload_feed();
         let task = Self::startup_theme_task(ThemePreference::System);
         (app, task)
     }
@@ -89,6 +111,9 @@ impl Inboxly {
             Message::ThemeChanged(new_theme) => {
                 self.theme = new_theme;
             }
+            Message::ReloadFeed => {
+                self.reload_feed();
+            }
         }
         Task::none()
     }
@@ -106,17 +131,28 @@ impl Inboxly {
             None
         };
 
-        let content_area: Element<Message> = container(
-            text(format!(
-                "{} -- content area placeholder",
-                self.active_view.title()
-            ))
-            .size(16.0),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .padding(crate::theme::DEFAULT_PADDING)
-        .into();
+        // Render inbox feed or placeholder depending on active view.
+        let content_area: Element<Message> = if self.active_view == ActiveView::Inbox {
+            inbox_view(
+                &self.feed_sections,
+                self.theme.colors.text_primary,
+                self.theme.colors.text_secondary,
+                self.theme.colors.surface,
+                self.theme.colors.divider,
+            )
+        } else {
+            container(
+                text(format!(
+                    "{} -- content area placeholder",
+                    self.active_view.title()
+                ))
+                .size(16.0),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(crate::theme::DEFAULT_PADDING)
+            .into()
+        };
 
         let body: Element<Message> = match drawer {
             Some(drawer_el) => row![drawer_el, content_area]
@@ -149,6 +185,19 @@ impl Inboxly {
                 Task::perform(InboxlyTheme::from_system(), Message::ThemeChanged)
             }
             _ => Task::none(),
+        }
+    }
+
+    /// Reload the feed from the store (synchronous, fast).
+    fn reload_feed(&mut self) {
+        if let Some(ref store) = self.store {
+            match feed::build_feed(store) {
+                Ok(sections) => self.feed_sections = sections,
+                Err(e) => {
+                    tracing::warn!("failed to load inbox feed: {e}");
+                    self.feed_sections = Vec::new();
+                }
+            }
         }
     }
 }
@@ -255,7 +304,7 @@ mod tests {
         assert_eq!(cats[7].name, "Low Priority");
     }
 
-    // -- M16 theme integration tests --
+    // -- M16 theme tests --
 
     #[test]
     fn default_theme_is_light() {
@@ -284,5 +333,27 @@ mod tests {
         let dark = InboxlyTheme::dark();
         let _ = app.update(Message::ThemeChanged(dark));
         assert!(app.theme.colors.is_dark);
+    }
+
+    // -- M17 feed tests --
+
+    #[test]
+    fn default_feed_is_empty() {
+        let app = Inboxly::default();
+        assert!(app.feed_sections.is_empty());
+    }
+
+    #[test]
+    fn reload_feed_with_store() {
+        let store = Store::open_in_memory().expect("in-memory store");
+        let (app, _) = Inboxly::with_store(store);
+        assert!(app.feed_sections.is_empty());
+    }
+
+    #[test]
+    fn reload_feed_message_does_not_panic() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::ReloadFeed);
+        assert!(app.feed_sections.is_empty());
     }
 }
