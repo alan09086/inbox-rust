@@ -19,7 +19,7 @@ pub enum FolderRole {
 /// A discovered IMAP folder with its parsed attributes.
 #[derive(Debug, Clone)]
 pub struct ImapFolder {
-    /// Full IMAP folder name (e.g., "[Gmail]/Sent Mail").
+    /// Full IMAP folder name (e.g., `[Gmail]/Sent Mail`).
     pub name: String,
     /// Hierarchy delimiter (e.g., '/' or '.').
     pub delimiter: Option<char>,
