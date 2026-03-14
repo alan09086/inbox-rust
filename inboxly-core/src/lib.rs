@@ -21,3 +21,7 @@ pub use thread::Thread;
 pub mod bundle;
 
 pub use bundle::{Bundle, BundleCategory, BundleIcon, BundleThrottle, BundleVisibility, Color};
+
+pub mod highlight;
+
+pub use highlight::{Highlight, TripBundle};
