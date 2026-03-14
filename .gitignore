@@ -1,0 +1,8 @@
+.superpowers/
+inbox-decompiled/
+reference/
+*.apk
+.venv/
+__pycache__/
+target/
+
