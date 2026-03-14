@@ -10,6 +10,7 @@ pub mod bundle;
 pub mod highlight;
 pub mod inbox;
 pub mod error;
+pub mod offline;
 pub mod traits;
 pub mod config;
 
@@ -26,3 +27,4 @@ pub use inbox::{InboxItem, SnoozeInfo, SnoozeUntil, ThreadState};
 pub use error::{InboxlyError, Result};
 pub use traits::{Bundler, Extractor, Store};
 pub use config::{AccountConfig, AppConfig, AuthMethod, ConfigError, Paths, SnoozePresets, ThemePreference};
+pub use offline::OfflineAction;

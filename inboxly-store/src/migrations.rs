@@ -214,12 +214,31 @@ fn migrate_v0_to_v1(store: &mut Store) -> Result<()> {
 }
 
 /// M8: Add body_downloaded column and index for Phase 2 sync.
+///
+/// The column may already exist if the database was created fresh with v0->v1
+/// that includes it. We check first to avoid a "duplicate column" error.
 fn migrate_v1_to_v2(store: &mut Store) -> Result<()> {
     info!("Running migration v1 -> v2: add body_downloaded column to emails");
 
+    // Check if column already exists (fresh installs already have it in v0->v1).
+    let has_column: bool = {
+        let mut stmt = store.conn().prepare("PRAGMA table_info(emails)")?;
+        let columns: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(1))?
+            .filter_map(|r| r.ok())
+            .collect();
+        columns.iter().any(|c| c == "body_downloaded")
+    };
+
+    if !has_column {
+        store.conn().execute_batch(
+            "ALTER TABLE emails ADD COLUMN body_downloaded INTEGER NOT NULL DEFAULT 0;"
+        )?;
+    }
+
+    // Index is idempotent (IF NOT EXISTS).
     store.conn().execute_batch(
-        "ALTER TABLE emails ADD COLUMN body_downloaded INTEGER NOT NULL DEFAULT 0;
-         CREATE INDEX IF NOT EXISTS idx_emails_body_downloaded
+        "CREATE INDEX IF NOT EXISTS idx_emails_body_downloaded
              ON emails(account_id, imap_folder, body_downloaded)
              WHERE body_downloaded = 0;"
     )?;

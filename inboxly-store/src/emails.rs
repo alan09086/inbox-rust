@@ -97,7 +97,7 @@ impl Store {
         let mut stmt = self.conn().prepare(
             "SELECT id, account_id, thread_id, from_name, from_address, to_json, cc_json,
              subject, snippet, date, maildir_path, flags, size_bytes, imap_uid, imap_folder,
-             has_attachments, message_id_header, in_reply_to, references_json
+             has_attachments, body_downloaded, message_id_header, in_reply_to, references_json
              FROM emails WHERE thread_id = ?1 ORDER BY date ASC",
         )?;
         let rows = stmt
@@ -115,7 +115,7 @@ impl Store {
         let mut stmt = self.conn().prepare(
             "SELECT id, account_id, thread_id, from_name, from_address, to_json, cc_json,
              subject, snippet, date, maildir_path, flags, size_bytes, imap_uid, imap_folder,
-             has_attachments, message_id_header, in_reply_to, references_json
+             has_attachments, body_downloaded, message_id_header, in_reply_to, references_json
              FROM emails WHERE account_id = ?1 AND imap_folder = ?2 ORDER BY date DESC",
         )?;
         let rows = stmt
@@ -134,7 +134,7 @@ impl Store {
         let result = self.conn().query_row(
             "SELECT id, account_id, thread_id, from_name, from_address, to_json, cc_json,
              subject, snippet, date, maildir_path, flags, size_bytes, imap_uid, imap_folder,
-             has_attachments, message_id_header, in_reply_to, references_json
+             has_attachments, body_downloaded, message_id_header, in_reply_to, references_json
              FROM emails WHERE account_id = ?1 AND imap_folder = ?2 AND imap_uid = ?3",
             params![account_id, folder, uid],
             Self::row_to_email,
