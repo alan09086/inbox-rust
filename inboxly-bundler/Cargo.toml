@@ -3,7 +3,18 @@ name = "inboxly-bundler"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Email categorisation engine for Inboxly"
 
 [dependencies]
-inboxly-core.workspace = true
-inboxly-store.workspace = true
+inboxly-core = { path = "../inboxly-core" }
+inboxly-store = { path = "../inboxly-store" }
+
+regex = "1"
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+tracing = "0.1"
+uuid = { version = "1", features = ["v5"] }
+
+[dev-dependencies]
+tempfile = "3"
