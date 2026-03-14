@@ -9,10 +9,15 @@
 //! - Channel types for UI communication
 
 pub mod auth;
+pub mod body_fetch;
+pub mod body_processor;
 pub mod channel;
 pub mod connection;
 pub mod error;
 pub mod folders;
+pub mod offline_replay;
+pub mod on_demand;
+pub mod phase2;
 pub mod pool;
 pub mod sync;
 pub mod tls;
