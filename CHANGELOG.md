@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.0] - 2026-03-14
+
+### Added
+
+- **Threading module**: Full References-based email threading algorithm in `inboxly-store/src/threading/` (simplified JWZ, no subject-based grouping)
+- **Header extraction**: Parse Message-ID, In-Reply-To, References with case-insensitive lookup, angle bracket stripping, bare ID support, header folding whitespace handling (`threading/headers.rs`)
+- **Thread assignment**: Core algorithm using `References[0]` as thread root, with placeholder threads for orphaned replies (`threading/assign.rs`)
+- **Placeholder tracking**: `is_placeholder_thread` and `list_placeholder_threads` helpers for diagnostics and re-threading
+- **Thread unification**: Merges placeholder threads when root emails arrive, handles cross-thread merge scenarios (`threading/unify.rs`)
+- **Metadata aggregation**: Recalculates subject (oldest), snippet (newest), dates, counts, attachment flag per thread; bulk refresh for account; participant extraction (`threading/metadata.rs`)
+- **Batch threading**: Processes unthreaded emails oldest-first to minimize placeholders, chunked at 5000 for large mailboxes; targeted email ID batch threading (`threading/batch.rs`)
+- **Thread rebuild**: Wipe and reconstruct all threads from scratch with proper FK cleanup (thread_state, highlights) (`threading/rebuild.rs`)
+- **Self-referencing protection**: Prevents infinite loops when broken mailers put own Message-ID in References
+- **Schema migration v3**: `root_message_id TEXT` column on threads table with index for placeholder tracking
+- **ThreadRow.root_message_id**: New `Option<String>` field on `ThreadRow` for placeholder thread identification
+- 75 new tests (350 total): header parsing (16), thread assignment (10), placeholder helpers (4), unification (4), metadata aggregation (6), batch threading (5), rebuild (4), edge cases (17), integration tests (13)
+
 ## [0.9.0] - 2026-03-14
 
 ### Added
