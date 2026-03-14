@@ -1,12 +1,14 @@
 //! # inboxly-bundler
 //!
-//! Email categorisation engine for Inboxly. Implements a three-layer system:
+//! Email categorisation engine for Inboxly.  Implements a four-layer system:
 //!
-//! 1. **User-defined rules** (highest priority) -- explicit sender/header rules (M13)
-//! 2. **Sender learning** (medium priority) -- learned from user actions (M13)
-//! 3. **Header heuristics** (lowest priority) -- zero-config pattern matching (this milestone)
+//! 1. **User-defined rules** (highest priority) -- explicit pattern matching
+//! 2. **Sender learning** (medium priority) -- learns from user moves
+//! 3. **Header heuristics** (lowest priority) -- zero-config pattern matching
+//! 4. **Uncategorised** -- email stays in primary inbox
 //!
-//! This milestone (M12) implements Layer 3: header-based heuristics.
+//! M12 introduced Layer 3 (header heuristics) and the [`Bundler`] struct.
+//! M13 adds Layers 1-2 via [`engine::BundlerEngine`] and the full pipeline.
 //!
 //! ## Quick Start
 //!
@@ -44,6 +46,24 @@ pub mod user_rules;
 
 #[cfg(test)]
 mod test_utils;
+
+// M13 re-exports: user rules, sender learning, evaluation pipeline
+pub use affinity::{
+    AffinityStore, AffinityStoreError, SenderAffinity, CONFIDENCE_HALF_LIFE_DAYS,
+    CONFIDENCE_INCREMENT, CONFIDENCE_MAX, CONFIDENCE_OVERRIDE_PENALTY, CONFIDENCE_THRESHOLD,
+};
+pub use custom_bundle::{
+    BundleInfo, BundleStore, BundleStoreError, CreateBundleParams, UpdateBundleParams,
+};
+pub use engine::{BundlerEngine, CategoriseResult, CategoriseSource, HeuristicMatch};
+pub use evaluator::{evaluate_affinity, evaluate_rules, AffinityResult, RuleResult};
+pub use recategorise::{process_move, MoveAction, MoveResult};
+pub use rule_store::{
+    validate_rule, CreateRuleParams, RuleStore, RuleStoreError, UpdateRuleParams,
+};
+pub use user_rules::{
+    BundleRule, RuleId, RuleMatchable, UserCompiledRule, UserRuleField, UserRuleOp,
+};
 
 use std::collections::HashMap;
 use std::path::Path;

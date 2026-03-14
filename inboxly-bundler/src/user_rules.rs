@@ -115,8 +115,8 @@ impl FromStr for UserRuleOp {
 /// Implemented by core types (via bridge functions) and by test doubles
 /// for unit testing the rule engine in isolation.
 pub trait RuleMatchable {
-    /// The full From address (e.g., "alice@example.com").
-    fn from_address(&self) -> &str;
+    /// The sender's From address (e.g., "alice@example.com").
+    fn sender_address(&self) -> &str;
     /// All To addresses.
     fn to_addresses(&self) -> &[String];
     /// The Subject line.
@@ -163,7 +163,7 @@ impl BundleRule {
     /// during Phase 1 sync, or a header that doesn't exist).
     pub fn matches(&self, email: &dyn RuleMatchable) -> bool {
         match &self.field {
-            UserRuleField::From => self.test_value(email.from_address()),
+            UserRuleField::From => self.test_value(email.sender_address()),
             UserRuleField::To => email
                 .to_addresses()
                 .iter()
@@ -239,7 +239,7 @@ impl UserCompiledRule {
                 return false; // invalid regex pattern
             };
             match &self.rule.field {
-                UserRuleField::From => re.is_match(email.from_address()),
+                UserRuleField::From => re.is_match(email.sender_address()),
                 UserRuleField::To => {
                     email.to_addresses().iter().any(|a| re.is_match(a))
                 }
@@ -305,7 +305,7 @@ mod tests {
     }
 
     impl RuleMatchable for MockEmail {
-        fn from_address(&self) -> &str {
+        fn sender_address(&self) -> &str {
             &self.from
         }
         fn to_addresses(&self) -> &[String] {

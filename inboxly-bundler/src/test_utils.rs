@@ -49,7 +49,7 @@ pub(crate) mod fixtures {
     }
 
     impl RuleMatchable for MockEmail {
-        fn from_address(&self) -> &str {
+        fn sender_address(&self) -> &str {
             &self.from
         }
         fn to_addresses(&self) -> &[String] {
