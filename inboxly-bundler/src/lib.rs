@@ -34,6 +34,7 @@
 pub mod heuristics;
 pub mod rules_toml;
 pub mod system_bundles;
+pub mod user_rules;
 
 use std::collections::HashMap;
 use std::path::Path;
