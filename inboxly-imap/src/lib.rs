@@ -14,6 +14,7 @@ pub mod connection;
 pub mod error;
 pub mod folders;
 pub mod pool;
+pub mod sync;
 pub mod tls;
 
 // Convenience re-exports
