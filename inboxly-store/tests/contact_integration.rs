@@ -3,7 +3,7 @@
 //! Exercises the full flow: inserting emails, extracting contacts,
 //! verifying avatar assignments and display name resolution.
 
-use inboxly_core::contact::{avatar_color_for_letter, AvatarColor, AVATAR_PALETTE};
+use inboxly_core::contact::{AVATAR_PALETTE, AvatarColor, avatar_color_for_letter};
 use inboxly_store::{AccountRow, EmailRow, Store};
 
 fn test_store_with_account() -> Store {
@@ -25,7 +25,15 @@ fn test_store_with_account() -> Store {
     store
 }
 
-fn insert_email(store: &Store, id: &str, from_name: Option<&str>, from_address: &str, to_json: &str, cc_json: &str, date: i64) {
+fn insert_email(
+    store: &Store,
+    id: &str,
+    from_name: Option<&str>,
+    from_address: &str,
+    to_json: &str,
+    cc_json: &str,
+    date: i64,
+) {
     let email = EmailRow {
         id: id.into(),
         account_id: "acct-test".into(),

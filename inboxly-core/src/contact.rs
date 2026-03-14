@@ -173,10 +173,7 @@ pub fn parse_address(raw: &str) -> Option<ParsedAddress> {
             return None;
         }
 
-        let address = raw
-            .get(angle_start + 1..angle_end)?
-            .trim()
-            .to_lowercase();
+        let address = raw.get(angle_start + 1..angle_end)?.trim().to_lowercase();
         if address.is_empty() || !address.contains('@') {
             return None;
         }
@@ -402,8 +399,7 @@ mod tests {
 
     #[test]
     fn parse_address_list_multiple() {
-        let list =
-            parse_address_list("Alice <alice@a.com>, Bob <bob@b.com>, charlie@c.com");
+        let list = parse_address_list("Alice <alice@a.com>, Bob <bob@b.com>, charlie@c.com");
         assert_eq!(list.len(), 3);
         assert_eq!(list[0].address, "alice@a.com");
         assert_eq!(list[1].address, "bob@b.com");

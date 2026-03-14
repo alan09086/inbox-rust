@@ -242,9 +242,9 @@ impl Store {
     ///
     /// Returns the number of contact upsert operations performed.
     pub fn backfill_contacts_from_emails(&self) -> Result<usize> {
-        let mut stmt = self.conn().prepare(
-            "SELECT from_name, from_address, to_json, cc_json, date FROM emails",
-        )?;
+        let mut stmt = self
+            .conn()
+            .prepare("SELECT from_name, from_address, to_json, cc_json, date FROM emails")?;
 
         let mut count = 0;
 
@@ -261,8 +261,7 @@ impl Store {
             let (from_name, from_address, to_json, cc_json, date) = row?;
 
             // Upsert the From contact
-            let from_contact =
-                ContactRow::from_address(&from_address, from_name.as_deref(), date);
+            let from_contact = ContactRow::from_address(&from_address, from_name.as_deref(), date);
             self.upsert_contact(&from_contact)?;
             count += 1;
 
@@ -514,8 +513,10 @@ mod tests {
     // --- backfill tests ---
 
     fn insert_test_emails(store: &Store) {
-        store.conn().execute_batch(
-            "INSERT INTO accounts (id, email, display_name, provider, auth_method,
+        store
+            .conn()
+            .execute_batch(
+                "INSERT INTO accounts (id, email, display_name, provider, auth_method,
                 imap_host, imap_port, smtp_host, smtp_port)
              VALUES ('acct1', 'test@test.com', 'Test', 'other', 'password',
                 'imap.test.com', 993, 'smtp.test.com', 587);
@@ -532,7 +533,8 @@ mod tests {
                  'Re: Hello', 'Reply', 2000, '/tmp/msg2', 2, 'INBOX'),
                 ('msg3', 'acct1', 't1', 'Alice S.', 'alice@a.com',
                  '[]', '[]', 'Re: Re: Hello', 'Another', 3000, '/tmp/msg3', 3, 'INBOX');",
-        ).unwrap();
+            )
+            .unwrap();
     }
 
     #[test]
