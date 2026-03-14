@@ -21,6 +21,25 @@ pub enum BundleCategory {
 }
 
 impl BundleCategory {
+    /// Stable string key for storage and settings (lowercase, underscore-separated).
+    ///
+    /// Use this for database keys and configuration, not display.
+    /// For display purposes, use [`label()`](Self::label).
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Social => "social",
+            Self::Promos => "promos",
+            Self::Updates => "updates",
+            Self::Finance => "finance",
+            Self::Purchases => "purchases",
+            Self::Travel => "travel",
+            Self::Forums => "forums",
+            Self::LowPriority => "low_priority",
+            Self::Saved => "saved",
+            Self::Custom(name) => name.as_str(),
+        }
+    }
+
     /// Human-readable label for display.
     pub fn label(&self) -> &str {
         match self {

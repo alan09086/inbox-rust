@@ -90,6 +90,14 @@ pub enum SyncEvent {
 
     /// Sync is now up to date for a folder (entering IDLE or poll wait).
     SyncUpToDate { account_id: String, folder: String },
+
+    // -- M14: Throttle events --
+    /// One or more bundle throttle windows have opened.
+    /// The UI should refresh the inbox feed to show newly-visible bundles.
+    ThrottleWindowOpened {
+        /// Bundle IDs whose delivery windows just opened.
+        bundle_ids: Vec<String>,
+    },
 }
 
 /// Commands sent from the UI to the IMAP sync engine.

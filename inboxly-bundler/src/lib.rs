@@ -37,6 +37,7 @@ pub mod affinity;
 pub mod custom_bundle;
 pub mod engine;
 pub mod evaluator;
+pub mod events;
 pub mod heuristics;
 pub mod recategorise;
 pub mod rule_store;
@@ -57,6 +58,7 @@ pub use custom_bundle::{
     BundleInfo, BundleStore, BundleStoreError, CreateBundleParams, UpdateBundleParams,
 };
 pub use engine::{BundlerEngine, CategoriseResult, CategoriseSource, HeuristicMatch};
+pub use events::BundlerEvent;
 pub use evaluator::{AffinityResult, RuleResult, evaluate_affinity, evaluate_rules};
 pub use recategorise::{MoveAction, MoveResult, process_move};
 pub use scheduler::{ThrottleEvent, ThrottleSchedulerConfig, spawn_throttle_scheduler};
