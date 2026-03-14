@@ -9,6 +9,7 @@ name = "inboxly"
 path = "src/main.rs"
 
 [dependencies]
+iced.workspace = true
 inboxly-bundler.workspace = true
 inboxly-core.workspace = true
 inboxly-store.workspace = true
