@@ -33,11 +33,15 @@
 
 pub mod affinity;
 pub mod custom_bundle;
+pub mod evaluator;
 pub mod heuristics;
 pub mod rule_store;
 pub mod rules_toml;
 pub mod system_bundles;
 pub mod user_rules;
+
+#[cfg(test)]
+mod test_utils;
 
 use std::collections::HashMap;
 use std::path::Path;
