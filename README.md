@@ -46,16 +46,14 @@ Requires Rust edition 2024 (rustc 1.85+).
 
 ## Status
 
-**M10 complete** — References-based email threading algorithm:
-- Simplified JWZ threading: groups emails by `References[0]` (thread root), no subject-based grouping
-- Placeholder threads for orphaned replies that resolve when root email arrives
-- Thread unification: merges placeholder threads when root emails arrive, handles cross-thread merges
-- Thread metadata aggregation: subject (oldest), snippet (newest), dates, counts, attachment flags
-- Batch threading: processes unthreaded emails oldest-first to minimize placeholders, chunked for large mailboxes
-- Full thread rebuild: wipe and reconstruct all threads from scratch (for algorithm updates or integrity repair)
-- Self-referencing protection prevents infinite loops from broken mailers
-- Schema migration v3: `root_message_id` column on threads table for placeholder tracking
-- 350 tests passing, 0 clippy warnings
+**M11 complete** — Contacts + Avatar System:
+- 26-colour BigTop APK avatar palette for consistent sender identification (A-Z mapped to unique colours)
+- RFC 2822 address header parsing (`From`, `To`, `Cc`) with quoted-name and comma-list support
+- Automatic avatar letter derivation from display name or email local part
+- Contact extraction from email ingest pipeline (runs on every new email)
+- Batch backfill for populating contacts from existing emails in the database
+- Contact deduplication by lowercase email address with display name resolution (most recent wins)
+- 392 tests passing, 0 clippy warnings
 
 ## Licence
 

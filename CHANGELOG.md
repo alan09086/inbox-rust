@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.11.0] - 2026-03-14
+
+### Added
+
+- **Avatar colour palette**: 26-colour BigTop APK palette (`AvatarColor`, `AVATAR_PALETTE`, `AVATAR_COLOR_DEFAULT`) for consistent sender visual identification in `inboxly-core/src/contact.rs`
+- **RFC 2822 address parsing**: `parse_address()` and `parse_address_list()` handle display name + angle bracket, quoted names with commas, bare addresses, and case normalisation
+- **`ParsedAddress` type**: Intermediate parsed address with optional name and normalised address
+- **`Contact::avatar_color()`**: Returns the palette colour for a contact's avatar letter
+- **`ContactRow::from_address()`**: Constructor that automatically derives avatar letter (from display name or email local part) and palette index
+- **`Store::list_all_contacts()`**: Returns all contacts ordered by most recently seen
+- **`Store::extract_contacts_from_headers()`**: Parses From/To/Cc headers and upserts contacts into the database (for email ingest pipeline)
+- **`Store::backfill_contacts_from_emails()`**: Batch-extracts contacts from all existing emails in the database (idempotent, for database rebuild or M11 migration)
+- **Improved upsert logic**: `upsert_contact()` now preserves `avatar_color_index` when display name is NULL (prevents colour reset on bare-address updates)
+- 42 new tests (392 total): palette lookups (7), contact creation (5), address parsing (9), ContactRow CRUD (6), header extraction (2), backfill (5), JSON parsing (2), integration pipeline (3), palette verification (1), deduplication (1)
+
 ## [0.10.0] - 2026-03-14
 
 ### Added
