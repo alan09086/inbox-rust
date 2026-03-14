@@ -1,0 +1,19 @@
+From: Newsletter <news@example.com>
+To: Bob Jones <bob@example.com>
+Subject: Weekly Digest
+Date: Sat, 14 Mar 2026 12:00:00 -0400
+Message-ID: <msg002@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="boundary123"
+
+--boundary123
+Content-Type: text/plain; charset=utf-8
+
+Weekly digest in plain text.
+
+--boundary123
+Content-Type: text/html; charset=utf-8
+
+<html><body><h1>Weekly Digest</h1><p>Weekly digest in HTML.</p></body></html>
+
+--boundary123--

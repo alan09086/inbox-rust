@@ -1,0 +1,22 @@
+From: Carol Davis <carol@example.com>
+To: Bob Jones <bob@example.com>
+Subject: Document attached
+Date: Sat, 14 Mar 2026 14:00:00 -0400
+Message-ID: <msg003@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="mixbound456"
+
+--mixbound456
+Content-Type: text/plain; charset=utf-8
+
+Please find the document attached.
+
+--mixbound456
+Content-Type: application/pdf; name="report.pdf"
+Content-Disposition: attachment; filename="report.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5k
+b2JqCg==
+
+--mixbound456--

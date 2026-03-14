@@ -1,0 +1,16 @@
+From: Bob Jones <bob@example.com>
+To: Alice Smith <alice@example.com>
+Subject: Re: Hello from Inboxly
+Date: Sat, 14 Mar 2026 11:00:00 -0400
+Message-ID: <msg004@example.com>
+In-Reply-To: <msg001@example.com>
+References: <msg001@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+Hi Alice,
+
+Thanks for the test email! Inboxly is looking great.
+
+Bob
