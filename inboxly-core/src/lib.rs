@@ -12,11 +12,13 @@ pub mod id;
 pub mod inbox;
 pub mod offline;
 pub mod thread;
+pub mod throttle;
 pub mod traits;
 
 // Re-exports for convenience
 pub use attachment::{Attachment, AttachmentMeta};
 pub use bundle::{Bundle, BundleCategory, BundleIcon, BundleThrottle, BundleVisibility, Color};
+pub use throttle::WeekdayWrapper;
 pub use config::{
     AccountConfig, AppConfig, AuthMethod, ConfigError, Paths, SnoozePresets, ThemePreference,
 };

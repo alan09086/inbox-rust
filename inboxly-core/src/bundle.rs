@@ -49,20 +49,8 @@ pub enum BundleVisibility {
     SkipInbox,
 }
 
-/// Controls delivery frequency for bundle notifications.
-///
-// NOTE(M14): This simple enum will be replaced by a richer tagged enum with
-// delivery_time/weekday. M14 must include a v3->v4 migration for existing
-// SQLite rows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum BundleThrottle {
-    /// Emails appear as they arrive.
-    Immediate,
-    /// Bundle surfaces once per day at configured time.
-    Daily,
-    /// Bundle surfaces once per week.
-    Weekly,
-}
+// BundleThrottle is now defined in crate::throttle (M14).
+pub use crate::throttle::BundleThrottle;
 
 /// Icon identifier for bundle display.
 /// Uses named icons rather than embedding actual icon data.
@@ -184,7 +172,9 @@ mod tests {
             unread_count: 0,
             newest_date: Utc::now(),
             visibility: BundleVisibility::Bundled,
-            throttle: BundleThrottle::Daily,
+            throttle: BundleThrottle::Daily {
+                delivery_time: chrono::NaiveTime::from_hms_opt(17, 0, 0).expect("valid time"),
+            },
         };
         let json = serde_json::to_string(&bundle).unwrap();
         let back: Bundle = serde_json::from_str(&json).unwrap();
