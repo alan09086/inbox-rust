@@ -46,13 +46,13 @@ Requires Rust edition 2024 (rustc 1.85+).
 
 ## Status
 
-**M2 complete** — TOML-based config system with XDG path resolution:
-- Config file at `~/.config/inboxly/config.toml`
-- Multi-account support (Gmail OAuth2, Fastmail app passwords, generic IMAP)
-- Configurable snooze presets, theme preference, data/cache dir overrides
-- XDG path resolver with `Paths` struct (config, data, cache directories)
-- Load/save with first-run defaults, validation with clear error messages
-- 88 tests passing
+**M3 complete** — SQLite storage backend with full schema and CRUD:
+- 13 tables (accounts, emails, threads, thread_state, sync_state, contacts, bundles, bundle_rules, sender_affinity, reminders, highlights, settings, offline_queue)
+- WAL mode, foreign keys, schema versioning via PRAGMA user_version
+- Full CRUD for all tables with typed Row structs
+- Transaction support with commit/rollback
+- Database rebuild capability for Maildir recovery
+- 106 tests passing
 
 ## Licence
 
