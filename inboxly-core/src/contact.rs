@@ -17,6 +17,8 @@
 //! the application. For database persistence with avatar metadata, see
 //! `ContactRow` in `inboxly-store`.
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -138,6 +140,17 @@ impl Contact {
     /// Returns the `AvatarColor` for this contact based on its avatar letter.
     pub fn avatar_color(&self) -> AvatarColor {
         avatar_color_for_letter(self.avatar_letter())
+    }
+}
+
+impl fmt::Display for Contact {
+    /// Formats the contact as `"Name <address>"` or just `"address"` if name is empty.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.name.is_empty() {
+            write!(f, "{}", self.address)
+        } else {
+            write!(f, "{} <{}>", self.name, self.address)
+        }
     }
 }
 

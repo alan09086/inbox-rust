@@ -17,4 +17,5 @@ tracing = "0.1"
 uuid = { version = "1", features = ["v5"] }
 
 [dev-dependencies]
+inboxly-core = { path = "../inboxly-core", features = ["test-helpers"] }
 tempfile = "3"

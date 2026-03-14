@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::path::Path;
+
 use rusqlite::params;
 
 use crate::error::{Result, StoreError};
@@ -102,6 +105,26 @@ impl Store {
             .query_map(params![thread_id], Self::row_to_email)?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(rows)
+    }
+
+    /// Get the newest email in a thread (by date descending).
+    ///
+    /// Returns `None` if the thread has no emails.
+    /// Used by the bundler to pick the representative email for categorisation.
+    pub fn get_newest_email_in_thread(&self, thread_id: &str) -> Result<Option<EmailRow>> {
+        let result = self.conn().query_row(
+            "SELECT id, account_id, thread_id, from_name, from_address, to_json, cc_json,
+             subject, snippet, date, maildir_path, flags, size_bytes, imap_uid, imap_folder,
+             has_attachments, body_downloaded, message_id_header, in_reply_to, references_json
+             FROM emails WHERE thread_id = ?1 ORDER BY date DESC LIMIT 1",
+            params![thread_id],
+            Self::row_to_email,
+        );
+        match result {
+            Ok(row) => Ok(Some(row)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(StoreError::Sqlite(e)),
+        }
     }
 
     /// Get all emails for an account in a folder, ordered by date descending.
@@ -388,6 +411,39 @@ impl Store {
             return Err(StoreError::NotFound(format!("email uid={uid} in {folder}")));
         }
         Ok(())
+    }
+
+    /// Load email headers from the Maildir .eml file for a given email.
+    ///
+    /// Reads the file at `maildir_path`, parses it with `mailparse`, and
+    /// returns all headers as a `HashMap<String, String>`. Returns an empty
+    /// map if the maildir path is empty or the file does not exist.
+    ///
+    /// Used by the bundler to evaluate header-based heuristics.
+    pub fn load_email_headers(&self, email_id: &str) -> Result<HashMap<String, String>> {
+        let path_str = match self.get_maildir_path(email_id)? {
+            Some(p) if !p.is_empty() => p,
+            _ => return Ok(HashMap::new()),
+        };
+
+        let path = Path::new(&path_str);
+        if !path.exists() {
+            return Ok(HashMap::new());
+        }
+
+        let data = std::fs::read(path).map_err(|e| {
+            StoreError::Maildir(format!("failed to read {}: {e}", path.display()))
+        })?;
+
+        let parsed = mailparse::parse_mail(&data).map_err(|e| {
+            StoreError::Parse(format!("failed to parse email headers: {e}"))
+        })?;
+
+        let mut headers = HashMap::new();
+        for header in &parsed.headers {
+            headers.insert(header.get_key(), header.get_value());
+        }
+        Ok(headers)
     }
 
     /// Upsert an email row (insert or update on conflict).
