@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.25.0] - 2026-03-14
+
+### Added (M21-M25)
+
+- **Snooze picker** (M21): `compute_presets()` returns 5 time presets (Later Today, Tomorrow, This Weekend, Next Week, Someday) with computed UTC times; `SnoozeThread` message with store integration
+- **Reminder row widget** (M22): clipboard icon, title, due date (red if overdue), done checkmark button
+- **Speed Dial FAB** (M22): 56dp main FAB with expand/collapse, two 40dp mini-FABs (Compose + Reminder)
+- **Compose view** (M23): `ComposeState` with To/Cc/Subject/Body, `ComposeMode` (New/Reply/ReplyAll/Forward), `ComposeMessage` events, max-width 920dp layout with Send/Discard
+- **Search view** (M24): `SearchResult` type, `search_view()` with empty/no-results states, `ParsedQuery` with from/to/subject/has:attachment/is:unread operators, `parse_query()` parser
+- **Inbox Zero Sun** (M25): celebratory view with sun emoji, "You're all done!" heading
+- **Keyboard shortcuts** (M25): standard keybindings matching Google Inbox (e=Done, ==Pin, c=Compose, /=Search, j/k=navigate, b=Snooze, r=Refresh)
+- 18 new tests across M21-M25 (715 total)
+
 ## [0.20.0] - 2026-03-14
 
 ### Added

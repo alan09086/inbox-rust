@@ -46,11 +46,17 @@ Requires Rust edition 2024 (rustc 1.85+).
 
 ## Status
 
-**M20 complete** -- Swipe + Hover Actions:
-- Swipe gesture state tracking (per-row drag offset, direction detection, arm threshold)
-- Hover-reveal action buttons (Done/Pin/Snooze) for desktop interaction
-- Two-threshold arm/commit system for swipe gestures
-- 697 tests passing, 0 clippy warnings
+**v0.25.0 / M25 complete** -- Full Inboxly v1 UI scaffold:
+- Theme system: light/dark with BigTop design tokens, D-Bus system detection
+- Inbox feed: date-grouped sections, email rows, bundle rows, mixed rendering
+- Triage actions: Done, Pin, Sweep with 7-second timed undo
+- Swipe gestures: state tracking, hover action buttons (Done/Pin/Snooze)
+- Snooze picker: 5 preset options with computed UTC times
+- Reminders: reminder row widget, Speed Dial FAB (Compose + Reminder)
+- Compose view: To/Cc/Subject/Body fields, Send/Discard, reply modes
+- Search: query parser (from:/to:/subject:/has:/is: operators), result view
+- Inbox Zero celebration view, keyboard shortcut definitions
+- 715 tests passing, 0 clippy warnings
 
 ## Licence
 
