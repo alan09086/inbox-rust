@@ -717,4 +717,53 @@ mod tests {
         assert!(paths.data_dir.exists());
         assert!(paths.cache_dir.exists());
     }
+
+    // === Task 19: Realistic TOML config (1 test) ===
+
+    #[test]
+    fn realistic_config_toml_parses() {
+        let toml_str = r#"
+# Inboxly configuration
+
+theme = "dark"
+
+[snooze]
+morning_hour = 7
+evening_hour = 20
+weekend_day = 6  # Sunday
+
+[[accounts]]
+email = "alan@gmail.com"
+display_name = "Alan Gaudet"
+provider = "gmail"
+auth_method = "oauth2"
+imap_host = "imap.gmail.com"
+imap_port = 993
+smtp_host = "smtp.gmail.com"
+smtp_port = 465
+
+[[accounts]]
+email = "alan@fastmail.com"
+display_name = "Alan (Work)"
+provider = "fastmail"
+auth_method = "app_password"
+imap_host = "imap.fastmail.com"
+smtp_host = "smtp.fastmail.com"
+"#;
+        let config: AppConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.theme, ThemePreference::Dark);
+        assert_eq!(config.accounts.len(), 2);
+        assert_eq!(config.accounts[0].provider, "gmail");
+        assert_eq!(config.accounts[0].auth_method, AuthMethod::OAuth2);
+        assert_eq!(config.accounts[0].smtp_port, 465);
+        assert_eq!(config.accounts[1].provider, "fastmail");
+        assert_eq!(config.accounts[1].auth_method, AuthMethod::AppPassword);
+        assert_eq!(config.accounts[1].imap_port, 993);  // default
+        assert_eq!(config.accounts[1].smtp_port, 587);  // default
+        assert_eq!(config.snooze.morning_hour, 7);
+        assert_eq!(config.snooze.afternoon_hour, 13);    // default
+        assert_eq!(config.snooze.evening_hour, 20);
+        assert_eq!(config.snooze.weekend_day, 6);
+        assert!(config.validate().is_ok());
+    }
 }
