@@ -20,6 +20,9 @@ pub mod metadata;
 pub mod rebuild;
 pub mod unify;
 
+#[cfg(test)]
+mod edge_case_tests;
+
 // Re-export public API.
 pub use assign::{assign_thread, is_placeholder_thread, list_placeholder_threads, ThreadAssignment};
 pub use batch::{thread_email_batch, thread_unthreaded_emails};
