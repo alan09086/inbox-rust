@@ -58,3 +58,36 @@ fn default_imap_port() -> u16 {
 fn default_smtp_port() -> u16 {
     587
 }
+
+/// Configurable hours for snooze time presets.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SnoozePresets {
+    /// Hour (0-23) for "Morning" snooze. Default: 8.
+    #[serde(default = "default_morning_hour")]
+    pub morning_hour: u8,
+    /// Hour (0-23) for "Afternoon" snooze. Default: 13.
+    #[serde(default = "default_afternoon_hour")]
+    pub afternoon_hour: u8,
+    /// Hour (0-23) for "Evening" snooze. Default: 18.
+    #[serde(default = "default_evening_hour")]
+    pub evening_hour: u8,
+    /// Day of week for "This Weekend" snooze (0=Monday .. 6=Sunday). Default: 5 (Saturday).
+    #[serde(default = "default_weekend_day")]
+    pub weekend_day: u8,
+}
+
+fn default_morning_hour() -> u8 { 8 }
+fn default_afternoon_hour() -> u8 { 13 }
+fn default_evening_hour() -> u8 { 18 }
+fn default_weekend_day() -> u8 { 5 }
+
+impl Default for SnoozePresets {
+    fn default() -> Self {
+        Self {
+            morning_hour: default_morning_hour(),
+            afternoon_hour: default_afternoon_hour(),
+            evening_hour: default_evening_hour(),
+            weekend_day: default_weekend_day(),
+        }
+    }
+}
