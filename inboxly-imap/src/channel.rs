@@ -65,6 +65,33 @@ pub enum SyncEvent {
         account_id: String,
         folders: Vec<ImapFolder>,
     },
+
+    // -- Phase 2 (M8): body download events --
+
+    /// Phase 2 body download progress update for a folder.
+    BodyDownloadProgress {
+        account_id: String,
+        folder: String,
+        downloaded: u64,
+        total: u64,
+    },
+
+    /// A single email body was fetched and indexed (on-demand fetch completion).
+    BodyFetched {
+        email_id: String,
+    },
+
+    /// Phase 2 body download completed for a folder.
+    BodyDownloadComplete {
+        account_id: String,
+        folder: String,
+    },
+
+    /// Phase 2 body download encountered a non-fatal error on a single email.
+    BodyDownloadError {
+        email_id: String,
+        error: String,
+    },
 }
 
 /// Commands sent from the UI to the IMAP sync engine.
@@ -90,6 +117,14 @@ pub enum UiCommand {
 
     /// Gracefully shut down all sync tasks.
     Shutdown,
+
+    /// Fetch a single email's body on demand (user opened it before Phase 2 reached it).
+    FetchBodyOnDemand {
+        email_id: String,
+        account_id: String,
+        folder: String,
+        imap_uid: u32,
+    },
 }
 
 /// Create the bidirectional channel pair for sync engine <-> UI communication.
