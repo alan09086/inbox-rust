@@ -9,6 +9,7 @@ description = "Email categorisation engine for Inboxly"
 inboxly-core = { path = "../inboxly-core" }
 inboxly-store = { path = "../inboxly-store" }
 
+chrono.workspace = true
 regex = "1"
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
