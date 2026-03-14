@@ -240,4 +240,42 @@ impl AppConfig {
         std::fs::write(path, contents)?;
         Ok(())
     }
+
+    /// Validate the configuration.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        for (i, account) in self.accounts.iter().enumerate() {
+            let ctx = format!("accounts[{}]", i);
+            if account.email.is_empty() {
+                return Err(ConfigError::Validation(format!("{}: email address is required", ctx)));
+            }
+            if !account.email.contains('@') {
+                return Err(ConfigError::Validation(format!("{}: '{}' is not a valid email address (missing '@')", ctx, account.email)));
+            }
+            if account.imap_host.is_empty() {
+                return Err(ConfigError::Validation(format!("{}: IMAP host is required", ctx)));
+            }
+            if account.smtp_host.is_empty() {
+                return Err(ConfigError::Validation(format!("{}: SMTP host is required", ctx)));
+            }
+            if account.imap_port == 0 {
+                return Err(ConfigError::Validation(format!("{}: IMAP port must be between 1 and 65535", ctx)));
+            }
+            if account.smtp_port == 0 {
+                return Err(ConfigError::Validation(format!("{}: SMTP port must be between 1 and 65535", ctx)));
+            }
+        }
+        if self.snooze.morning_hour > 23 {
+            return Err(ConfigError::Validation(format!("snooze.morning_hour {} is out of range (0-23)", self.snooze.morning_hour)));
+        }
+        if self.snooze.afternoon_hour > 23 {
+            return Err(ConfigError::Validation(format!("snooze.afternoon_hour {} is out of range (0-23)", self.snooze.afternoon_hour)));
+        }
+        if self.snooze.evening_hour > 23 {
+            return Err(ConfigError::Validation(format!("snooze.evening_hour {} is out of range (0-23)", self.snooze.evening_hour)));
+        }
+        if self.snooze.weekend_day > 6 {
+            return Err(ConfigError::Validation(format!("snooze.weekend_day {} is out of range (0=Monday .. 6=Sunday)", self.snooze.weekend_day)));
+        }
+        Ok(())
+    }
 }
