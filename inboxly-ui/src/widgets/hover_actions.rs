@@ -11,12 +11,13 @@ use crate::theme::dimensions::DEFAULT_PADDING;
 
 /// Build a row of hover action buttons for an email row.
 ///
-/// Returns a right-aligned row containing Done, Pin, and Snooze buttons.
+/// Returns a right-aligned row containing Done, Pin, Snooze, and More buttons.
 /// Caller should overlay this on the email row when mouse is hovering.
 pub fn hover_action_buttons<'a, Message: 'a + Clone>(
     on_done: Message,
     on_pin: Message,
     on_snooze: Message,
+    on_more: Message,
     accent_color: Color,
     surface_color: Color,
 ) -> Element<'a, Message> {
@@ -29,8 +30,9 @@ pub fn hover_action_buttons<'a, Message: 'a + Clone>(
         accent_color,
         surface_color,
     );
+    let more_btn = action_button("\u{22EE}", "More", on_more, accent_color, surface_color);
 
-    row![done_btn, pin_btn, snooze_btn]
+    row![done_btn, pin_btn, snooze_btn, more_btn]
         .spacing(4.0)
         .padding([0.0, DEFAULT_PADDING])
         .into()
@@ -81,6 +83,7 @@ mod tests {
             "done",
             "pin",
             "snooze",
+            "more",
             Color::from_rgb(0.26, 0.52, 0.96), // blue
             Color::WHITE,
         );
