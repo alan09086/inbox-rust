@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.28.0] - 2026-03-14
+
+### Added (M28)
+
+- **Account switcher** (M28): Inline expansion at top of nav drawer — collapsed header shows 44px avatar, display name, email, chevron; expanded list shows all accounts with active highlighted (#e8f0fe + checkmark), "Add account" row navigates to Settings
+- `ToggleAccountSwitcher` and `SwitchAccount(usize)` messages with proper bounds checking
+- Replaced mock `account_email`/`account_count` with `Vec<AccountConfig>` + `active_account_index`
+- `active_email()`, `active_display_name()`, `active_account()` convenience methods
+- Click-away dismiss via `mouse_area` wrapper on content area
+- Accounts loaded from `AppConfig` on startup via `OnceLock` pattern
+- `ACCOUNT_SWITCHER_AVATAR` (44dp) and `ACCOUNT_ROW_HEIGHT` (56dp) dimension constants
+- 16 new tests (790 total)
+
 ## [0.27.0] - 2026-03-14
 
 ### Added (M27)
