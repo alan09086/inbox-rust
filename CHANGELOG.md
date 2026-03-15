@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.30.0] - 2026-03-14
+
+### Added (M30)
+
+- **Bundles settings tab** (M30): Reorderable bundle list with up/down arrows, coloured throttle badge (Immediate/Daily/Weekly parsed from BundleThrottle JSON), visibility toggle (checkbox). All mutations auto-saved to SQLite.
+- **Notifications settings tab** (M30): Desktop notifications toggle, sound toggle (disabled when notifications off), "Notify for" section with All/Primary/per-bundle checkboxes. Persisted as JSON to settings store.
+- **Keyboard Shortcuts settings tab** (M30): Two-column Action/Shortcut table for all 18 actions, click-to-capture UI ("Press key..."), Reset button for customised bindings. Only non-default overrides stored as JSON.
+- **ShortcutMap** replaces compile-time `Shortcuts` struct: Runtime-configurable `HashMap<ShortcutAction, String>` with `defaults()`, `to_overrides_json()`/`from_overrides_json()` for delta persistence, `action_for_key()` reverse lookup
+- `ShortcutAction` enum (18 variants) with serde snake_case serialisation, labels, and display ordering
+- `key_event_to_shortcut_string()` helper for converting Iced keyboard events to human-readable strings (e.g. "Ctrl+Z", "Shift+R")
+- All 6 settings tabs now fully implemented — no more "Coming in M30" placeholders
+- 67 new tests (841 total)
+
 ## [0.29.0] - 2026-03-14
 
 ### Added (M29)
