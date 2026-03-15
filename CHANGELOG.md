@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.27.0] - 2026-03-14
+
+### Added (M27)
+
+- **Toolbar gear icon** (M27): Navigates to `ActiveView::Settings` with neutral grey `#455a64` toolbar, back-arrow replaces hamburger in Settings mode
+- **Overflow menu** (M27): Three-dot (⋮) button appended to hover action row; opens `PopupMenu` (BelowRight) with 4 groups — thread actions (Move to.../Mark read/Mute), reply actions, organisation (Add to bundle/Create rule), safety (Block sender/Report spam)
+- **Right-click context menu** (M27): Custom `RightClickArea` widget intercepts right-click events; opens `PopupMenu` (AtCursor) with Done/Pin/Snooze quick actions + full overflow menu items
+- **16 new Message variants** for thread actions: MoveTo, MarkReadState, MuteThread, Reply, ReplyAll, Forward, AddToBundle, CreateRuleFromSender, BlockSender, ReportSpam, plus menu open/close and settings navigation
+- `MoveDestination` enum (Inbox, Trash, Spam) for typed folder moves
+- `toolbar_settings` colour on ThemeColors, `sender_address` on FeedItem
+- Themed toolbar colours (`toolbar_color_themed`) for dark mode support
+- 18 new tests (774 total)
+
 ## [0.26.0] - 2026-03-14
 
 ### Added (M26)
