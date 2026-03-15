@@ -741,4 +741,113 @@ mod tests {
         let _ = app.update(Message::ReloadFeed);
         assert!(app.feed_sections.is_empty());
     }
+
+    // -- M27 Settings nav, toolbar colour, FeedItem tests --
+
+    #[test]
+    fn navigate_to_settings_stores_previous_view() {
+        let mut app = Inboxly::default();
+        app.active_view = ActiveView::Snoozed;
+        let _ = app.update(Message::NavigateToSettings);
+        assert_eq!(app.active_view, ActiveView::Settings);
+        assert_eq!(app.previous_view, ActiveView::Snoozed);
+        assert!(!app.drawer_open);
+    }
+
+    #[test]
+    fn navigate_back_from_settings_restores_view() {
+        let mut app = Inboxly::default();
+        app.active_view = ActiveView::Done;
+        let _ = app.update(Message::NavigateToSettings);
+        let _ = app.update(Message::NavigateBack);
+        assert_eq!(app.active_view, ActiveView::Done);
+        assert!(app.drawer_open);
+    }
+
+    #[test]
+    fn settings_toolbar_distinct_from_all_views() {
+        let settings_color = ActiveView::Settings.toolbar_color();
+        assert_ne!(settings_color, ActiveView::Inbox.toolbar_color());
+        assert_ne!(settings_color, ActiveView::Snoozed.toolbar_color());
+        assert_ne!(settings_color, ActiveView::Done.toolbar_color());
+    }
+
+    // -- M27 menu state transition tests --
+
+    #[test]
+    fn open_overflow_menu_sets_state() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenOverflowMenu("t1".into()));
+        assert_eq!(app.overflow_menu_thread, Some("t1".into()));
+    }
+
+    #[test]
+    fn close_overflow_menu_clears_state() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenOverflowMenu("t1".into()));
+        let _ = app.update(Message::CloseOverflowMenu);
+        assert!(app.overflow_menu_thread.is_none());
+    }
+
+    #[test]
+    fn open_context_menu_closes_overflow() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenOverflowMenu("t1".into()));
+        let _ = app.update(Message::OpenContextMenu {
+            thread_id: "t2".into(),
+            position: iced::Point::new(100.0, 200.0),
+        });
+        assert!(app.overflow_menu_thread.is_none());
+        assert_eq!(app.context_menu_thread, Some("t2".into()));
+    }
+
+    #[test]
+    fn open_overflow_closes_context_menu() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenContextMenu {
+            thread_id: "t1".into(),
+            position: iced::Point::ORIGIN,
+        });
+        let _ = app.update(Message::OpenOverflowMenu("t2".into()));
+        assert!(app.context_menu_thread.is_none());
+        assert_eq!(app.overflow_menu_thread, Some("t2".into()));
+    }
+
+    #[test]
+    fn thread_actions_close_menus() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenOverflowMenu("t1".into()));
+        let _ = app.update(Message::MoveTo {
+            thread_id: "t1".into(),
+            destination: MoveDestination::Inbox,
+        });
+        assert!(app.overflow_menu_thread.is_none());
+    }
+
+    #[test]
+    fn thread_actions_do_not_panic() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::MoveTo {
+            thread_id: "t1".into(),
+            destination: MoveDestination::Trash,
+        });
+        let _ = app.update(Message::MarkReadState {
+            thread_id: "t1".into(),
+            read: true,
+        });
+        let _ = app.update(Message::MuteThread("t1".into()));
+        let _ = app.update(Message::Reply("t1".into()));
+        let _ = app.update(Message::ReplyAll("t1".into()));
+        let _ = app.update(Message::Forward("t1".into()));
+        let _ = app.update(Message::AddToBundle {
+            thread_id: "t1".into(),
+            category: "Social".into(),
+        });
+        let _ = app.update(Message::CreateRuleFromSender("a@b.com".into()));
+        let _ = app.update(Message::BlockSender {
+            thread_id: "t1".into(),
+            sender_address: "a@b.com".into(),
+        });
+        let _ = app.update(Message::ReportSpam("t1".into()));
+    }
 }
