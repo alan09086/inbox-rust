@@ -11,7 +11,7 @@ use crate::nav::{NavBundleCategory, NavTarget, default_bundle_categories};
 use crate::theme::{ActiveView, InboxlyTheme, SettingsReader};
 use crate::undo::{UndoAction, UndoState};
 use crate::views::inbox_view::{InboxViewMessage, inbox_view};
-use crate::views::settings_view::{SettingsTab, StoreSettingsAdapter};
+use crate::views::settings_view::{SettingsTab, StoreSettingsAdapter, settings_view};
 
 /// Top-level application state.
 pub struct Inboxly {
@@ -1014,23 +1014,7 @@ impl Inboxly {
 
         // Render content area depending on active view.
         let content_area: Element<Message> = if self.active_view == ActiveView::Settings {
-            // Settings placeholder -- full implementation is M29.
-            container(
-                column![
-                    text("Settings").size(24.0),
-                    text("Coming in M29")
-                        .size(14.0)
-                        .color(self.theme.colors.text_secondary),
-                ]
-                .spacing(8.0)
-                .align_x(iced::Alignment::Center),
-            )
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding(crate::theme::DEFAULT_PADDING)
-            .align_x(iced::alignment::Horizontal::Center)
-            .align_y(iced::alignment::Vertical::Center)
-            .into()
+            settings_view(self)
         } else if self.active_view == ActiveView::Inbox {
             inbox_view(
                 &self.feed_sections,
@@ -1478,5 +1462,156 @@ mod tests {
         let app = Inboxly::with_accounts(accounts);
         assert_eq!(app.accounts.len(), 1);
         assert_eq!(app.active_email(), "test@example.com");
+    }
+
+    // -- M29 Settings state management tests --
+
+    #[test]
+    fn open_settings_changes_view_and_hides_drawer() {
+        let mut app = Inboxly::default();
+        assert!(app.drawer_open);
+        let _ = app.update(Message::NavigateToSettings);
+        assert_eq!(app.active_view, ActiveView::Settings);
+        assert!(!app.drawer_open);
+    }
+
+    #[test]
+    fn close_settings_restores_previous_view() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::Navigate(NavTarget::View(ActiveView::Done)));
+        let _ = app.update(Message::NavigateToSettings);
+        assert_eq!(app.active_view, ActiveView::Settings);
+        let _ = app.update(Message::NavigateBack);
+        assert_eq!(app.active_view, ActiveView::Done);
+    }
+
+    #[test]
+    fn close_settings_restores_drawer_state() {
+        let mut app = Inboxly::default();
+        // Start with drawer closed
+        app.drawer_open = false;
+        let _ = app.update(Message::NavigateToSettings);
+        assert!(!app.drawer_open);
+        let _ = app.update(Message::NavigateBack);
+        // Restores to false (was closed before settings)
+        assert!(!app.drawer_open);
+
+        // Now with drawer open
+        app.drawer_open = true;
+        let _ = app.update(Message::NavigateToSettings);
+        assert!(!app.drawer_open);
+        let _ = app.update(Message::NavigateBack);
+        assert!(app.drawer_open);
+    }
+
+    #[test]
+    fn settings_tab_defaults_to_general() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::NavigateToSettings);
+        assert_eq!(app.settings_tab, SettingsTab::General);
+    }
+
+    #[test]
+    fn settings_tab_change() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::NavigateToSettings);
+        let _ = app.update(Message::SettingsTabChanged(SettingsTab::Accounts));
+        assert_eq!(app.settings_tab, SettingsTab::Accounts);
+    }
+
+    #[test]
+    fn settings_tab_change_resets_edit_state() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::NavigateToSettings);
+        // Set some edit state
+        app.adding_account = true;
+        app.editing_account_index = Some(0);
+        app.removing_account_index = Some(1);
+        app.data_action_status = Some("test".to_owned());
+        // Switch tab
+        let _ = app.update(Message::SettingsTabChanged(SettingsTab::General));
+        assert!(!app.adding_account);
+        assert!(app.editing_account_index.is_none());
+        assert!(app.removing_account_index.is_none());
+        assert!(app.data_action_status.is_none());
+    }
+
+    #[test]
+    fn add_account_start_opens_form() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::AddAccountStart);
+        assert!(app.adding_account);
+        assert!(app.editing_account_index.is_none());
+        assert!(app.removing_account_index.is_none());
+    }
+
+    #[test]
+    fn account_form_cancel_resets_state() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::AddAccountStart);
+        assert!(app.adding_account);
+        let _ = app.update(Message::AccountFormCancel);
+        assert!(!app.adding_account);
+        assert!(app.editing_account_index.is_none());
+    }
+
+    #[test]
+    fn account_form_field_updates() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::AccountFormEmailChanged("test@example.com".into()));
+        assert_eq!(app.account_form.email, "test@example.com");
+
+        let _ = app.update(Message::AccountFormDisplayNameChanged("Test User".into()));
+        assert_eq!(app.account_form.display_name, "Test User");
+
+        let _ = app.update(Message::AccountFormProviderChanged("gmail".into()));
+        assert_eq!(app.account_form.provider, "gmail");
+
+        let _ = app.update(Message::AccountFormAuthMethodChanged("oauth2".into()));
+        assert_eq!(
+            app.account_form.auth_method,
+            inboxly_core::config::AuthMethod::OAuth2
+        );
+
+        let _ = app.update(Message::AccountFormImapHostChanged("imap.gmail.com".into()));
+        assert_eq!(app.account_form.imap_host, "imap.gmail.com");
+
+        let _ = app.update(Message::AccountFormImapPortChanged("143".into()));
+        assert_eq!(app.account_form.imap_port, 143);
+
+        let _ = app.update(Message::AccountFormSmtpHostChanged("smtp.gmail.com".into()));
+        assert_eq!(app.account_form.smtp_host, "smtp.gmail.com");
+
+        let _ = app.update(Message::AccountFormSmtpPortChanged("465".into()));
+        assert_eq!(app.account_form.smtp_port, 465);
+    }
+
+    #[test]
+    fn remove_account_confirm_and_cancel() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::RemoveAccountConfirm(1));
+        assert_eq!(app.removing_account_index, Some(1));
+        let _ = app.update(Message::RemoveAccountCancel);
+        assert!(app.removing_account_index.is_none());
+    }
+
+    #[test]
+    fn undo_timeout_values() {
+        let mut app = Inboxly::default();
+        for secs in [3, 5, 7, 10, 15] {
+            let _ = app.update(Message::SetUndoTimeout(secs));
+            assert_eq!(app.undo_timeout_secs, secs);
+        }
+    }
+
+    #[test]
+    fn format_size_helper() {
+        assert_eq!(format_size(0), "0 B");
+        assert_eq!(format_size(512), "512 B");
+        assert_eq!(format_size(1024), "1.0 KB");
+        assert_eq!(format_size(1536), "1.5 KB");
+        assert_eq!(format_size(1024 * 1024), "1.0 MB");
+        assert_eq!(format_size(1024 * 1024 * 1024), "1.0 GB");
+        assert_eq!(format_size(2 * 1024 * 1024 * 1024), "2.0 GB");
     }
 }
