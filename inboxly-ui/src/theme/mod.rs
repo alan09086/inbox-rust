@@ -259,7 +259,6 @@ impl InboxlyTheme {
     /// - D-Bus is unavailable
     /// - The portal doesn't support the setting
     /// - The system reports "no preference"
-    /// Detect system theme via D-Bus (`dbus-send`).
     ///
     /// This is synchronous and safe to call from any context (no Tokio needed).
     pub fn from_system() -> Self {

@@ -33,6 +33,18 @@ pub struct ThemeColors {
     pub toolbar_text: Color,
     /// Whether this is a dark theme.
     pub is_dark: bool,
+
+    // -- Popup menu colours --
+    /// Menu item hover background (`#f5f5f5` light, `#2a2a2a` dark).
+    pub menu_hover: Color,
+    /// Destructive menu item hover background (`#fbe9e7` light, `#3d1a14` dark).
+    pub menu_destructive_hover: Color,
+    /// Destructive menu item text colour (`#ef5350` both themes).
+    pub menu_destructive_text: Color,
+    /// Menu separator line colour (`#e8e8e8` light, `#333333` dark).
+    pub menu_separator: Color,
+    /// Menu card shadow colour (rgba black, 18% light, 30% dark).
+    pub menu_shadow: Color,
 }
 
 impl ThemeColors {
@@ -52,6 +64,16 @@ impl ThemeColors {
             toolbar_snoozed: hex("#ef6c00"),
             toolbar_text: hex("#ffffff"),
             is_dark: false,
+            menu_hover: hex("#f5f5f5"),
+            menu_destructive_hover: hex("#fbe9e7"),
+            menu_destructive_text: hex("#ef5350"),
+            menu_separator: hex("#e8e8e8"),
+            menu_shadow: Color {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 0.18,
+            },
         }
     }
 
@@ -71,6 +93,16 @@ impl ThemeColors {
             toolbar_snoozed: hex("#8f4100"),
             toolbar_text: hex("#ffffff"),
             is_dark: true,
+            menu_hover: hex("#2a2a2a"),
+            menu_destructive_hover: hex("#3d1a14"),
+            menu_destructive_text: hex("#ef5350"),
+            menu_separator: hex("#333333"),
+            menu_shadow: Color {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 0.30,
+            },
         }
     }
 }
@@ -253,5 +285,58 @@ mod tests {
     fn hex_parser_no_hash() {
         let c = hex("4285f4");
         assert_color_hex(c, "#4285f4");
+    }
+
+    // -- Popup menu colour tests --
+
+    #[test]
+    fn light_theme_menu_hover() {
+        assert_color_hex(ThemeColors::light().menu_hover, "#f5f5f5");
+    }
+
+    #[test]
+    fn light_theme_menu_destructive_hover() {
+        assert_color_hex(ThemeColors::light().menu_destructive_hover, "#fbe9e7");
+    }
+
+    #[test]
+    fn light_theme_menu_destructive_text() {
+        assert_color_hex(ThemeColors::light().menu_destructive_text, "#ef5350");
+    }
+
+    #[test]
+    fn light_theme_menu_separator() {
+        assert_color_hex(ThemeColors::light().menu_separator, "#e8e8e8");
+    }
+
+    #[test]
+    fn light_theme_menu_shadow() {
+        let c = ThemeColors::light().menu_shadow;
+        assert!(c.r.abs() < 0.01);
+        assert!(c.g.abs() < 0.01);
+        assert!(c.b.abs() < 0.01);
+        assert!((c.a - 0.18).abs() < 0.02);
+    }
+
+    #[test]
+    fn dark_theme_menu_hover() {
+        let c = ThemeColors::dark().menu_hover;
+        let surface = ThemeColors::dark().surface;
+        assert!(c.r > surface.r, "dark hover should be lighter than surface");
+    }
+
+    #[test]
+    fn dark_theme_menu_destructive_text_same_as_light() {
+        assert_color_hex(ThemeColors::dark().menu_destructive_text, "#ef5350");
+    }
+
+    #[test]
+    fn dark_theme_menu_shadow_is_darker() {
+        let dark_shadow = ThemeColors::dark().menu_shadow;
+        let light_shadow = ThemeColors::light().menu_shadow;
+        assert!(
+            dark_shadow.a >= light_shadow.a,
+            "dark theme shadow should be at least as opaque"
+        );
     }
 }
