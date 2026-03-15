@@ -497,7 +497,10 @@ where
         layout: Layout<'_>,
         cursor: mouse::Cursor,
     ) {
-        let menu_layout = layout.children().next().expect("overlay layout always has menu card child");
+        let menu_layout = layout
+            .children()
+            .next()
+            .expect("overlay layout always has menu card child");
         let menu_bounds = menu_layout.bounds();
 
         // -- Shadow --
@@ -750,7 +753,10 @@ where
         _clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
     ) {
-        let menu_layout = layout.children().next().expect("overlay layout always has menu card child");
+        let menu_layout = layout
+            .children()
+            .next()
+            .expect("overlay layout always has menu card child");
         let menu_bounds = menu_layout.bounds();
 
         match event {
@@ -807,7 +813,10 @@ where
         cursor: mouse::Cursor,
         _renderer: &Renderer,
     ) -> mouse::Interaction {
-        let menu_layout = layout.children().next().expect("overlay layout always has menu card child");
+        let menu_layout = layout
+            .children()
+            .next()
+            .expect("overlay layout always has menu card child");
         let menu_bounds = menu_layout.bounds();
 
         if let Some(pos) = cursor.position()
