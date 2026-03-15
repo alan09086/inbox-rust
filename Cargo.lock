@@ -2011,7 +2011,7 @@ dependencies = [
 
 [[package]]
 name = "inboxly"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "iced",
  "inboxly-bundler",
@@ -2023,7 +2023,7 @@ dependencies = [
 
 [[package]]
 name = "inboxly-bundler"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "chrono",
  "inboxly-core",
@@ -2041,7 +2041,7 @@ dependencies = [
 
 [[package]]
 name = "inboxly-core"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "chrono",
  "dirs",
@@ -2055,14 +2055,14 @@ dependencies = [
 
 [[package]]
 name = "inboxly-extract"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "inboxly-core",
 ]
 
 [[package]]
 name = "inboxly-imap"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "async-imap",
  "base64",
@@ -2093,7 +2093,7 @@ dependencies = [
 
 [[package]]
 name = "inboxly-snooze"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "inboxly-core",
  "inboxly-store",
@@ -2101,7 +2101,7 @@ dependencies = [
 
 [[package]]
 name = "inboxly-store"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "chrono",
  "inboxly-core",
@@ -2119,7 +2119,7 @@ dependencies = [
 
 [[package]]
 name = "inboxly-ui"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "chrono",
  "iced",
