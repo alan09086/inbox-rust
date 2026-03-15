@@ -1,9 +1,11 @@
 # Inboxly — Implementation Roadmap
 
-> **25 milestones**, each with its own detailed implementation plan.
+> **30 milestones**, each with its own detailed implementation plan.
 > Plans are written upfront before any implementation begins.
 
-**Spec:** `docs/superpowers/specs/2026-03-14-inboxly-design.md`
+**Specs:**
+- `docs/superpowers/specs/2026-03-14-inboxly-design.md` (v1 core)
+- `docs/superpowers/specs/2026-03-14-qol-menus-settings-design.md` (QoL: menus, settings, dropdowns)
 
 ---
 
@@ -36,6 +38,12 @@
 | M23 | Compose + SMTP + Drafts | `imap`, `ui` | [M23 Plan](./2026-03-14-m23-compose-smtp.md) |
 | M24 | Search + Query Parser | `store`, `ui` | [M24 Plan](./2026-03-14-m24-search-query.md) |
 | M25 | Highlights + Trips + Multi-Account + Polish | `extract`, `imap`, `store`, `ui` | [M25 Plan](./2026-03-14-m25-highlights-polish.md) |
+| | **Post-v1: QoL, Menus & Settings** | | |
+| M26 | PopupMenu Widget | `ui` | [M26 Plan](./2026-03-14-m26-popup-menu-widget.md) |
+| M27 | Overflow + Context Menus | `ui` | [M27 Plan](./2026-03-14-m27-overflow-context-menus.md) |
+| M28 | Account Switcher | `ui` | [M28 Plan](./2026-03-14-m28-account-switcher.md) |
+| M29 | Settings: General + Accounts + Data | `ui`, `core`, `store` | [M29 Plan](./2026-03-14-m29-settings-general-accounts.md) |
+| M30 | Settings: Bundles + Notifications + Shortcuts | `ui`, `store`, `bundler` | [M30 Plan](./2026-03-14-m30-settings-bundles-shortcuts.md) |
 
 ## Dependency Graph
 
@@ -55,6 +63,12 @@ M19 → M20
 M21 → M22
        ↓
 M23 → M24 → M25
+                 ↓
+M26 → M27
+       ↓
+       M28
+       ↓
+M29 → M30
 ```
 
 ## Key Checkpoints
@@ -65,6 +79,8 @@ M23 → M24 → M25
 - **After M17**: First visual — emails on screen
 - **After M19**: Usable email client (read + archive + pin)
 - **After M25**: Full Inboxly v1
+- **After M27**: Contextual menus working (overflow + right-click)
+- **After M30**: Polished desktop client with full settings
 
 ## Licence
 
