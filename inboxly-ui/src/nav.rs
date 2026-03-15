@@ -165,7 +165,10 @@ fn divider() -> Element<'static, Message> {
 }
 
 /// Render the account switcher at the top of the nav drawer.
-fn account_switcher(email: &str, account_count: u32) -> Element<'_, Message> {
+fn account_switcher<'a>(app: &'a Inboxly) -> Element<'a, Message> {
+    let email = app.active_email();
+    let account_count = app.accounts.len();
+
     let avatar_letter = email
         .chars()
         .next()
@@ -219,7 +222,7 @@ pub fn view_drawer(app: &Inboxly) -> Element<'_, Message> {
     let mut drawer = column![].width(NAV_DRAWER_WIDTH);
 
     // Account switcher
-    drawer = drawer.push(account_switcher(&app.account_email, app.account_count));
+    drawer = drawer.push(account_switcher(app));
     drawer = drawer.push(divider());
 
     // Primary nav: Inbox, Snoozed, Done

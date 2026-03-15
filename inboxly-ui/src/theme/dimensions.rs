@@ -92,6 +92,13 @@ pub const POPUP_MENU_SHADOW_BLUR: f32 = 24.0;
 /// Popup menu shadow vertical offset.
 pub const POPUP_MENU_SHADOW_OFFSET_Y: f32 = 6.0;
 
+// -- Account Switcher --
+
+/// Avatar diameter in the account switcher header (larger than standard 40dp).
+pub const ACCOUNT_SWITCHER_AVATAR: f32 = 44.0;
+/// Height of each account row in the expanded account list.
+pub const ACCOUNT_ROW_HEIGHT: f32 = 56.0;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,5 +191,15 @@ mod tests {
     #[test]
     fn popup_menu_shadow_offset_y_is_6dp() {
         assert_eq!(POPUP_MENU_SHADOW_OFFSET_Y, 6.0);
+    }
+
+    #[test]
+    fn account_switcher_avatar_is_44dp() {
+        assert_eq!(ACCOUNT_SWITCHER_AVATAR, 44.0);
+    }
+
+    #[test]
+    fn account_row_height_is_56dp() {
+        assert_eq!(ACCOUNT_ROW_HEIGHT, 56.0);
     }
 }

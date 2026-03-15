@@ -23,10 +23,12 @@ pub struct Inboxly {
     pub drawer_open: bool,
     /// Bundle categories shown in the nav drawer.
     pub bundle_categories: Vec<NavBundleCategory>,
-    /// Mock account info for the account switcher.
-    pub account_email: String,
-    /// Number of accounts (for the account switcher display).
-    pub account_count: u32,
+    /// Configured email accounts (loaded from AppConfig on startup).
+    pub accounts: Vec<inboxly_core::config::AccountConfig>,
+    /// Index of the currently active account.
+    pub active_account_index: usize,
+    /// Whether the account switcher dropdown is expanded.
+    pub account_switcher_open: bool,
     /// Active theme (light or dark, with full BigTop tokens).
     pub theme: InboxlyTheme,
     /// SQLite store for querying threads (None until wired from binary).
@@ -97,6 +99,10 @@ pub enum Message {
     },
     /// Close the right-click context menu.
     CloseContextMenu,
+    /// Toggle the account switcher dropdown in the nav drawer.
+    ToggleAccountSwitcher,
+    /// Switch to the account at the given index.
+    SwitchAccount(usize),
     /// Navigate to Settings view (gear icon).
     NavigateToSettings,
     /// Navigate back from Settings to previous view.
@@ -137,8 +143,9 @@ impl Default for Inboxly {
             active_nav: NavTarget::View(ActiveView::Inbox),
             drawer_open: true,
             bundle_categories: default_bundle_categories(),
-            account_email: "user@example.com".into(),
-            account_count: 1,
+            accounts: Vec::new(),
+            active_account_index: 0,
+            account_switcher_open: false,
             theme: InboxlyTheme::light(),
             store: None,
             feed_sections: Vec::new(),
@@ -176,6 +183,31 @@ impl Inboxly {
         (app, Task::none())
     }
 
+    /// Returns the currently active account config.
+    pub fn active_account(&self) -> Option<&inboxly_core::config::AccountConfig> {
+        self.accounts.get(self.active_account_index)
+    }
+
+    /// Returns the email address of the active account.
+    pub fn active_email(&self) -> &str {
+        self.active_account()
+            .map(|a| a.email.as_str())
+            .unwrap_or("No account")
+    }
+
+    /// Returns the display name of the active account.
+    pub fn active_display_name(&self) -> &str {
+        self.active_account()
+            .map(|a| {
+                if a.display_name.is_empty() {
+                    a.email.as_str()
+                } else {
+                    a.display_name.as_str()
+                }
+            })
+            .unwrap_or("No account")
+    }
+
     /// Iced update function -- handle messages and mutate state.
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
@@ -184,6 +216,23 @@ impl Inboxly {
                     self.active_view = *view;
                 }
                 self.active_nav = target;
+                self.account_switcher_open = false;
+            }
+            Message::ToggleAccountSwitcher => {
+                self.account_switcher_open = !self.account_switcher_open;
+            }
+            Message::SwitchAccount(index) => {
+                if index < self.accounts.len() {
+                    self.active_account_index = index;
+                    self.account_switcher_open = false;
+                    self.reload_feed();
+                } else {
+                    tracing::warn!(
+                        "SwitchAccount index {} out of bounds (have {} accounts)",
+                        index,
+                        self.accounts.len()
+                    );
+                }
             }
             Message::ToggleDrawer => {
                 self.drawer_open = !self.drawer_open;
@@ -850,5 +899,93 @@ mod tests {
             sender_address: "a@b.com".into(),
         });
         let _ = app.update(Message::ReportSpam("t1".into()));
+    }
+
+    // -- M28 account switcher data layer tests --
+
+    fn make_test_account(email: &str, display_name: &str) -> inboxly_core::config::AccountConfig {
+        inboxly_core::config::AccountConfig {
+            email: email.to_string(),
+            display_name: display_name.to_string(),
+            provider: "generic".to_string(),
+            auth_method: inboxly_core::config::AuthMethod::Password,
+            imap_host: "imap.example.com".to_string(),
+            imap_port: 993,
+            smtp_host: "smtp.example.com".to_string(),
+            smtp_port: 587,
+        }
+    }
+
+    fn make_test_account_no_name(email: &str) -> inboxly_core::config::AccountConfig {
+        inboxly_core::config::AccountConfig {
+            email: email.to_string(),
+            display_name: String::new(),
+            provider: "generic".to_string(),
+            auth_method: inboxly_core::config::AuthMethod::Password,
+            imap_host: "imap.example.com".to_string(),
+            imap_port: 993,
+            smtp_host: "smtp.example.com".to_string(),
+            smtp_port: 587,
+        }
+    }
+
+    #[test]
+    fn toggle_account_switcher() {
+        let mut app = Inboxly::default();
+        assert!(!app.account_switcher_open);
+        let _ = app.update(Message::ToggleAccountSwitcher);
+        assert!(app.account_switcher_open);
+        let _ = app.update(Message::ToggleAccountSwitcher);
+        assert!(!app.account_switcher_open);
+    }
+
+    #[test]
+    fn switch_account_out_of_bounds_is_noop() {
+        let mut app = Inboxly::default();
+        assert_eq!(app.active_account_index, 0);
+        let _ = app.update(Message::SwitchAccount(5));
+        assert_eq!(app.active_account_index, 0);
+    }
+
+    #[test]
+    fn active_email_with_no_accounts() {
+        let app = Inboxly::default();
+        assert_eq!(app.active_email(), "No account");
+    }
+
+    #[test]
+    fn navigate_closes_account_switcher() {
+        let mut app = Inboxly::default();
+        app.account_switcher_open = true;
+        let _ = app.update(Message::Navigate(NavTarget::View(ActiveView::Inbox)));
+        assert!(!app.account_switcher_open);
+    }
+
+    #[test]
+    fn switch_account_changes_active_index() {
+        let mut app = Inboxly::default();
+        app.accounts = vec![
+            make_test_account("first@example.com", "First"),
+            make_test_account("second@example.com", "Second"),
+        ];
+        let _ = app.update(Message::SwitchAccount(1));
+        assert_eq!(app.active_account_index, 1);
+        assert_eq!(app.active_email(), "second@example.com");
+    }
+
+    #[test]
+    fn switch_account_closes_switcher() {
+        let mut app = Inboxly::default();
+        app.accounts = vec![make_test_account("test@example.com", "Test")];
+        app.account_switcher_open = true;
+        let _ = app.update(Message::SwitchAccount(0));
+        assert!(!app.account_switcher_open);
+    }
+
+    #[test]
+    fn active_display_name_falls_back_to_email() {
+        let mut app = Inboxly::default();
+        app.accounts = vec![make_test_account_no_name("test@example.com")];
+        assert_eq!(app.active_display_name(), "test@example.com");
     }
 }
