@@ -15,6 +15,8 @@ use crate::views::inbox_view::{InboxViewMessage, inbox_view};
 pub struct Inboxly {
     /// Currently active primary view (drives toolbar colour).
     pub active_view: ActiveView,
+    /// View to return to when leaving Settings (back arrow).
+    pub previous_view: ActiveView,
     /// Currently selected nav target (may be a primary view, folder, or bundle).
     pub active_nav: NavTarget,
     /// Whether the nav drawer is visible (toggled by hamburger).
@@ -76,6 +78,7 @@ impl Default for Inboxly {
     fn default() -> Self {
         Self {
             active_view: ActiveView::Inbox,
+            previous_view: ActiveView::Inbox,
             active_nav: NavTarget::View(ActiveView::Inbox),
             drawer_open: true,
             bundle_categories: default_bundle_categories(),
