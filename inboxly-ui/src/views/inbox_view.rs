@@ -334,11 +334,9 @@ pub fn inbox_view<'a>(
                             item.is_unread,
                             bundle_categories,
                         );
-                        // For AtCursor, PopupMenu uses the tracked cursor position
-                        // from its internal state. We set the cursor position stored
-                        // in the widget state. The overlay positions itself at the
-                        // cursor position captured when the menu was opened.
-                        let _ = context_menu_position; // used by AtCursor anchor mode
+                        // TODO: plumb context_menu_position into PopupMenu for precise AtCursor placement.
+                        // Currently relies on PopupMenu's internal cursor tracking which is approximately correct.
+                        let _ = context_menu_position;
                         let popup: Element<'a, InboxViewMessage> = PopupMenu::new(
                             with_right_click,
                             menu_items,

@@ -17,7 +17,7 @@ use crate::theme::{
 /// - Center: search bar placeholder
 /// - Right: account avatar placeholder (circle with first letter)
 pub fn view_toolbar(app: &Inboxly) -> Element<'_, Message> {
-    let toolbar_bg = app.active_view.toolbar_color();
+    let toolbar_bg = app.active_view.toolbar_color_themed(&app.theme);
 
     // Hamburger / back button: show back arrow in Settings view, hamburger otherwise.
     let (nav_icon, nav_message) = if app.active_view == ActiveView::Settings {

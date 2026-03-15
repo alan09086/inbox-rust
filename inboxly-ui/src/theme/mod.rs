@@ -611,5 +611,6 @@ mod tests {
         assert_eq!(ActiveView::Inbox.title(), "Inbox");
         assert_eq!(ActiveView::Snoozed.title(), "Snoozed");
         assert_eq!(ActiveView::Done.title(), "Done");
+        assert_eq!(ActiveView::Settings.title(), "Settings");
     }
 }
