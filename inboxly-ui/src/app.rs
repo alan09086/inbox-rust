@@ -107,10 +107,7 @@ pub enum Message {
         destination: MoveDestination,
     },
     /// Mark thread as read or unread.
-    MarkReadState {
-        thread_id: String,
-        read: bool,
-    },
+    MarkReadState { thread_id: String, read: bool },
     /// Mute a thread.
     MuteThread(String),
     /// Reply to a thread.
@@ -120,10 +117,7 @@ pub enum Message {
     /// Forward a thread.
     Forward(String),
     /// Add thread to a bundle category.
-    AddToBundle {
-        thread_id: String,
-        category: String,
-    },
+    AddToBundle { thread_id: String, category: String },
     /// Create a rule from sender (stub -- shows "Coming soon" toast).
     CreateRuleFromSender(String),
     /// Block the sender.
