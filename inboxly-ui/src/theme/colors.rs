@@ -35,7 +35,6 @@ pub struct ThemeColors {
     pub is_dark: bool,
 
     // -- Popup menu colours --
-
     /// Menu item hover background (`#f5f5f5` light, `#2a2a2a` dark).
     pub menu_hover: Color,
     /// Destructive menu item hover background (`#fbe9e7` light, `#3d1a14` dark).
@@ -69,7 +68,12 @@ impl ThemeColors {
             menu_destructive_hover: hex("#fbe9e7"),
             menu_destructive_text: hex("#ef5350"),
             menu_separator: hex("#e8e8e8"),
-            menu_shadow: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.18 },
+            menu_shadow: Color {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 0.18,
+            },
         }
     }
 
@@ -93,7 +97,12 @@ impl ThemeColors {
             menu_destructive_hover: hex("#3d1a14"),
             menu_destructive_text: hex("#ef5350"),
             menu_separator: hex("#333333"),
-            menu_shadow: Color { r: 0.0, g: 0.0, b: 0.0, a: 0.30 },
+            menu_shadow: Color {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 0.30,
+            },
         }
     }
 }
@@ -325,6 +334,9 @@ mod tests {
     fn dark_theme_menu_shadow_is_darker() {
         let dark_shadow = ThemeColors::dark().menu_shadow;
         let light_shadow = ThemeColors::light().menu_shadow;
-        assert!(dark_shadow.a >= light_shadow.a, "dark theme shadow should be at least as opaque");
+        assert!(
+            dark_shadow.a >= light_shadow.a,
+            "dark theme shadow should be at least as opaque"
+        );
     }
 }
