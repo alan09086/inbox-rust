@@ -71,6 +71,27 @@ pub const COMPOSE_MAX_WIDTH: f32 = 920.0;
 /// Divider line thickness (1 physical pixel; Iced handles DPI).
 pub const DIVIDER_THICKNESS: f32 = 1.0;
 
+// -- Popup Menu --
+
+/// Popup menu card width (overflow/context menus).
+pub const POPUP_MENU_WIDTH: f32 = 260.0;
+/// Popup menu card corner radius.
+pub const POPUP_MENU_CORNER_RADIUS: f32 = 10.0;
+/// Popup menu item horizontal padding.
+pub const POPUP_MENU_ITEM_PADDING_H: f32 = 18.0;
+/// Popup menu item vertical padding.
+pub const POPUP_MENU_ITEM_PADDING_V: f32 = 12.0;
+/// Popup menu icon column width (left-aligned).
+pub const POPUP_MENU_ICON_WIDTH: f32 = 22.0;
+/// Popup menu item font size.
+pub const POPUP_MENU_ITEM_FONT_SIZE: f32 = 15.0;
+/// Popup menu separator vertical margin.
+pub const POPUP_MENU_SEPARATOR_MARGIN: f32 = 2.0;
+/// Popup menu shadow blur radius.
+pub const POPUP_MENU_SHADOW_BLUR: f32 = 24.0;
+/// Popup menu shadow vertical offset.
+pub const POPUP_MENU_SHADOW_OFFSET_Y: f32 = 6.0;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,5 +139,50 @@ mod tests {
     #[test]
     fn flat_cards_have_zero_radius() {
         assert_eq!(LIST_ITEM_CORNER_RADIUS, 0.0);
+    }
+
+    #[test]
+    fn popup_menu_width_is_260dp() {
+        assert_eq!(POPUP_MENU_WIDTH, 260.0);
+    }
+
+    #[test]
+    fn popup_menu_corner_radius_is_10dp() {
+        assert_eq!(POPUP_MENU_CORNER_RADIUS, 10.0);
+    }
+
+    #[test]
+    fn popup_menu_item_padding_h_is_18dp() {
+        assert_eq!(POPUP_MENU_ITEM_PADDING_H, 18.0);
+    }
+
+    #[test]
+    fn popup_menu_item_padding_v_is_12dp() {
+        assert_eq!(POPUP_MENU_ITEM_PADDING_V, 12.0);
+    }
+
+    #[test]
+    fn popup_menu_icon_width_is_22dp() {
+        assert_eq!(POPUP_MENU_ICON_WIDTH, 22.0);
+    }
+
+    #[test]
+    fn popup_menu_item_font_size_is_15() {
+        assert_eq!(POPUP_MENU_ITEM_FONT_SIZE, 15.0);
+    }
+
+    #[test]
+    fn popup_menu_separator_margin_is_2dp() {
+        assert_eq!(POPUP_MENU_SEPARATOR_MARGIN, 2.0);
+    }
+
+    #[test]
+    fn popup_menu_shadow_blur_is_24dp() {
+        assert_eq!(POPUP_MENU_SHADOW_BLUR, 24.0);
+    }
+
+    #[test]
+    fn popup_menu_shadow_offset_y_is_6dp() {
+        assert_eq!(POPUP_MENU_SHADOW_OFFSET_Y, 6.0);
     }
 }
