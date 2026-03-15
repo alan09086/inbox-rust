@@ -125,10 +125,7 @@ impl ShortcutMap {
 
     /// Get the binding for an action.
     pub fn get(&self, action: ShortcutAction) -> &str {
-        self.bindings
-            .get(&action)
-            .map(String::as_str)
-            .unwrap_or("")
+        self.bindings.get(&action).map(String::as_str).unwrap_or("")
     }
 
     /// Override the binding for an action.
@@ -180,9 +177,7 @@ impl ShortcutMap {
 
     /// Iterate over all actions in display order with their current bindings.
     pub fn iter_display_order(&self) -> impl Iterator<Item = (ShortcutAction, &str)> {
-        ShortcutAction::ALL
-            .iter()
-            .map(|a| (*a, self.get(*a)))
+        ShortcutAction::ALL.iter().map(|a| (*a, self.get(*a)))
     }
 
     /// The default binding for a single action.
@@ -229,10 +224,7 @@ mod tests {
     fn defaults_cover_all_actions() {
         let map = ShortcutMap::defaults();
         for action in ShortcutAction::ALL {
-            assert!(
-                !map.get(action).is_empty(),
-                "no default for {action:?}"
-            );
+            assert!(!map.get(action).is_empty(), "no default for {action:?}");
         }
     }
 
