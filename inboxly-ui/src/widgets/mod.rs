@@ -10,6 +10,7 @@ pub mod inbox_zero;
 pub mod overflow_menu;
 pub mod popup_menu;
 pub mod reminder_row;
+pub mod right_click_area;
 pub mod section_header;
 pub mod snooze_picker;
 pub mod speed_dial_fab;
