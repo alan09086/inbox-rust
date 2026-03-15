@@ -81,6 +81,8 @@ pub struct FeedItem {
     pub thread_id: String,
     /// Primary sender's display name (or email if no name).
     pub sender_name: String,
+    /// Sender's email address (for block/rule actions).
+    pub sender_address: String,
     /// Avatar letter (first letter of name, uppercased).
     pub avatar_letter: char,
     /// Avatar colour index (0-25, maps to A-Z palette).
@@ -191,8 +193,9 @@ pub fn build_feed(store: &Store) -> Result<Vec<FeedSection>, inboxly_store::Stor
     for thread in threads {
         let item = FeedItem {
             thread_id: thread.id,
+            sender_address: thread.sender_address.clone(),
             sender_name: if thread.sender_name.is_empty() {
-                thread.sender_address.clone()
+                thread.sender_address
             } else {
                 thread.sender_name
             },
