@@ -48,7 +48,7 @@ pub fn view_toolbar(app: &Inboxly) -> Element<'_, Message> {
 
     // Account avatar (first letter circle)
     let avatar_letter = app
-        .account_email
+        .active_email()
         .chars()
         .next()
         .unwrap_or('?')
