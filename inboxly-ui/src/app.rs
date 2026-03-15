@@ -172,6 +172,14 @@ impl Inboxly {
         (app, Task::none())
     }
 
+    /// Create the app with pre-loaded account configs.
+    pub fn with_accounts(accounts: Vec<inboxly_core::config::AccountConfig>) -> Self {
+        Self {
+            accounts,
+            ..Self::default()
+        }
+    }
+
     /// Create the app with a store instance (called from binary crate).
     pub fn with_store(store: Store) -> (Self, Task<Message>) {
         let mut app = Self {
@@ -586,6 +594,15 @@ impl Inboxly {
             .into()
         };
 
+        // Dismiss account switcher when clicking in the content area.
+        let content_area: Element<Message> = if self.account_switcher_open {
+            iced::widget::mouse_area(content_area)
+                .on_press(Message::ToggleAccountSwitcher)
+                .into()
+        } else {
+            content_area
+        };
+
         let body: Element<Message> = match drawer {
             Some(drawer_el) => row![drawer_el, content_area]
                 .width(Length::Fill)
@@ -987,5 +1004,13 @@ mod tests {
         let mut app = Inboxly::default();
         app.accounts = vec![make_test_account_no_name("test@example.com")];
         assert_eq!(app.active_display_name(), "test@example.com");
+    }
+
+    #[test]
+    fn with_accounts_sets_accounts() {
+        let accounts = vec![make_test_account("test@example.com", "Test")];
+        let app = Inboxly::with_accounts(accounts);
+        assert_eq!(app.accounts.len(), 1);
+        assert_eq!(app.active_email(), "test@example.com");
     }
 }

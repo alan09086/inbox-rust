@@ -6,8 +6,9 @@ use iced::{Alignment, Background, Border, Color, Element, Length};
 use crate::app::{Inboxly, Message};
 use crate::theme::{
     AVATAR_DIAMETER, ActiveView, DEFAULT_PADDING, DIVIDER_THICKNESS, NAV_DRAWER_WIDTH,
-    NAV_ITEM_HEIGHT, NAV_ITEM_SIZE, category_color, color_from_hex, divider_color, primary_text,
-    secondary_text, selected_bg, surface_color,
+    NAV_ITEM_HEIGHT, NAV_ITEM_SIZE, avatar_colors, category_color, color_from_hex,
+    dimensions::{ACCOUNT_ROW_HEIGHT, ACCOUNT_SWITCHER_AVATAR},
+    divider_color, primary_text, secondary_text, selected_bg, surface_color,
 };
 
 /// Secondary navigation destinations (folders, not primary views).
@@ -164,65 +165,194 @@ fn divider() -> Element<'static, Message> {
         .into()
 }
 
-/// Render the account switcher at the top of the nav drawer.
-fn account_switcher<'a>(app: &'a Inboxly) -> Element<'a, Message> {
-    let email = app.active_email();
-    let account_count = app.accounts.len();
-
-    let avatar_letter = email
-        .chars()
-        .next()
-        .unwrap_or('?')
-        .to_uppercase()
-        .to_string();
-
-    let avatar = container(
-        text(avatar_letter)
-            .size(18.0)
+/// Build a circular avatar with a letter and background colour.
+fn letter_avatar(letter: char, diameter: f32) -> Element<'static, Message> {
+    let letter_str = letter.to_uppercase().to_string();
+    let bg_color = avatar_colors::for_letter(letter);
+    container(
+        text(letter_str)
+            .size(diameter * 0.4)
             .color(Color::WHITE)
             .align_x(iced::alignment::Horizontal::Center)
             .align_y(iced::alignment::Vertical::Center),
     )
-    .width(AVATAR_DIAMETER)
-    .height(AVATAR_DIAMETER)
+    .width(diameter)
+    .height(diameter)
     .align_x(iced::alignment::Horizontal::Center)
     .align_y(iced::alignment::Vertical::Center)
-    .style(|_theme| container::Style {
-        background: Some(Background::Color(color_from_hex(0x42, 0x85, 0xf4))),
+    .style(move |_theme| container::Style {
+        background: Some(Background::Color(bg_color)),
         border: Border {
-            radius: (AVATAR_DIAMETER / 2.0).into(),
+            radius: (diameter / 2.0).into(),
             ..Default::default()
         },
         ..Default::default()
-    });
+    })
+    .into()
+}
 
-    let email_text = text(email.to_string())
-        .size(NAV_ITEM_SIZE)
+/// Render the account switcher header -- always visible at top of drawer.
+///
+/// Shows the active account avatar (44px), display name (bold, 15px),
+/// email (grey, 13px), and a chevron indicating open/closed state.
+/// Clicking anywhere toggles the account list.
+fn account_switcher_header(app: &Inboxly) -> Element<'_, Message> {
+    let display_name = app.active_display_name();
+    let email = app.active_email();
+
+    let first_char = display_name.chars().next().unwrap_or('?');
+    let avatar = letter_avatar(first_char, ACCOUNT_SWITCHER_AVATAR);
+
+    let name_text = text(display_name.to_string())
+        .size(15.0)
         .color(primary_text());
 
-    let suffix = if account_count != 1 { "s" } else { "" };
-    let count_text = text(format!("{account_count} account{suffix}"))
-        .size(12.0)
-        .color(secondary_text());
+    let email_text = text(email.to_string()).size(13.0).color(secondary_text());
 
-    let info_col = column![email_text, count_text].spacing(2);
+    let chevron = if app.account_switcher_open {
+        "\u{25B2}" // ▲
+    } else {
+        "\u{25BC}" // ▼
+    };
+    let chevron_text = text(chevron.to_string()).size(12.0).color(secondary_text());
 
-    container(
-        row![avatar, info_col]
+    let name_row = row![name_text, chevron_text]
+        .spacing(6)
+        .align_y(Alignment::Center);
+
+    let info_col = column![name_row, email_text].spacing(2);
+
+    let content = row![avatar, info_col]
+        .spacing(12)
+        .align_y(Alignment::Center)
+        .padding(DEFAULT_PADDING);
+
+    button(container(content).width(Length::Fill))
+        .on_press(Message::ToggleAccountSwitcher)
+        .width(Length::Fill)
+        .style(|_theme, _status| button::Style {
+            background: Some(Background::Color(surface_color())),
+            text_color: primary_text(),
+            border: Border::default(),
+            ..Default::default()
+        })
+        .into()
+}
+
+/// Render the expanded account list (shown when `account_switcher_open` is true).
+///
+/// Each account row has a 40px avatar, email text, and the active account
+/// gets a blue highlight background with a checkmark. Other accounts are
+/// clickable to switch. An "Add account" row at the bottom navigates to Settings.
+fn account_list(app: &Inboxly) -> Element<'_, Message> {
+    let active_bg = color_from_hex(0xe8, 0xf0, 0xfe); // #e8f0fe
+    let blue = color_from_hex(0x42, 0x85, 0xf4); // #4285f4
+
+    let mut list = column![].spacing(0);
+
+    for (index, account) in app.accounts.iter().enumerate() {
+        let is_active = index == app.active_account_index;
+        let first_char = if account.display_name.is_empty() {
+            account.email.chars().next().unwrap_or('?')
+        } else {
+            account.display_name.chars().next().unwrap_or('?')
+        };
+
+        let avatar = letter_avatar(first_char, AVATAR_DIAMETER);
+
+        let email_text = text(account.email.clone())
+            .size(NAV_ITEM_SIZE)
+            .color(primary_text());
+
+        let mut content_row = row![avatar, email_text]
             .spacing(12)
-            .align_y(Alignment::Center)
-            .padding(DEFAULT_PADDING),
-    )
-    .width(Length::Fill)
-    .into()
+            .align_y(Alignment::Center);
+
+        if is_active {
+            let check = text("\u{2713}".to_string()) // ✓
+                .size(NAV_ITEM_SIZE)
+                .color(blue);
+            content_row = content_row.push(Space::new().width(Length::Fill).height(0.0));
+            content_row = content_row.push(check);
+        }
+
+        let row_bg = if is_active {
+            active_bg
+        } else {
+            surface_color()
+        };
+
+        let row_container = container(content_row)
+            .padding([0.0, DEFAULT_PADDING])
+            .height(ACCOUNT_ROW_HEIGHT)
+            .width(Length::Fill)
+            .align_y(iced::alignment::Vertical::Center);
+
+        let row_element: Element<Message> = if is_active {
+            // Active account row -- not clickable (already selected)
+            container(row_container)
+                .width(Length::Fill)
+                .style(move |_theme| container::Style {
+                    background: Some(Background::Color(row_bg)),
+                    ..Default::default()
+                })
+                .into()
+        } else {
+            // Other account rows -- clickable to switch
+            button(row_container)
+                .on_press(Message::SwitchAccount(index))
+                .width(Length::Fill)
+                .style(move |_theme, _status| button::Style {
+                    background: Some(Background::Color(row_bg)),
+                    text_color: primary_text(),
+                    border: Border::default(),
+                    ..Default::default()
+                })
+                .into()
+        };
+
+        list = list.push(row_element);
+    }
+
+    // "Add account" row
+    let plus_text = text("+".to_string()).size(20.0).color(blue);
+    let add_label = text("Add account".to_string())
+        .size(NAV_ITEM_SIZE)
+        .color(blue);
+    let add_row = row![plus_text, add_label]
+        .spacing(12)
+        .align_y(Alignment::Center);
+
+    let add_container = container(add_row)
+        .padding([0.0, DEFAULT_PADDING])
+        .height(ACCOUNT_ROW_HEIGHT)
+        .width(Length::Fill)
+        .align_y(iced::alignment::Vertical::Center);
+
+    let add_button = button(add_container)
+        .on_press(Message::NavigateToSettings)
+        .width(Length::Fill)
+        .style(|_theme, _status| button::Style {
+            background: Some(Background::Color(surface_color())),
+            text_color: primary_text(),
+            border: Border::default(),
+            ..Default::default()
+        });
+
+    list = list.push(add_button);
+
+    list.into()
 }
 
 /// Render the full nav drawer (264dp wide).
 pub fn view_drawer(app: &Inboxly) -> Element<'_, Message> {
     let mut drawer = column![].width(NAV_DRAWER_WIDTH);
 
-    // Account switcher
-    drawer = drawer.push(account_switcher(app));
+    // Account switcher header (always visible)
+    drawer = drawer.push(account_switcher_header(app));
+    if app.account_switcher_open {
+        drawer = drawer.push(account_list(app));
+    }
     drawer = drawer.push(divider());
 
     // Primary nav: Inbox, Snoozed, Done
@@ -269,4 +399,80 @@ pub fn view_drawer(app: &Inboxly) -> Element<'_, Message> {
             ..Default::default()
         })
         .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::{Inboxly, Message};
+    use inboxly_core::config::{AccountConfig, AuthMethod};
+
+    fn make_test_account(email: &str, display_name: &str) -> AccountConfig {
+        AccountConfig {
+            email: email.to_string(),
+            display_name: display_name.to_string(),
+            provider: "generic".to_string(),
+            auth_method: AuthMethod::Password,
+            imap_host: "imap.example.com".to_string(),
+            imap_port: 993,
+            smtp_host: "smtp.example.com".to_string(),
+            smtp_port: 587,
+        }
+    }
+
+    #[test]
+    fn account_switcher_starts_collapsed() {
+        let app = Inboxly::default();
+        assert!(!app.account_switcher_open);
+    }
+
+    #[test]
+    fn account_switcher_toggles() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::ToggleAccountSwitcher);
+        assert!(app.account_switcher_open);
+        let _ = app.update(Message::ToggleAccountSwitcher);
+        assert!(!app.account_switcher_open);
+    }
+
+    #[test]
+    fn switch_to_same_account_still_closes_switcher() {
+        let mut app = Inboxly::default();
+        app.accounts = vec![make_test_account("test@example.com", "Test User")];
+        app.account_switcher_open = true;
+        let _ = app.update(Message::SwitchAccount(0));
+        assert!(!app.account_switcher_open);
+        assert_eq!(app.active_account_index, 0);
+    }
+
+    #[test]
+    fn switch_account_updates_index_and_closes() {
+        let mut app = Inboxly::default();
+        app.accounts = vec![
+            make_test_account("first@example.com", "First"),
+            make_test_account("second@example.com", "Second"),
+        ];
+        app.account_switcher_open = true;
+        let _ = app.update(Message::SwitchAccount(1));
+        assert_eq!(app.active_account_index, 1);
+        assert_eq!(app.active_email(), "second@example.com");
+        assert!(!app.account_switcher_open);
+    }
+
+    #[test]
+    fn navigate_closes_account_switcher() {
+        let mut app = Inboxly::default();
+        app.account_switcher_open = true;
+        let _ = app.update(Message::Navigate(super::NavTarget::View(
+            crate::theme::ActiveView::Inbox,
+        )));
+        assert!(!app.account_switcher_open);
+    }
+
+    #[test]
+    fn with_accounts_sets_accounts() {
+        let accounts = vec![make_test_account("test@example.com", "Test")];
+        let app = Inboxly::with_accounts(accounts);
+        assert_eq!(app.accounts.len(), 1);
+        assert_eq!(app.active_email(), "test@example.com");
+    }
 }
