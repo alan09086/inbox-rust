@@ -204,6 +204,81 @@ impl Inboxly {
                 InboxViewMessage::ToggleBundle(bundle_id) => {
                     tracing::debug!("toggle bundle: {bundle_id}");
                 }
+                InboxViewMessage::HoverDone(tid) => {
+                    return self.update(Message::MarkDone(tid));
+                }
+                InboxViewMessage::HoverPin(tid) => {
+                    return self.update(Message::TogglePin(tid));
+                }
+                InboxViewMessage::HoverSnooze(tid) => {
+                    tracing::debug!("hover snooze: {tid}");
+                }
+                InboxViewMessage::OpenOverflow(tid) => {
+                    return self.update(Message::OpenOverflowMenu(tid));
+                }
+                InboxViewMessage::CloseOverflow => {
+                    return self.update(Message::CloseOverflowMenu);
+                }
+                InboxViewMessage::OpenContextMenu {
+                    thread_id,
+                    position,
+                } => {
+                    return self.update(Message::OpenContextMenu {
+                        thread_id,
+                        position,
+                    });
+                }
+                InboxViewMessage::CloseContextMenu => {
+                    return self.update(Message::CloseContextMenu);
+                }
+                InboxViewMessage::MoveTo {
+                    thread_id,
+                    destination,
+                } => {
+                    return self.update(Message::MoveTo {
+                        thread_id,
+                        destination,
+                    });
+                }
+                InboxViewMessage::MarkReadState { thread_id, read } => {
+                    return self.update(Message::MarkReadState { thread_id, read });
+                }
+                InboxViewMessage::MuteThread(tid) => {
+                    return self.update(Message::MuteThread(tid));
+                }
+                InboxViewMessage::ReplyThread(tid) => {
+                    return self.update(Message::Reply(tid));
+                }
+                InboxViewMessage::ReplyAllThread(tid) => {
+                    return self.update(Message::ReplyAll(tid));
+                }
+                InboxViewMessage::ForwardThread(tid) => {
+                    return self.update(Message::Forward(tid));
+                }
+                InboxViewMessage::AddToBundle {
+                    thread_id,
+                    category,
+                } => {
+                    return self.update(Message::AddToBundle {
+                        thread_id,
+                        category,
+                    });
+                }
+                InboxViewMessage::CreateRuleFromSender(sender) => {
+                    return self.update(Message::CreateRuleFromSender(sender));
+                }
+                InboxViewMessage::BlockSender {
+                    thread_id,
+                    sender_address,
+                } => {
+                    return self.update(Message::BlockSender {
+                        thread_id,
+                        sender_address,
+                    });
+                }
+                InboxViewMessage::ReportSpam(tid) => {
+                    return self.update(Message::ReportSpam(tid));
+                }
             },
             Message::MarkDone(thread_id) => {
                 if let Some(ref store) = self.store {
@@ -400,20 +475,52 @@ impl Inboxly {
 
         let toolbar = view_toolbar(self);
 
-        let drawer = if self.drawer_open {
+        // Hide nav drawer when Settings is active.
+        let drawer = if self.drawer_open && self.active_view != ActiveView::Settings {
             Some(view_drawer(self))
         } else {
             None
         };
 
-        // Render inbox feed or placeholder depending on active view.
-        let content_area: Element<Message> = if self.active_view == ActiveView::Inbox {
+        // Bundle category names for menu submenus.
+        let bundle_cat_names: Vec<String> = self
+            .bundle_categories
+            .iter()
+            .map(|c| c.name.clone())
+            .collect();
+
+        // Render content area depending on active view.
+        let content_area: Element<Message> = if self.active_view == ActiveView::Settings {
+            // Settings placeholder -- full implementation is M29.
+            container(
+                column![
+                    text("Settings").size(24.0),
+                    text("Coming in M29")
+                        .size(14.0)
+                        .color(self.theme.colors.text_secondary),
+                ]
+                .spacing(8.0)
+                .align_x(iced::Alignment::Center),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(crate::theme::DEFAULT_PADDING)
+            .align_x(iced::alignment::Horizontal::Center)
+            .align_y(iced::alignment::Vertical::Center)
+            .into()
+        } else if self.active_view == ActiveView::Inbox {
             inbox_view(
                 &self.feed_sections,
                 self.theme.colors.text_primary,
                 self.theme.colors.text_secondary,
                 self.theme.colors.surface,
                 self.theme.colors.divider,
+                self.theme.colors.toolbar_inbox,
+                self.overflow_menu_thread.as_deref(),
+                self.context_menu_thread.as_deref(),
+                self.context_menu_position,
+                &bundle_cat_names,
+                &self.theme.colors,
             )
             .map(Message::InboxView)
         } else {
