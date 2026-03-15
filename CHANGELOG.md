@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.29.0] - 2026-03-14
+
+### Added (M29)
+
+- **Settings view framework** (M29): 240px sidebar with 6 tab buttons (active state: blue text + left border + light blue bg), scrollable content area (640px max-width), replaces main content when `ActiveView::Settings`
+- **General tab**: Theme preference (System/Light/Dark chips with auto-save), Default View (Inbox/Snoozed/Done chips), Snooze Presets (4 labeled inputs for morning/afternoon/evening hour + weekend day), Undo Timeout (3s/5s/7s/10s/15s chips)
+- **Accounts tab**: Account cards (48px avatar, email, provider/auth info, Edit/Remove buttons), inline add/edit form (8 fields + Cancel/Save), removal confirmation bar, active account deletion prevention (Remove button disabled)
+- **Data & Storage tab**: Clear Cache / Rebuild Search Index / Export Data action buttons, storage size display (SQLite, Tantivy, Maildir), last sync timestamp
+- `SettingsTab` enum (6 variants), `StoreSettingsAdapter` bridging Store to SettingsReader/Writer
+- 24 new Message variants for settings controls with auto-save persistence
+- Dark theme support for all settings views
+- `format_size()` and `dir_size()` utility helpers
+- 34 new tests (808 total)
+
 ## [0.28.0] - 2026-03-14
 
 ### Added (M28)
