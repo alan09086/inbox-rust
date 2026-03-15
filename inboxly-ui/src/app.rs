@@ -3,13 +3,15 @@
 use iced::widget::{column, container, row, text};
 use iced::{Element, Length, Task, Theme};
 
+use inboxly_core::config::{AccountConfig, AppConfig, AuthMethod, Paths, ThemePreference};
 use inboxly_store::Store;
 
 use crate::feed::{self, FeedSection};
 use crate::nav::{NavBundleCategory, NavTarget, default_bundle_categories};
-use crate::theme::{ActiveView, InboxlyTheme};
+use crate::theme::{ActiveView, InboxlyTheme, SettingsReader};
 use crate::undo::{UndoAction, UndoState};
 use crate::views::inbox_view::{InboxViewMessage, inbox_view};
+use crate::views::settings_view::{SettingsTab, StoreSettingsAdapter};
 
 /// Top-level application state.
 pub struct Inboxly {
@@ -43,6 +45,44 @@ pub struct Inboxly {
     pub context_menu_thread: Option<String>,
     /// Cursor position where the context menu was triggered.
     pub context_menu_position: iced::Point,
+
+    // -- Settings state --
+    /// Active settings tab (only relevant when active_view == Settings).
+    pub settings_tab: SettingsTab,
+    /// Whether the drawer was open before entering settings.
+    pub drawer_was_open: bool,
+    /// Loaded AppConfig (for accounts + snooze presets editing).
+    pub config: AppConfig,
+
+    // -- General tab state --
+    /// Current theme preference (System/Light/Dark).
+    pub theme_preference: ThemePreference,
+    /// Default view preference ("inbox", "snoozed", "done").
+    pub default_view: String,
+    /// Undo timeout in seconds.
+    pub undo_timeout_secs: u32,
+
+    // -- Accounts tab state --
+    /// Index of the account currently being edited (None = no edit form open).
+    pub editing_account_index: Option<usize>,
+    /// Scratch account for the add/edit form.
+    pub account_form: AccountConfig,
+    /// Whether we're adding a new account (vs editing existing).
+    pub adding_account: bool,
+    /// Index of account pending removal confirmation (None = no confirmation shown).
+    pub removing_account_index: Option<usize>,
+
+    // -- Data & Storage tab state --
+    /// Cached database size string (e.g., "42.3 MB").
+    pub db_size_display: String,
+    /// Cached search index size string.
+    pub index_size_display: String,
+    /// Cached maildir size string.
+    pub maildir_size_display: String,
+    /// Last full sync timestamp display string.
+    pub last_sync_display: String,
+    /// Status message shown after an action (e.g., "Cache cleared", "Rebuilding...").
+    pub data_action_status: Option<String>,
 }
 
 /// IMAP folder destinations for the "Move to..." action.
@@ -107,13 +147,74 @@ pub enum Message {
     NavigateToSettings,
     /// Navigate back from Settings to previous view.
     NavigateBack,
+    /// Settings sidebar tab clicked.
+    SettingsTabChanged(SettingsTab),
+
+    // -- General tab --
+    /// Theme chip button clicked.
+    SetThemePreference(ThemePreference),
+    /// Default view dropdown changed.
+    SetDefaultView(String),
+    /// Undo timeout dropdown changed.
+    SetUndoTimeout(u32),
+    /// Snooze morning hour changed.
+    SetSnoozeMorningHour(String),
+    /// Snooze afternoon hour changed.
+    SetSnoozeAfternoonHour(String),
+    /// Snooze evening hour changed.
+    SetSnoozeEveningHour(String),
+    /// Snooze weekend day changed.
+    SetSnoozeWeekendDay(String),
+
+    // -- Accounts tab --
+    /// Open the add-account form.
+    AddAccountStart,
+    /// Open the edit form for account at index.
+    EditAccountStart(usize),
+    /// Cancel add/edit form.
+    AccountFormCancel,
+    /// Save the add/edit form.
+    AccountFormSave,
+    /// Account form field changed.
+    AccountFormEmailChanged(String),
+    AccountFormDisplayNameChanged(String),
+    AccountFormProviderChanged(String),
+    AccountFormAuthMethodChanged(String),
+    AccountFormImapHostChanged(String),
+    AccountFormImapPortChanged(String),
+    AccountFormSmtpHostChanged(String),
+    AccountFormSmtpPortChanged(String),
+    /// Show removal confirmation for account at index.
+    RemoveAccountConfirm(usize),
+    /// Dismiss removal confirmation.
+    RemoveAccountCancel,
+    /// Execute account removal.
+    RemoveAccountExecute(usize),
+
+    // -- Data & Storage tab --
+    /// Clear cache button pressed.
+    ClearCache,
+    /// Rebuild search index button pressed.
+    RebuildSearchIndex,
+    /// Export data button pressed.
+    ExportData,
+    /// Async: data sizes calculated.
+    DataSizesLoaded {
+        db_size: String,
+        index_size: String,
+        maildir_size: String,
+        last_sync: String,
+    },
     /// Move thread to a folder.
     MoveTo {
         thread_id: String,
         destination: MoveDestination,
     },
     /// Mark thread as read or unread.
-    MarkReadState { thread_id: String, read: bool },
+    MarkReadState {
+        thread_id: String,
+        read: bool,
+    },
     /// Mute a thread.
     MuteThread(String),
     /// Reply to a thread.
@@ -123,7 +224,10 @@ pub enum Message {
     /// Forward a thread.
     Forward(String),
     /// Add thread to a bundle category.
-    AddToBundle { thread_id: String, category: String },
+    AddToBundle {
+        thread_id: String,
+        category: String,
+    },
     /// Create a rule from sender (stub -- shows "Coming soon" toast).
     CreateRuleFromSender(String),
     /// Block the sender.
@@ -153,7 +257,77 @@ impl Default for Inboxly {
             overflow_menu_thread: None,
             context_menu_thread: None,
             context_menu_position: iced::Point::ORIGIN,
+            // Settings state
+            settings_tab: SettingsTab::General,
+            drawer_was_open: true,
+            config: AppConfig::default(),
+            theme_preference: ThemePreference::System,
+            default_view: "inbox".to_owned(),
+            undo_timeout_secs: 7,
+            editing_account_index: None,
+            account_form: new_empty_account_form(),
+            adding_account: false,
+            removing_account_index: None,
+            db_size_display: String::new(),
+            index_size_display: String::new(),
+            maildir_size_display: String::new(),
+            last_sync_display: "Never".to_owned(),
+            data_action_status: None,
         }
+    }
+}
+
+/// Create an empty account form with sensible defaults.
+fn new_empty_account_form() -> AccountConfig {
+    AccountConfig {
+        email: String::new(),
+        display_name: String::new(),
+        provider: "generic".to_owned(),
+        auth_method: AuthMethod::Password,
+        imap_host: String::new(),
+        imap_port: 993,
+        smtp_host: String::new(),
+        smtp_port: 587,
+    }
+}
+
+/// Calculate the total size of a directory in bytes (recursive).
+fn dir_size(path: &std::path::Path) -> u64 {
+    if !path.exists() {
+        return 0;
+    }
+    dir_size_recursive(path)
+}
+
+fn dir_size_recursive(path: &std::path::Path) -> u64 {
+    let mut total = 0u64;
+    if let Ok(entries) = std::fs::read_dir(path) {
+        for entry in entries.flatten() {
+            if let Ok(meta) = entry.metadata() {
+                if meta.is_file() {
+                    total += meta.len();
+                } else if meta.is_dir() {
+                    total += dir_size_recursive(&entry.path());
+                }
+            }
+        }
+    }
+    total
+}
+
+/// Format bytes as a human-readable size string.
+fn format_size(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+    if bytes >= GB {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{bytes} B")
     }
 }
 
@@ -455,13 +629,305 @@ impl Inboxly {
             }
             Message::NavigateToSettings => {
                 self.previous_view = self.active_view;
+                self.drawer_was_open = self.drawer_open;
                 self.active_view = ActiveView::Settings;
+                self.active_nav = NavTarget::View(ActiveView::Settings);
                 self.drawer_open = false;
+                self.settings_tab = SettingsTab::General;
+
+                // Load current settings from store
+                if let Some(ref store) = self.store {
+                    let adapter = StoreSettingsAdapter { store };
+                    // Theme preference
+                    self.theme_preference = adapter
+                        .get_setting("theme")
+                        .ok()
+                        .flatten()
+                        .map(|v| match v.as_str() {
+                            "light" => ThemePreference::Light,
+                            "dark" => ThemePreference::Dark,
+                            _ => ThemePreference::System,
+                        })
+                        .unwrap_or(ThemePreference::System);
+                    // Default view
+                    self.default_view = adapter
+                        .get_setting("default_view")
+                        .ok()
+                        .flatten()
+                        .unwrap_or_else(|| "inbox".to_owned());
+                    // Undo timeout
+                    self.undo_timeout_secs = adapter
+                        .get_setting("undo_timeout_secs")
+                        .ok()
+                        .flatten()
+                        .and_then(|v| v.parse::<u32>().ok())
+                        .unwrap_or(7);
+                }
+                // Load config for snooze presets and accounts
+                if let Ok(config) = AppConfig::load() {
+                    self.config = config;
+                }
             }
             Message::NavigateBack => {
                 self.active_view = self.previous_view;
-                self.drawer_open = true;
+                self.active_nav = NavTarget::View(self.previous_view);
+                self.drawer_open = self.drawer_was_open;
             }
+            Message::SettingsTabChanged(tab) => {
+                self.settings_tab = tab;
+                // Reset edit state when switching tabs
+                self.editing_account_index = None;
+                self.adding_account = false;
+                self.removing_account_index = None;
+                self.data_action_status = None;
+
+                // Load sizes when entering Data & Storage tab
+                if tab == SettingsTab::DataStorage {
+                    if let Ok(config) = AppConfig::load()
+                        && let Some(paths) = Paths::resolve_with_config(&config)
+                    {
+                        self.db_size_display = format_size(
+                            paths
+                                .database_file()
+                                .metadata()
+                                .map(|m| m.len())
+                                .unwrap_or(0),
+                        );
+                        self.index_size_display = format_size(dir_size(&paths.search_index_dir()));
+                        self.maildir_size_display = format_size(dir_size(&paths.maildir_root()));
+                    }
+                    // Last sync from store
+                    if let Some(ref store) = self.store {
+                        self.last_sync_display = store
+                            .get_setting("last_full_sync")
+                            .ok()
+                            .flatten()
+                            .unwrap_or_else(|| "Never".to_owned());
+                    }
+                }
+            }
+
+            // -- General tab handlers --
+            Message::SetThemePreference(pref) => {
+                self.theme_preference = pref;
+                // Persist to settings store
+                if let Some(ref store) = self.store {
+                    let value = match pref {
+                        ThemePreference::System => "system",
+                        ThemePreference::Light => "light",
+                        ThemePreference::Dark => "dark",
+                    };
+                    if let Err(e) = store.set_setting("theme", value) {
+                        tracing::warn!("failed to persist theme preference: {e}");
+                    }
+                }
+                // Apply immediately
+                self.theme = InboxlyTheme::from_preference(pref);
+            }
+
+            Message::SetDefaultView(view) => {
+                self.default_view = view.clone();
+                if let Some(ref store) = self.store
+                    && let Err(e) = store.set_setting("default_view", &view)
+                {
+                    tracing::warn!("failed to persist default view: {e}");
+                }
+            }
+
+            Message::SetUndoTimeout(secs) => {
+                self.undo_timeout_secs = secs;
+                if let Some(ref store) = self.store
+                    && let Err(e) = store.set_setting("undo_timeout_secs", &secs.to_string())
+                {
+                    tracing::warn!("failed to persist undo timeout: {e}");
+                }
+            }
+
+            Message::SetSnoozeMorningHour(val) => {
+                if let Ok(hour) = val.parse::<u8>()
+                    && hour <= 23
+                {
+                    self.config.snooze.morning_hour = hour;
+                    if let Err(e) = self.config.save() {
+                        tracing::warn!("failed to save config: {e}");
+                    }
+                }
+            }
+
+            Message::SetSnoozeAfternoonHour(val) => {
+                if let Ok(hour) = val.parse::<u8>()
+                    && hour <= 23
+                {
+                    self.config.snooze.afternoon_hour = hour;
+                    if let Err(e) = self.config.save() {
+                        tracing::warn!("failed to save config: {e}");
+                    }
+                }
+            }
+
+            Message::SetSnoozeEveningHour(val) => {
+                if let Ok(hour) = val.parse::<u8>()
+                    && hour <= 23
+                {
+                    self.config.snooze.evening_hour = hour;
+                    if let Err(e) = self.config.save() {
+                        tracing::warn!("failed to save config: {e}");
+                    }
+                }
+            }
+
+            Message::SetSnoozeWeekendDay(val) => {
+                if let Ok(day) = val.parse::<u8>()
+                    && day <= 6
+                {
+                    self.config.snooze.weekend_day = day;
+                    if let Err(e) = self.config.save() {
+                        tracing::warn!("failed to save config: {e}");
+                    }
+                }
+            }
+
+            // -- Accounts tab handlers --
+            Message::AddAccountStart => {
+                self.adding_account = true;
+                self.editing_account_index = None;
+                self.removing_account_index = None;
+                self.account_form = new_empty_account_form();
+            }
+
+            Message::EditAccountStart(index) => {
+                if let Some(account) = self.config.accounts.get(index) {
+                    self.account_form = account.clone();
+                    self.editing_account_index = Some(index);
+                    self.adding_account = false;
+                    self.removing_account_index = None;
+                }
+            }
+
+            Message::AccountFormCancel => {
+                self.editing_account_index = None;
+                self.adding_account = false;
+            }
+
+            Message::AccountFormSave => {
+                // Validate form
+                let form = &self.account_form;
+                if form.email.is_empty()
+                    || !form.email.contains('@')
+                    || form.imap_host.is_empty()
+                    || form.smtp_host.is_empty()
+                {
+                    // Invalid -- do nothing (UI should show inline validation hints)
+                    return Task::none();
+                }
+
+                if self.adding_account {
+                    self.config.accounts.push(self.account_form.clone());
+                } else if let Some(index) = self.editing_account_index
+                    && let Some(account) = self.config.accounts.get_mut(index)
+                {
+                    *account = self.account_form.clone();
+                }
+
+                if let Err(e) = self.config.save() {
+                    tracing::warn!("failed to save config after account update: {e}");
+                }
+                self.editing_account_index = None;
+                self.adding_account = false;
+            }
+
+            Message::AccountFormEmailChanged(v) => self.account_form.email = v,
+            Message::AccountFormDisplayNameChanged(v) => self.account_form.display_name = v,
+            Message::AccountFormProviderChanged(v) => self.account_form.provider = v,
+            Message::AccountFormAuthMethodChanged(v) => {
+                self.account_form.auth_method = match v.as_str() {
+                    "oauth2" => AuthMethod::OAuth2,
+                    "app_password" => AuthMethod::AppPassword,
+                    _ => AuthMethod::Password,
+                };
+            }
+            Message::AccountFormImapHostChanged(v) => self.account_form.imap_host = v,
+            Message::AccountFormImapPortChanged(v) => {
+                if let Ok(port) = v.parse::<u16>() {
+                    self.account_form.imap_port = port;
+                }
+            }
+            Message::AccountFormSmtpHostChanged(v) => self.account_form.smtp_host = v,
+            Message::AccountFormSmtpPortChanged(v) => {
+                if let Ok(port) = v.parse::<u16>() {
+                    self.account_form.smtp_port = port;
+                }
+            }
+
+            Message::RemoveAccountConfirm(index) => {
+                self.removing_account_index = Some(index);
+            }
+
+            Message::RemoveAccountCancel => {
+                self.removing_account_index = None;
+            }
+
+            Message::RemoveAccountExecute(index) => {
+                // Prevent removing the active account
+                if index == self.active_account_index {
+                    tracing::warn!(
+                        "cannot remove the active account (index {index}); switch accounts first"
+                    );
+                } else if index < self.config.accounts.len() {
+                    self.config.accounts.remove(index);
+                    // Adjust active_account_index if needed
+                    if self.active_account_index > index {
+                        self.active_account_index = self.active_account_index.saturating_sub(1);
+                    }
+                    if let Err(e) = self.config.save() {
+                        tracing::warn!("failed to save config after account removal: {e}");
+                    }
+                }
+                self.removing_account_index = None;
+            }
+
+            // -- Data & Storage tab handlers --
+            Message::ClearCache => {
+                tracing::info!("cache clear requested");
+                if let Ok(config) = AppConfig::load()
+                    && let Some(paths) = Paths::resolve_with_config(&config)
+                {
+                    if paths.cache_dir.exists() {
+                        if let Err(e) = std::fs::remove_dir_all(&paths.cache_dir) {
+                            tracing::warn!("failed to clear cache: {e}");
+                            self.data_action_status = Some(format!("Failed to clear cache: {e}"));
+                        } else {
+                            let _ = std::fs::create_dir_all(&paths.cache_dir);
+                            self.data_action_status = Some("Cache cleared".to_owned());
+                        }
+                    } else {
+                        self.data_action_status = Some("No cache to clear".to_owned());
+                    }
+                }
+            }
+
+            Message::RebuildSearchIndex => {
+                self.data_action_status = Some("Rebuilding search index...".to_owned());
+                tracing::info!("search index rebuild requested (stub)");
+            }
+
+            Message::ExportData => {
+                self.data_action_status = Some("Coming soon".to_owned());
+                tracing::info!("data export requested (stub)");
+            }
+
+            Message::DataSizesLoaded {
+                db_size,
+                index_size,
+                maildir_size,
+                last_sync,
+            } => {
+                self.db_size_display = db_size;
+                self.index_size_display = index_size;
+                self.maildir_size_display = maildir_size;
+                self.last_sync_display = last_sync;
+            }
+
             Message::MoveTo {
                 thread_id,
                 destination,
