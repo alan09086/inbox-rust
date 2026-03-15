@@ -35,6 +35,20 @@ pub struct Inboxly {
     pub feed_sections: Vec<FeedSection>,
     /// Undo state for timed undo of inbox actions.
     pub undo_state: UndoState,
+    /// Thread ID whose overflow (three-dot) menu is currently open.
+    pub overflow_menu_thread: Option<String>,
+    /// Thread ID whose right-click context menu is currently open.
+    pub context_menu_thread: Option<String>,
+    /// Cursor position where the context menu was triggered.
+    pub context_menu_position: iced::Point,
+}
+
+/// IMAP folder destinations for the "Move to..." action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MoveDestination {
+    Inbox,
+    Trash,
+    Spam,
 }
 
 /// All messages the application can receive.
@@ -72,6 +86,53 @@ pub enum Message {
         thread_id: String,
         until: chrono::DateTime<chrono::Utc>,
     },
+    /// Open the overflow (three-dot) menu for a specific thread.
+    OpenOverflowMenu(String),
+    /// Close the overflow menu.
+    CloseOverflowMenu,
+    /// Open the right-click context menu for a thread at a cursor position.
+    OpenContextMenu {
+        thread_id: String,
+        position: iced::Point,
+    },
+    /// Close the right-click context menu.
+    CloseContextMenu,
+    /// Navigate to Settings view (gear icon).
+    NavigateToSettings,
+    /// Navigate back from Settings to previous view.
+    NavigateBack,
+    /// Move thread to a folder.
+    MoveTo {
+        thread_id: String,
+        destination: MoveDestination,
+    },
+    /// Mark thread as read or unread.
+    MarkReadState {
+        thread_id: String,
+        read: bool,
+    },
+    /// Mute a thread.
+    MuteThread(String),
+    /// Reply to a thread.
+    Reply(String),
+    /// Reply all to a thread.
+    ReplyAll(String),
+    /// Forward a thread.
+    Forward(String),
+    /// Add thread to a bundle category.
+    AddToBundle {
+        thread_id: String,
+        category: String,
+    },
+    /// Create a rule from sender (stub -- shows "Coming soon" toast).
+    CreateRuleFromSender(String),
+    /// Block the sender.
+    BlockSender {
+        thread_id: String,
+        sender_address: String,
+    },
+    /// Report thread as spam.
+    ReportSpam(String),
 }
 
 impl Default for Inboxly {
@@ -88,6 +149,9 @@ impl Default for Inboxly {
             store: None,
             feed_sections: Vec::new(),
             undo_state: UndoState::new(),
+            overflow_menu_thread: None,
+            context_menu_thread: None,
+            context_menu_position: iced::Point::ORIGIN,
         }
     }
 }
@@ -244,6 +308,92 @@ impl Inboxly {
                     }
                 }
                 self.reload_feed();
+            }
+            Message::OpenOverflowMenu(thread_id) => {
+                self.context_menu_thread = None;
+                self.overflow_menu_thread = Some(thread_id);
+            }
+            Message::CloseOverflowMenu => {
+                self.overflow_menu_thread = None;
+            }
+            Message::OpenContextMenu {
+                thread_id,
+                position,
+            } => {
+                self.overflow_menu_thread = None;
+                self.context_menu_thread = Some(thread_id);
+                self.context_menu_position = position;
+            }
+            Message::CloseContextMenu => {
+                self.context_menu_thread = None;
+            }
+            Message::NavigateToSettings => {
+                self.previous_view = self.active_view;
+                self.active_view = ActiveView::Settings;
+                self.drawer_open = false;
+            }
+            Message::NavigateBack => {
+                self.active_view = self.previous_view;
+                self.drawer_open = true;
+            }
+            Message::MoveTo {
+                thread_id,
+                destination,
+            } => {
+                tracing::info!("move thread {thread_id} to {destination:?}");
+                self.overflow_menu_thread = None;
+                self.context_menu_thread = None;
+            }
+            Message::MarkReadState { thread_id, read } => {
+                tracing::info!("mark thread {thread_id} read={read}");
+                self.overflow_menu_thread = None;
+                self.context_menu_thread = None;
+            }
+            Message::MuteThread(thread_id) => {
+                tracing::info!("mute thread {thread_id}");
+                self.overflow_menu_thread = None;
+                self.context_menu_thread = None;
+            }
+            Message::Reply(thread_id) => {
+                tracing::info!("reply to thread {thread_id}");
+                self.overflow_menu_thread = None;
+                self.context_menu_thread = None;
+            }
+            Message::ReplyAll(thread_id) => {
+                tracing::info!("reply all to thread {thread_id}");
+                self.overflow_menu_thread = None;
+                self.context_menu_thread = None;
+            }
+            Message::Forward(thread_id) => {
+                tracing::info!("forward thread {thread_id}");
+                self.overflow_menu_thread = None;
+                self.context_menu_thread = None;
+            }
+            Message::AddToBundle {
+                thread_id,
+                category,
+            } => {
+                tracing::info!("add thread {thread_id} to bundle {category}");
+                self.overflow_menu_thread = None;
+                self.context_menu_thread = None;
+            }
+            Message::CreateRuleFromSender(sender) => {
+                tracing::info!("create rule from sender: {sender} (coming soon)");
+                self.overflow_menu_thread = None;
+                self.context_menu_thread = None;
+            }
+            Message::BlockSender {
+                thread_id,
+                sender_address,
+            } => {
+                tracing::info!("block sender {sender_address} (thread {thread_id})");
+                self.overflow_menu_thread = None;
+                self.context_menu_thread = None;
+            }
+            Message::ReportSpam(thread_id) => {
+                tracing::info!("report spam: thread {thread_id}");
+                self.overflow_menu_thread = None;
+                self.context_menu_thread = None;
             }
         }
         Task::none()
