@@ -36,6 +36,9 @@ pub struct Inboxly {
 }
 
 /// All messages the application can receive.
+// ThemeChanged carries InboxlyTheme which has grown with additional Color fields;
+// boxing would change the API surface and is heavy-handed for a UI message enum.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum Message {
     /// User clicked a nav item.
@@ -93,8 +96,10 @@ impl Inboxly {
     /// `InboxlyTheme::from_system()`) since zbus requires Tokio
     /// and Iced doesn't provide one.
     pub fn new() -> (Self, Task<Message>) {
-        let mut app = Self::default();
-        app.theme = InboxlyTheme::from_system();
+        let mut app = Self {
+            theme: InboxlyTheme::from_system(),
+            ..Self::default()
+        };
         app.reload_feed();
         (app, Task::none())
     }
