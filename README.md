@@ -46,7 +46,9 @@ Requires Rust edition 2024 (rustc 1.85+).
 
 ## Status
 
-**v0.25.0 / M25 complete** -- Full Inboxly v1 UI scaffold:
+**v0.30.0 / M30 complete** -- Full UI scaffold with QoL menus and settings:
+
+### v1 Foundation (M1-M25)
 - Theme system: light/dark with BigTop design tokens, D-Bus system detection
 - Inbox feed: date-grouped sections, email rows, bundle rows, mixed rendering
 - Triage actions: Done, Pin, Sweep with 7-second timed undo
@@ -55,8 +57,21 @@ Requires Rust edition 2024 (rustc 1.85+).
 - Reminders: reminder row widget, Speed Dial FAB (Compose + Reminder)
 - Compose view: To/Cc/Subject/Body fields, Send/Discard, reply modes
 - Search: query parser (from:/to:/subject:/has:/is: operators), result view
-- Inbox Zero celebration view, keyboard shortcut definitions
-- 715 tests passing, 0 clippy warnings
+- Inbox Zero celebration view
+
+### QoL Menus & Settings (M26-M30)
+- **PopupMenu widget** (M26): Reusable dropdown/context menu overlay using Iced 0.14's `advanced` Widget + Overlay traits
+- **Overflow + context menus** (M27): Three-dot overflow menu on email rows, right-click context menu with `RightClickArea` widget, gear icon for Settings
+- **Account switcher** (M28): Multi-account support in nav drawer with inline expansion, switch between accounts, load from `AppConfig`
+- **Settings view** (M29-M30): Full 6-tab settings with sidebar navigation:
+  - General: theme preference (System/Light/Dark), default view, snooze presets, undo timeout
+  - Accounts: add/edit/remove accounts with inline forms, active-deletion prevention
+  - Bundles: reorder with arrows, throttle badge (Immediate/Daily/Weekly), visibility toggle
+  - Notifications: desktop notification toggle, sound toggle, per-bundle selection
+  - Keyboard Shortcuts: runtime-remappable bindings (ShortcutMap), click-to-capture UI, delta persistence
+  - Data & Storage: clear cache, rebuild index, export (stub), storage sizes
+
+841 tests passing, 0 clippy warnings
 
 ## Licence
 
