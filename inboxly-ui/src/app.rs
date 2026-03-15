@@ -15,6 +15,8 @@ use crate::views::inbox_view::{InboxViewMessage, inbox_view};
 pub struct Inboxly {
     /// Currently active primary view (drives toolbar colour).
     pub active_view: ActiveView,
+    /// View to return to when leaving Settings (back arrow).
+    pub previous_view: ActiveView,
     /// Currently selected nav target (may be a primary view, folder, or bundle).
     pub active_nav: NavTarget,
     /// Whether the nav drawer is visible (toggled by hamburger).
@@ -33,6 +35,20 @@ pub struct Inboxly {
     pub feed_sections: Vec<FeedSection>,
     /// Undo state for timed undo of inbox actions.
     pub undo_state: UndoState,
+    /// Thread ID whose overflow (three-dot) menu is currently open.
+    pub overflow_menu_thread: Option<String>,
+    /// Thread ID whose right-click context menu is currently open.
+    pub context_menu_thread: Option<String>,
+    /// Cursor position where the context menu was triggered.
+    pub context_menu_position: iced::Point,
+}
+
+/// IMAP folder destinations for the "Move to..." action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MoveDestination {
+    Inbox,
+    Trash,
+    Spam,
 }
 
 /// All messages the application can receive.
@@ -70,12 +86,54 @@ pub enum Message {
         thread_id: String,
         until: chrono::DateTime<chrono::Utc>,
     },
+    /// Open the overflow (three-dot) menu for a specific thread.
+    OpenOverflowMenu(String),
+    /// Close the overflow menu.
+    CloseOverflowMenu,
+    /// Open the right-click context menu for a thread at a cursor position.
+    OpenContextMenu {
+        thread_id: String,
+        position: iced::Point,
+    },
+    /// Close the right-click context menu.
+    CloseContextMenu,
+    /// Navigate to Settings view (gear icon).
+    NavigateToSettings,
+    /// Navigate back from Settings to previous view.
+    NavigateBack,
+    /// Move thread to a folder.
+    MoveTo {
+        thread_id: String,
+        destination: MoveDestination,
+    },
+    /// Mark thread as read or unread.
+    MarkReadState { thread_id: String, read: bool },
+    /// Mute a thread.
+    MuteThread(String),
+    /// Reply to a thread.
+    Reply(String),
+    /// Reply all to a thread.
+    ReplyAll(String),
+    /// Forward a thread.
+    Forward(String),
+    /// Add thread to a bundle category.
+    AddToBundle { thread_id: String, category: String },
+    /// Create a rule from sender (stub -- shows "Coming soon" toast).
+    CreateRuleFromSender(String),
+    /// Block the sender.
+    BlockSender {
+        thread_id: String,
+        sender_address: String,
+    },
+    /// Report thread as spam.
+    ReportSpam(String),
 }
 
 impl Default for Inboxly {
     fn default() -> Self {
         Self {
             active_view: ActiveView::Inbox,
+            previous_view: ActiveView::Inbox,
             active_nav: NavTarget::View(ActiveView::Inbox),
             drawer_open: true,
             bundle_categories: default_bundle_categories(),
@@ -85,6 +143,9 @@ impl Default for Inboxly {
             store: None,
             feed_sections: Vec::new(),
             undo_state: UndoState::new(),
+            overflow_menu_thread: None,
+            context_menu_thread: None,
+            context_menu_position: iced::Point::ORIGIN,
         }
     }
 }
@@ -142,6 +203,81 @@ impl Inboxly {
             Message::InboxView(inbox_msg) => match inbox_msg {
                 InboxViewMessage::ToggleBundle(bundle_id) => {
                     tracing::debug!("toggle bundle: {bundle_id}");
+                }
+                InboxViewMessage::HoverDone(tid) => {
+                    return self.update(Message::MarkDone(tid));
+                }
+                InboxViewMessage::HoverPin(tid) => {
+                    return self.update(Message::TogglePin(tid));
+                }
+                InboxViewMessage::HoverSnooze(tid) => {
+                    tracing::debug!("hover snooze: {tid}");
+                }
+                InboxViewMessage::OpenOverflow(tid) => {
+                    return self.update(Message::OpenOverflowMenu(tid));
+                }
+                InboxViewMessage::CloseOverflow => {
+                    return self.update(Message::CloseOverflowMenu);
+                }
+                InboxViewMessage::OpenContextMenu {
+                    thread_id,
+                    position,
+                } => {
+                    return self.update(Message::OpenContextMenu {
+                        thread_id,
+                        position,
+                    });
+                }
+                InboxViewMessage::CloseContextMenu => {
+                    return self.update(Message::CloseContextMenu);
+                }
+                InboxViewMessage::MoveTo {
+                    thread_id,
+                    destination,
+                } => {
+                    return self.update(Message::MoveTo {
+                        thread_id,
+                        destination,
+                    });
+                }
+                InboxViewMessage::MarkReadState { thread_id, read } => {
+                    return self.update(Message::MarkReadState { thread_id, read });
+                }
+                InboxViewMessage::MuteThread(tid) => {
+                    return self.update(Message::MuteThread(tid));
+                }
+                InboxViewMessage::ReplyThread(tid) => {
+                    return self.update(Message::Reply(tid));
+                }
+                InboxViewMessage::ReplyAllThread(tid) => {
+                    return self.update(Message::ReplyAll(tid));
+                }
+                InboxViewMessage::ForwardThread(tid) => {
+                    return self.update(Message::Forward(tid));
+                }
+                InboxViewMessage::AddToBundle {
+                    thread_id,
+                    category,
+                } => {
+                    return self.update(Message::AddToBundle {
+                        thread_id,
+                        category,
+                    });
+                }
+                InboxViewMessage::CreateRuleFromSender(sender) => {
+                    return self.update(Message::CreateRuleFromSender(sender));
+                }
+                InboxViewMessage::BlockSender {
+                    thread_id,
+                    sender_address,
+                } => {
+                    return self.update(Message::BlockSender {
+                        thread_id,
+                        sender_address,
+                    });
+                }
+                InboxViewMessage::ReportSpam(tid) => {
+                    return self.update(Message::ReportSpam(tid));
                 }
             },
             Message::MarkDone(thread_id) => {
@@ -242,6 +378,92 @@ impl Inboxly {
                 }
                 self.reload_feed();
             }
+            Message::OpenOverflowMenu(thread_id) => {
+                self.context_menu_thread = None;
+                self.overflow_menu_thread = Some(thread_id);
+            }
+            Message::CloseOverflowMenu => {
+                self.overflow_menu_thread = None;
+            }
+            Message::OpenContextMenu {
+                thread_id,
+                position,
+            } => {
+                self.overflow_menu_thread = None;
+                self.context_menu_thread = Some(thread_id);
+                self.context_menu_position = position;
+            }
+            Message::CloseContextMenu => {
+                self.context_menu_thread = None;
+            }
+            Message::NavigateToSettings => {
+                self.previous_view = self.active_view;
+                self.active_view = ActiveView::Settings;
+                self.drawer_open = false;
+            }
+            Message::NavigateBack => {
+                self.active_view = self.previous_view;
+                self.drawer_open = true;
+            }
+            Message::MoveTo {
+                thread_id,
+                destination,
+            } => {
+                tracing::info!("move thread {thread_id} to {destination:?}");
+                self.overflow_menu_thread = None;
+                self.context_menu_thread = None;
+            }
+            Message::MarkReadState { thread_id, read } => {
+                tracing::info!("mark thread {thread_id} read={read}");
+                self.overflow_menu_thread = None;
+                self.context_menu_thread = None;
+            }
+            Message::MuteThread(thread_id) => {
+                tracing::info!("mute thread {thread_id}");
+                self.overflow_menu_thread = None;
+                self.context_menu_thread = None;
+            }
+            Message::Reply(thread_id) => {
+                tracing::info!("reply to thread {thread_id}");
+                self.overflow_menu_thread = None;
+                self.context_menu_thread = None;
+            }
+            Message::ReplyAll(thread_id) => {
+                tracing::info!("reply all to thread {thread_id}");
+                self.overflow_menu_thread = None;
+                self.context_menu_thread = None;
+            }
+            Message::Forward(thread_id) => {
+                tracing::info!("forward thread {thread_id}");
+                self.overflow_menu_thread = None;
+                self.context_menu_thread = None;
+            }
+            Message::AddToBundle {
+                thread_id,
+                category,
+            } => {
+                tracing::info!("add thread {thread_id} to bundle {category}");
+                self.overflow_menu_thread = None;
+                self.context_menu_thread = None;
+            }
+            Message::CreateRuleFromSender(sender) => {
+                tracing::info!("create rule from sender: {sender} (coming soon)");
+                self.overflow_menu_thread = None;
+                self.context_menu_thread = None;
+            }
+            Message::BlockSender {
+                thread_id,
+                sender_address,
+            } => {
+                tracing::info!("block sender {sender_address} (thread {thread_id})");
+                self.overflow_menu_thread = None;
+                self.context_menu_thread = None;
+            }
+            Message::ReportSpam(thread_id) => {
+                tracing::info!("report spam: thread {thread_id}");
+                self.overflow_menu_thread = None;
+                self.context_menu_thread = None;
+            }
         }
         Task::none()
     }
@@ -253,20 +475,52 @@ impl Inboxly {
 
         let toolbar = view_toolbar(self);
 
-        let drawer = if self.drawer_open {
+        // Hide nav drawer when Settings is active.
+        let drawer = if self.drawer_open && self.active_view != ActiveView::Settings {
             Some(view_drawer(self))
         } else {
             None
         };
 
-        // Render inbox feed or placeholder depending on active view.
-        let content_area: Element<Message> = if self.active_view == ActiveView::Inbox {
+        // Bundle category names for menu submenus.
+        let bundle_cat_names: Vec<String> = self
+            .bundle_categories
+            .iter()
+            .map(|c| c.name.clone())
+            .collect();
+
+        // Render content area depending on active view.
+        let content_area: Element<Message> = if self.active_view == ActiveView::Settings {
+            // Settings placeholder -- full implementation is M29.
+            container(
+                column![
+                    text("Settings").size(24.0),
+                    text("Coming in M29")
+                        .size(14.0)
+                        .color(self.theme.colors.text_secondary),
+                ]
+                .spacing(8.0)
+                .align_x(iced::Alignment::Center),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(crate::theme::DEFAULT_PADDING)
+            .align_x(iced::alignment::Horizontal::Center)
+            .align_y(iced::alignment::Vertical::Center)
+            .into()
+        } else if self.active_view == ActiveView::Inbox {
             inbox_view(
                 &self.feed_sections,
                 self.theme.colors.text_primary,
                 self.theme.colors.text_secondary,
                 self.theme.colors.surface,
                 self.theme.colors.divider,
+                self.theme.colors.toolbar_inbox,
+                self.overflow_menu_thread.as_deref(),
+                self.context_menu_thread.as_deref(),
+                self.context_menu_position,
+                &bundle_cat_names,
+                &self.theme.colors,
             )
             .map(Message::InboxView)
         } else {
@@ -416,6 +670,7 @@ mod tests {
         assert_eq!(ActiveView::Inbox.title(), "Inbox");
         assert_eq!(ActiveView::Snoozed.title(), "Snoozed");
         assert_eq!(ActiveView::Done.title(), "Done");
+        assert_eq!(ActiveView::Settings.title(), "Settings");
     }
 
     #[test]
@@ -486,5 +741,114 @@ mod tests {
         let mut app = Inboxly::default();
         let _ = app.update(Message::ReloadFeed);
         assert!(app.feed_sections.is_empty());
+    }
+
+    // -- M27 Settings nav, toolbar colour, FeedItem tests --
+
+    #[test]
+    fn navigate_to_settings_stores_previous_view() {
+        let mut app = Inboxly::default();
+        app.active_view = ActiveView::Snoozed;
+        let _ = app.update(Message::NavigateToSettings);
+        assert_eq!(app.active_view, ActiveView::Settings);
+        assert_eq!(app.previous_view, ActiveView::Snoozed);
+        assert!(!app.drawer_open);
+    }
+
+    #[test]
+    fn navigate_back_from_settings_restores_view() {
+        let mut app = Inboxly::default();
+        app.active_view = ActiveView::Done;
+        let _ = app.update(Message::NavigateToSettings);
+        let _ = app.update(Message::NavigateBack);
+        assert_eq!(app.active_view, ActiveView::Done);
+        assert!(app.drawer_open);
+    }
+
+    #[test]
+    fn settings_toolbar_distinct_from_all_views() {
+        let settings_color = ActiveView::Settings.toolbar_color();
+        assert_ne!(settings_color, ActiveView::Inbox.toolbar_color());
+        assert_ne!(settings_color, ActiveView::Snoozed.toolbar_color());
+        assert_ne!(settings_color, ActiveView::Done.toolbar_color());
+    }
+
+    // -- M27 menu state transition tests --
+
+    #[test]
+    fn open_overflow_menu_sets_state() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenOverflowMenu("t1".into()));
+        assert_eq!(app.overflow_menu_thread, Some("t1".into()));
+    }
+
+    #[test]
+    fn close_overflow_menu_clears_state() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenOverflowMenu("t1".into()));
+        let _ = app.update(Message::CloseOverflowMenu);
+        assert!(app.overflow_menu_thread.is_none());
+    }
+
+    #[test]
+    fn open_context_menu_closes_overflow() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenOverflowMenu("t1".into()));
+        let _ = app.update(Message::OpenContextMenu {
+            thread_id: "t2".into(),
+            position: iced::Point::new(100.0, 200.0),
+        });
+        assert!(app.overflow_menu_thread.is_none());
+        assert_eq!(app.context_menu_thread, Some("t2".into()));
+    }
+
+    #[test]
+    fn open_overflow_closes_context_menu() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenContextMenu {
+            thread_id: "t1".into(),
+            position: iced::Point::ORIGIN,
+        });
+        let _ = app.update(Message::OpenOverflowMenu("t2".into()));
+        assert!(app.context_menu_thread.is_none());
+        assert_eq!(app.overflow_menu_thread, Some("t2".into()));
+    }
+
+    #[test]
+    fn thread_actions_close_menus() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenOverflowMenu("t1".into()));
+        let _ = app.update(Message::MoveTo {
+            thread_id: "t1".into(),
+            destination: MoveDestination::Inbox,
+        });
+        assert!(app.overflow_menu_thread.is_none());
+    }
+
+    #[test]
+    fn thread_actions_do_not_panic() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::MoveTo {
+            thread_id: "t1".into(),
+            destination: MoveDestination::Trash,
+        });
+        let _ = app.update(Message::MarkReadState {
+            thread_id: "t1".into(),
+            read: true,
+        });
+        let _ = app.update(Message::MuteThread("t1".into()));
+        let _ = app.update(Message::Reply("t1".into()));
+        let _ = app.update(Message::ReplyAll("t1".into()));
+        let _ = app.update(Message::Forward("t1".into()));
+        let _ = app.update(Message::AddToBundle {
+            thread_id: "t1".into(),
+            category: "Social".into(),
+        });
+        let _ = app.update(Message::CreateRuleFromSender("a@b.com".into()));
+        let _ = app.update(Message::BlockSender {
+            thread_id: "t1".into(),
+            sender_address: "a@b.com".into(),
+        });
+        let _ = app.update(Message::ReportSpam("t1".into()));
     }
 }

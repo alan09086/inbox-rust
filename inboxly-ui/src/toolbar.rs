@@ -5,7 +5,8 @@ use iced::{Alignment, Background, Border, Color, Element, Length};
 
 use crate::app::{Inboxly, Message};
 use crate::theme::{
-    AVATAR_DIAMETER, DEFAULT_PADDING, TOOLBAR_HEIGHT, TOOLBAR_TITLE_SIZE, color_from_hex,
+    AVATAR_DIAMETER, ActiveView, DEFAULT_PADDING, TOOLBAR_HEIGHT, TOOLBAR_TITLE_SIZE,
+    color_from_hex,
 };
 
 /// Render the toolbar bar.
@@ -16,11 +17,16 @@ use crate::theme::{
 /// - Center: search bar placeholder
 /// - Right: account avatar placeholder (circle with first letter)
 pub fn view_toolbar(app: &Inboxly) -> Element<'_, Message> {
-    let toolbar_bg = app.active_view.toolbar_color();
+    let toolbar_bg = app.active_view.toolbar_color_themed(&app.theme);
 
-    // Hamburger button
-    let hamburger = button(text("\u{2630}").size(20.0).color(Color::WHITE))
-        .on_press(Message::ToggleDrawer)
+    // Hamburger / back button: show back arrow in Settings view, hamburger otherwise.
+    let (nav_icon, nav_message) = if app.active_view == ActiveView::Settings {
+        ("\u{2190}", Message::NavigateBack) // ← back arrow
+    } else {
+        ("\u{2630}", Message::ToggleDrawer) // ☰ hamburger
+    };
+    let hamburger = button(text(nav_icon).size(20.0).color(Color::WHITE))
+        .on_press(nav_message)
         .padding([8, 12])
         .style(move |_theme, _status| button::Style {
             background: Some(Background::Color(Color::TRANSPARENT)),
@@ -68,12 +74,24 @@ pub fn view_toolbar(app: &Inboxly) -> Element<'_, Message> {
         ..Default::default()
     });
 
+    // Gear icon (settings)
+    let gear = button(text("\u{2699}").size(20.0).color(Color::WHITE))
+        .on_press(Message::NavigateToSettings)
+        .padding([8, 12])
+        .style(move |_theme, _status| button::Style {
+            background: Some(Background::Color(Color::TRANSPARENT)),
+            text_color: Color::WHITE,
+            border: Border::default(),
+            ..Default::default()
+        });
+
     let toolbar_row = row![
         hamburger,
         title,
         Space::new().width(Length::Fixed(DEFAULT_PADDING)),
         search,
         Space::new().width(Length::Fill),
+        gear,
         avatar,
     ]
     .spacing(12)

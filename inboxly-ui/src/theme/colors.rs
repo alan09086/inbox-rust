@@ -33,6 +33,8 @@ pub struct ThemeColors {
     pub toolbar_text: Color,
     /// Whether this is a dark theme.
     pub is_dark: bool,
+    /// Toolbar colour for Settings view (`#455a64` light, `#37474f` dark).
+    pub toolbar_settings: Color,
 
     // -- Popup menu colours --
     /// Menu item hover background (`#f5f5f5` light, `#2a2a2a` dark).
@@ -64,6 +66,7 @@ impl ThemeColors {
             toolbar_snoozed: hex("#ef6c00"),
             toolbar_text: hex("#ffffff"),
             is_dark: false,
+            toolbar_settings: hex("#455a64"),
             menu_hover: hex("#f5f5f5"),
             menu_destructive_hover: hex("#fbe9e7"),
             menu_destructive_text: hex("#ef5350"),
@@ -93,6 +96,7 @@ impl ThemeColors {
             toolbar_snoozed: hex("#8f4100"),
             toolbar_text: hex("#ffffff"),
             is_dark: true,
+            toolbar_settings: hex("#37474f"),
             menu_hover: hex("#2a2a2a"),
             menu_destructive_hover: hex("#3d1a14"),
             menu_destructive_text: hex("#ef5350"),
@@ -204,6 +208,16 @@ mod tests {
     #[test]
     fn light_theme_toolbar_snoozed() {
         assert_color_hex(ThemeColors::light().toolbar_snoozed, "#ef6c00");
+    }
+
+    #[test]
+    fn light_theme_toolbar_settings() {
+        assert_color_hex(ThemeColors::light().toolbar_settings, "#455a64");
+    }
+
+    #[test]
+    fn dark_theme_toolbar_settings() {
+        assert_color_hex(ThemeColors::dark().toolbar_settings, "#37474f");
     }
 
     #[test]

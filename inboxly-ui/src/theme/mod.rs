@@ -51,6 +51,8 @@ pub enum ActiveView {
     Inbox,
     Snoozed,
     Done,
+    /// Full-screen settings view. Toolbar turns grey, hamburger becomes back arrow.
+    Settings,
 }
 
 impl ActiveView {
@@ -60,6 +62,7 @@ impl ActiveView {
             Self::Inbox => "Inbox",
             Self::Snoozed => "Snoozed",
             Self::Done => "Done",
+            Self::Settings => "Settings",
         }
     }
 
@@ -69,6 +72,7 @@ impl ActiveView {
             Self::Inbox => color_from_hex(0x42, 0x85, 0xf4), // #4285f4
             Self::Snoozed => color_from_hex(0xef, 0x6c, 0x00), // #ef6c00
             Self::Done => color_from_hex(0x0f, 0x9d, 0x58),  // #0f9d58
+            Self::Settings => color_from_hex(0x45, 0x5a, 0x64),
         }
     }
 
@@ -78,6 +82,7 @@ impl ActiveView {
             Self::Inbox => theme.colors.toolbar_inbox,
             Self::Snoozed => theme.colors.toolbar_snoozed,
             Self::Done => theme.colors.toolbar_done,
+            Self::Settings => theme.colors.toolbar_settings,
         }
     }
 }
@@ -606,5 +611,6 @@ mod tests {
         assert_eq!(ActiveView::Inbox.title(), "Inbox");
         assert_eq!(ActiveView::Snoozed.title(), "Snoozed");
         assert_eq!(ActiveView::Done.title(), "Done");
+        assert_eq!(ActiveView::Settings.title(), "Settings");
     }
 }
