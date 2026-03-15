@@ -13,3 +13,4 @@ pub mod snooze_picker;
 pub mod speed_dial_fab;
 pub mod swipe_state;
 pub mod undo_snackbar;
+pub mod popup_menu;
