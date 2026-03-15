@@ -46,7 +46,7 @@ enum MenuItem<Message> {
     Submenu {
         label: String,
         icon: Option<char>,
-        items: Vec<MenuItem<Message>>,
+        items: Vec<MenuItem<Message>>,  // Max 1 level deep for initial implementation
     },
 }
 
@@ -102,7 +102,7 @@ The `PopupMenu` widget implements Iced's `Widget::overlay()` method:
 - Menu items (grouped with separators):
 
   **Group 1 — Thread actions**:
-  - Move to... (opens submenu with bundle categories)
+  - Move to... (opens submenu with IMAP destinations: Inbox, Trash, Spam — NOT bundle categories; bundle assignment is handled by "Add to bundle...")
   - Mark as read / Mark as unread (toggles based on current state)
   - Mute thread
 
@@ -113,7 +113,7 @@ The `PopupMenu` widget implements Iced's `Widget::overlay()` method:
 
   **Group 3 — Organisation**:
   - Add to bundle... (opens submenu with bundle categories)
-  - Create rule from sender
+  - Create rule from sender (stub: shows "Coming soon" toast via undo snackbar; full rule creation UI is out of scope for this spec)
 
   **Group 4 — Safety** (destructive style):
   - Block sender
@@ -169,13 +169,15 @@ Top of the nav drawer, above the navigation items.
 ```rust
 // New fields in Inboxly struct:
 pub account_switcher_open: bool,
-pub accounts: Vec<AccountInfo>,      // loaded from AppConfig
+pub accounts: Vec<AccountConfig>,    // reuses existing type from inboxly-core::config
 pub active_account_index: usize,
 
 // New messages:
 Message::ToggleAccountSwitcher,
 Message::SwitchAccount(usize),       // index into accounts vec
 ```
+
+Note: `AccountConfig` is the existing type from `inboxly-core::config`. The UI displays `email`, `display_name`, `provider`, and `auth_method` fields from it. No new type is needed.
 
 ## System 5: Settings View
 
@@ -197,7 +199,7 @@ The nav drawer is hidden when the Settings view is active. The back arrow return
 
 | Setting | Control | Persists To |
 |---------|---------|-------------|
-| Theme | 3 chip buttons (System / Light / Dark) | `AppConfig.theme` + settings store |
+| Theme | 3 chip buttons (System / Light / Dark) | SQLite settings store only (authoritative at runtime; `AppConfig.theme` is the initial default for fresh installs, not updated after first launch) |
 | Default View | Dropdown (Inbox / Snoozed / Done) | settings store |
 | Snooze Presets | 4 form fields: Morning time, Afternoon time, Evening time, Weekend day dropdown | `AppConfig.snooze` |
 | Undo Timeout | Dropdown (3s / 5s / 7s / 10s / 15s) | settings store |
@@ -209,7 +211,7 @@ The nav drawer is hidden when the Settings view is active. The back arrow return
   - Email address (bold, 17px)
   - Provider + auth method + last sync time (grey, 14px)
   - Edit button (opens inline edit form with IMAP/SMTP fields)
-  - Remove button (red, with confirmation dialog)
+  - Remove button (red, with confirmation dialog using `PopupMenu` rendered as a confirmation popup: "Remove account?" with Cancel / Remove buttons)
 - "+ Add Account" button (blue chip) at top-right
 - Add/Edit form fields: email, display name, provider (Gmail/Fastmail/Generic), auth method (Password/OAuth2/App Password), IMAP host/port, SMTP host/port
 
@@ -239,18 +241,32 @@ The nav drawer is hidden when the Settings view is active. The back arrow return
 
 - Two-column table: Action → Shortcut
 - Editable: click a shortcut cell, press new key combination, confirm
-- Default shortcuts:
-  - `e` — Done (archive)
-  - `p` — Pin/unpin
-  - `s` — Snooze
-  - `/` — Focus search
-  - `c` — Compose
-  - `r` — Reply
-  - `a` — Reply All
-  - `f` — Forward
-  - `j` / `k` — Next / previous thread
-  - `?` — Show shortcut help
-  - `Esc` — Close menu / back
+- Default shortcuts match the existing `Shortcuts` struct in `keyboard.rs`, plus new additions:
+  - `e` — Done (archive) *(existing)*
+  - `=` — Pin/unpin *(existing)*
+  - `b` — Snooze *(existing)*
+  - `/` — Focus search *(existing)*
+  - `c` — Compose *(existing)*
+  - `r` — Refresh *(existing)*
+  - `j` / `k` — Next / previous thread *(existing)*
+  - `o` — Open thread *(existing)*
+  - `Ctrl+Z` — Undo *(existing)*
+  - `g i` / `g s` / `g d` — Go to Inbox / Snoozed / Done *(existing)*
+  - `R` — Reply *(new — Shift+R to avoid conflict with lowercase `r` for Refresh)*
+  - `A` — Reply All *(new)*
+  - `f` — Forward *(new)*
+  - `?` — Show shortcut help *(new)*
+  - `Esc` — Close menu / back *(new)*
+
+#### Migration from Compile-Time to Runtime Shortcuts
+
+The existing `Shortcuts` struct uses compile-time `&'static str` constants. This spec replaces it with a runtime `ShortcutMap` backed by `HashMap<ShortcutAction, String>`:
+
+1. `ShortcutAction` enum lists all actions (Done, Pin, Snooze, Compose, etc.)
+2. `ShortcutMap::defaults()` returns the same bindings as the current `Shortcuts` struct
+3. On startup, load customisations from the `shortcuts` settings key (JSON). Missing keys fall back to defaults.
+4. The old `Shortcuts` struct is deleted once `ShortcutMap` is wired in.
+5. The settings UI reads/writes the `ShortcutMap`, persisting only non-default overrides.
 
 ### Tab: Data & Storage
 
@@ -281,7 +297,7 @@ Settings that don't belong in `AppConfig.toml` (runtime preferences) persist via
 
 Account configuration and snooze presets persist to `~/.config/inboxly/config.toml` via the existing `AppConfig` serialisation.
 
-Bundle order and visibility persist to the SQLite `bundles` table (existing `display_order` and `visible` columns, to be added if not present).
+Bundle order and visibility persist to the SQLite `bundles` table using the existing `sort_order` (INTEGER) and `visibility` (TEXT) columns. No migration needed — these columns already exist.
 
 Keyboard shortcuts persist to a `shortcuts` settings key as JSON.
 
@@ -307,7 +323,7 @@ None. All UI work uses existing Iced widgets. The `PopupMenu` is a custom widget
 
 ## Migration
 
-No schema migration needed. The `settings` table already exists with a generic key-value schema. Bundle `display_order` and `visible` columns should be verified (add via migration if missing).
+No schema migration needed. The `settings` table already exists with a generic key-value schema. The `bundles` table already has `sort_order` and `visibility` columns.
 
 ## Dark Theme
 
