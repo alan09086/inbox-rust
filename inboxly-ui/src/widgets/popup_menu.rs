@@ -171,7 +171,8 @@ impl<Message> MenuItem<Message> {
 /// Internal state stored in the widget tree.
 #[derive(Debug, Default)]
 pub(crate) struct PopupMenuState {
-    /// Index of the menu item currently hovered.
+    /// Reserved for future keyboard arrow-key navigation. Currently unused.
+    #[allow(dead_code)]
     pub(crate) hovered_index: Option<usize>,
     /// Cursor position for AtCursor anchor mode.
     pub(crate) cursor_position: Point,
@@ -355,7 +356,6 @@ where
                 theme_colors: self.theme_colors,
                 trigger_bounds,
                 cursor_position: state.cursor_position,
-                hovered_index: state.hovered_index,
             };
 
             Some(overlay::Element::new(Box::new(menu_overlay)))
@@ -396,7 +396,6 @@ struct MenuOverlay<'a, Message> {
     theme_colors: ThemeColors,
     trigger_bounds: Rectangle,
     cursor_position: Point,
-    hovered_index: Option<usize>,
 }
 
 impl<'a, Message> MenuOverlay<'a, Message> {
@@ -795,18 +794,8 @@ where
                 }
             }
 
-            // Mouse move — update hover tracking.
-            Event::Mouse(mouse::Event::CursorMoved { .. }) => {
-                if let Some(pos) = cursor.position() {
-                    if menu_bounds.contains(pos) {
-                        let relative_y = pos.y - menu_bounds.y;
-                        self.hovered_index = self.item_index_at(relative_y);
-                    } else {
-                        self.hovered_index = None;
-                    }
-                }
-                // Don't capture mouse move events — other widgets may need them.
-            }
+            // Mouse move events are not captured — other widgets may need them.
+            Event::Mouse(mouse::Event::CursorMoved { .. }) => {}
 
             _ => {}
         }
@@ -1014,13 +1003,6 @@ mod tests {
         state.hovered_index = Some(1);
         state.hovered_index = None;
         assert!(state.hovered_index.is_none());
-    }
-
-    #[test]
-    fn popup_menu_stores_anchor() {
-        let _br = PopupAnchor::BelowRight;
-        let _bl = PopupAnchor::BelowLeft;
-        let _ac = PopupAnchor::AtCursor;
     }
 
     // -- Integration-level construction tests --
