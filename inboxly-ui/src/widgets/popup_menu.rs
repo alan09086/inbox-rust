@@ -28,10 +28,9 @@ use iced::{Border, Element, Event, Length, Point, Rectangle, Shadow, Size, Vecto
 
 use crate::theme::colors::ThemeColors;
 use crate::theme::dimensions::{
-    DIVIDER_THICKNESS, POPUP_MENU_CORNER_RADIUS, POPUP_MENU_ICON_WIDTH,
-    POPUP_MENU_ITEM_FONT_SIZE, POPUP_MENU_ITEM_PADDING_H, POPUP_MENU_ITEM_PADDING_V,
-    POPUP_MENU_SEPARATOR_MARGIN, POPUP_MENU_SHADOW_BLUR, POPUP_MENU_SHADOW_OFFSET_Y,
-    POPUP_MENU_WIDTH,
+    DIVIDER_THICKNESS, POPUP_MENU_CORNER_RADIUS, POPUP_MENU_ICON_WIDTH, POPUP_MENU_ITEM_FONT_SIZE,
+    POPUP_MENU_ITEM_PADDING_H, POPUP_MENU_ITEM_PADDING_V, POPUP_MENU_SEPARATOR_MARGIN,
+    POPUP_MENU_SHADOW_BLUR, POPUP_MENU_SHADOW_OFFSET_Y, POPUP_MENU_WIDTH,
 };
 
 /// Style variant for a menu action item.
@@ -101,11 +100,7 @@ impl<Message> MenuItem<Message> {
     }
 
     /// Create a normal action item with an icon.
-    pub fn action_with_icon(
-        label: impl Into<String>,
-        icon: char,
-        message: Message,
-    ) -> Self {
+    pub fn action_with_icon(label: impl Into<String>, icon: char, message: Message) -> Self {
         Self::Action {
             label: label.into(),
             icon: Some(icon),
@@ -125,11 +120,7 @@ impl<Message> MenuItem<Message> {
     }
 
     /// Create a destructive action item with an icon.
-    pub fn destructive_with_icon(
-        label: impl Into<String>,
-        icon: char,
-        message: Message,
-    ) -> Self {
+    pub fn destructive_with_icon(label: impl Into<String>, icon: char, message: Message) -> Self {
         Self::Action {
             label: label.into(),
             icon: Some(icon),
@@ -288,9 +279,15 @@ where
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
-        self.trigger
-            .as_widget()
-            .draw(&tree.children[0], renderer, theme, style, layout, cursor, viewport);
+        self.trigger.as_widget().draw(
+            &tree.children[0],
+            renderer,
+            theme,
+            style,
+            layout,
+            cursor,
+            viewport,
+        );
     }
 
     fn update(
@@ -330,9 +327,13 @@ where
         viewport: &Rectangle,
         renderer: &Renderer,
     ) -> mouse::Interaction {
-        self.trigger
-            .as_widget()
-            .mouse_interaction(&tree.children[0], layout, cursor, viewport, renderer)
+        self.trigger.as_widget().mouse_interaction(
+            &tree.children[0],
+            layout,
+            cursor,
+            viewport,
+            renderer,
+        )
     }
 
     fn overlay<'b>(
@@ -402,9 +403,7 @@ impl<'a, Message> MenuOverlay<'a, Message> {
     /// Compute the height of a single menu item.
     fn item_height(item: &MenuItem<Message>) -> f32 {
         match item {
-            MenuItem::Separator => {
-                POPUP_MENU_SEPARATOR_MARGIN * 2.0 + DIVIDER_THICKNESS
-            }
+            MenuItem::Separator => POPUP_MENU_SEPARATOR_MARGIN * 2.0 + DIVIDER_THICKNESS,
             _ => POPUP_MENU_ITEM_PADDING_V * 2.0 + POPUP_MENU_ITEM_FONT_SIZE,
         }
     }
@@ -415,11 +414,7 @@ impl<'a, Message> MenuOverlay<'a, Message> {
     }
 
     /// Compute the position of the menu card top-left corner.
-    fn menu_position(
-        &self,
-        menu_size: Size,
-        viewport: Size,
-    ) -> Point {
+    fn menu_position(&self, menu_size: Size, viewport: Size) -> Point {
         let (mut x, mut y) = match self.anchor {
             PopupAnchor::BelowRight => {
                 // Right-align to trigger's right edge.
@@ -573,12 +568,10 @@ where
                     style: item_style,
                     ..
                 } => {
-                    let is_destructive =
-                        *item_style == MenuItemStyle::Destructive;
+                    let is_destructive = *item_style == MenuItemStyle::Destructive;
 
                     // Hover highlight.
-                    let is_hovered = cursor_pos
-                        .is_some_and(|p| item_bounds.contains(p));
+                    let is_hovered = cursor_pos.is_some_and(|p| item_bounds.contains(p));
                     if is_hovered {
                         let hover_bg = if is_destructive {
                             self.theme_colors.menu_destructive_hover
@@ -609,10 +602,7 @@ where
                     if let Some(icon_char) = icon {
                         let icon_text = iced::advanced::text::Text {
                             content: String::from(*icon_char),
-                            bounds: Size::new(
-                                POPUP_MENU_ICON_WIDTH,
-                                POPUP_MENU_ITEM_FONT_SIZE,
-                            ),
+                            bounds: Size::new(POPUP_MENU_ICON_WIDTH, POPUP_MENU_ITEM_FONT_SIZE),
                             size: POPUP_MENU_ITEM_FONT_SIZE.into(),
                             line_height: text::LineHeight::default(),
                             font: renderer.default_font(),
@@ -634,8 +624,13 @@ where
                     let label_text = iced::advanced::text::Text {
                         content: label.clone(),
                         bounds: Size::new(
-                            menu_bounds.width - POPUP_MENU_ITEM_PADDING_H * 2.0
-                                - if icon.is_some() { POPUP_MENU_ICON_WIDTH } else { 0.0 },
+                            menu_bounds.width
+                                - POPUP_MENU_ITEM_PADDING_H * 2.0
+                                - if icon.is_some() {
+                                    POPUP_MENU_ICON_WIDTH
+                                } else {
+                                    0.0
+                                },
                             POPUP_MENU_ITEM_FONT_SIZE,
                         ),
                         size: POPUP_MENU_ITEM_FONT_SIZE.into(),
@@ -653,12 +648,9 @@ where
                         menu_bounds,
                     );
                 }
-                MenuItem::Submenu {
-                    label, icon, ..
-                } => {
+                MenuItem::Submenu { label, icon, .. } => {
                     // Hover highlight.
-                    let is_hovered = cursor_pos
-                        .is_some_and(|p| item_bounds.contains(p));
+                    let is_hovered = cursor_pos.is_some_and(|p| item_bounds.contains(p));
                     if is_hovered {
                         renderer.fill_quad(
                             renderer::Quad {
@@ -677,10 +669,7 @@ where
                     if let Some(icon_char) = icon {
                         let icon_text = iced::advanced::text::Text {
                             content: String::from(*icon_char),
-                            bounds: Size::new(
-                                POPUP_MENU_ICON_WIDTH,
-                                POPUP_MENU_ITEM_FONT_SIZE,
-                            ),
+                            bounds: Size::new(POPUP_MENU_ICON_WIDTH, POPUP_MENU_ITEM_FONT_SIZE),
                             size: POPUP_MENU_ITEM_FONT_SIZE.into(),
                             line_height: text::LineHeight::default(),
                             font: renderer.default_font(),
@@ -702,8 +691,13 @@ where
                     let label_text = iced::advanced::text::Text {
                         content: label.clone(),
                         bounds: Size::new(
-                            menu_bounds.width - POPUP_MENU_ITEM_PADDING_H * 2.0
-                                - if icon.is_some() { POPUP_MENU_ICON_WIDTH } else { 0.0 },
+                            menu_bounds.width
+                                - POPUP_MENU_ITEM_PADDING_H * 2.0
+                                - if icon.is_some() {
+                                    POPUP_MENU_ICON_WIDTH
+                                } else {
+                                    0.0
+                                },
                             POPUP_MENU_ITEM_FONT_SIZE,
                         ),
                         size: POPUP_MENU_ITEM_FONT_SIZE.into(),
@@ -724,10 +718,7 @@ where
                     // Draw chevron (right arrow) for submenu indicator.
                     let chevron_text = iced::advanced::text::Text {
                         content: String::from('\u{203A}'), // single right-pointing angle
-                        bounds: Size::new(
-                            POPUP_MENU_ITEM_FONT_SIZE,
-                            POPUP_MENU_ITEM_FONT_SIZE,
-                        ),
+                        bounds: Size::new(POPUP_MENU_ITEM_FONT_SIZE, POPUP_MENU_ITEM_FONT_SIZE),
                         size: POPUP_MENU_ITEM_FONT_SIZE.into(),
                         line_height: text::LineHeight::default(),
                         font: renderer.default_font(),
@@ -908,8 +899,7 @@ mod tests {
 
     #[test]
     fn action_with_icon_creates_item_with_icon() {
-        let item: MenuItem<&str> =
-            MenuItem::action_with_icon("Reply", '\u{21A9}', "reply");
+        let item: MenuItem<&str> = MenuItem::action_with_icon("Reply", '\u{21A9}', "reply");
         match item {
             MenuItem::Action {
                 label,
@@ -942,9 +932,7 @@ mod tests {
         let item: MenuItem<&str> =
             MenuItem::destructive_with_icon("Report spam", '\u{26A0}', "spam");
         match item {
-            MenuItem::Action {
-                icon, style, ..
-            } => {
+            MenuItem::Action { icon, style, .. } => {
                 assert_eq!(icon, Some('\u{26A0}'));
                 assert_eq!(style, MenuItemStyle::Destructive);
             }
@@ -982,14 +970,9 @@ mod tests {
             MenuItem::action("Inbox", "inbox"),
             MenuItem::action("Trash", "trash"),
         ];
-        let item: MenuItem<&str> =
-            MenuItem::submenu("Move to...", Some('\u{1F4C1}'), children);
+        let item: MenuItem<&str> = MenuItem::submenu("Move to...", Some('\u{1F4C1}'), children);
         match item {
-            MenuItem::Submenu {
-                label,
-                icon,
-                items,
-            } => {
+            MenuItem::Submenu { label, icon, items } => {
                 assert_eq!(label, "Move to...");
                 assert_eq!(icon, Some('\u{1F4C1}'));
                 assert_eq!(items.len(), 2);
@@ -1038,5 +1021,84 @@ mod tests {
         let _br = PopupAnchor::BelowRight;
         let _bl = PopupAnchor::BelowLeft;
         let _ac = PopupAnchor::AtCursor;
+    }
+
+    // -- Integration-level construction tests --
+
+    #[test]
+    fn build_realistic_overflow_menu() {
+        let items: Vec<MenuItem<String>> = vec![
+            MenuItem::action_with_icon("Move to...", '\u{1F4C1}', "move".into()),
+            MenuItem::action("Mark as read", "mark_read".into()),
+            MenuItem::action("Mute thread", "mute".into()),
+            MenuItem::separator(),
+            MenuItem::action_with_icon("Reply", '\u{21A9}', "reply".into()),
+            MenuItem::action("Reply All", "reply_all".into()),
+            MenuItem::action("Forward", "forward".into()),
+            MenuItem::separator(),
+            MenuItem::action("Add to bundle...", "add_bundle".into()),
+            MenuItem::action("Create rule from sender", "create_rule".into()),
+            MenuItem::separator(),
+            MenuItem::destructive_with_icon("Block sender", '\u{1F6AB}', "block".into()),
+            MenuItem::destructive_with_icon("Report spam", '\u{26A0}', "spam".into()),
+        ];
+
+        assert_eq!(items.len(), 13);
+        assert!(items[3].is_separator());
+        assert!(items[7].is_separator());
+        assert!(items[10].is_separator());
+        assert!(items[11].is_destructive());
+        assert!(items[12].is_destructive());
+        assert!(!items[0].is_destructive());
+        assert!(!items[4].is_destructive());
+    }
+
+    #[test]
+    fn build_submenu() {
+        let submenu_items: Vec<MenuItem<String>> = vec![
+            MenuItem::action("Inbox", "move_inbox".into()),
+            MenuItem::action("Trash", "move_trash".into()),
+            MenuItem::action("Spam", "move_spam".into()),
+        ];
+        let item: MenuItem<String> =
+            MenuItem::submenu("Move to...", Some('\u{1F4C1}'), submenu_items);
+
+        match &item {
+            MenuItem::Submenu { items, .. } => {
+                assert_eq!(items.len(), 3);
+            }
+            _ => panic!("expected Submenu"),
+        }
+    }
+
+    #[test]
+    fn empty_menu_has_no_items() {
+        let items: Vec<MenuItem<&str>> = vec![];
+        assert!(items.is_empty());
+    }
+
+    #[test]
+    fn menu_item_label_preserved() {
+        let item: MenuItem<u32> = MenuItem::action("Very Long Label With Spaces", 42);
+        match item {
+            MenuItem::Action { label, .. } => {
+                assert_eq!(label, "Very Long Label With Spaces");
+            }
+            _ => panic!("expected Action"),
+        }
+    }
+
+    #[test]
+    fn all_anchor_variants_are_copy() {
+        let a = PopupAnchor::BelowRight;
+        let b = a; // Copy
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn all_style_variants_are_copy() {
+        let a = MenuItemStyle::Destructive;
+        let b = a; // Copy
+        assert_eq!(a, b);
     }
 }
