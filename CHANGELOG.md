@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.26.0] - 2026-03-14
+
+### Added (M26)
+
+- **PopupMenu widget** (M26): Reusable dropdown/context menu overlay using Iced 0.14's `advanced` Widget + Overlay traits — first custom advanced widget in the project
+- `MenuItem<Message>` enum with Action (label/icon/message/style), Separator, and Submenu variants; ergonomic constructors (`action`, `destructive`, `action_with_icon`, etc.)
+- `MenuItemStyle` (Normal, Destructive) and `PopupAnchor` (BelowRight, BelowLeft, AtCursor) types
+- `PopupMenu` wraps any trigger element, delegates layout/draw/events, conditionally renders `MenuOverlay` as overlay
+- `MenuOverlay` handles viewport-clamped positioning, shadow + card + item rendering, hover highlighting, click/Escape dismiss
+- 5 new colour tokens on `ThemeColors`: `menu_hover`, `menu_destructive_hover`, `menu_destructive_text`, `menu_separator`, `menu_shadow` (both light and dark)
+- 9 popup menu dimension constants in `dimensions.rs`
+- 41 new tests (756 total)
+
 ## [0.25.0] - 2026-03-14
 
 ### Added (M21-M25)
