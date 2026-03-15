@@ -1835,4 +1835,227 @@ mod tests {
         assert_eq!(format_size(1024 * 1024 * 1024), "1.0 GB");
         assert_eq!(format_size(2 * 1024 * 1024 * 1024), "2.0 GB");
     }
+
+    // -- M30 Batch 2: Notifications, bundles, and shortcuts settings tests --
+
+    #[test]
+    fn toggle_notifications() {
+        let mut app = Inboxly::default();
+        assert!(app.notifications_enabled);
+        let _ = app.update(Message::ToggleNotifications);
+        assert!(!app.notifications_enabled);
+        let _ = app.update(Message::ToggleNotifications);
+        assert!(app.notifications_enabled);
+    }
+
+    #[test]
+    fn toggle_notification_sound() {
+        let mut app = Inboxly::default();
+        assert!(app.notification_sound);
+        let _ = app.update(Message::ToggleNotificationSound);
+        assert!(!app.notification_sound);
+        let _ = app.update(Message::ToggleNotificationSound);
+        assert!(app.notification_sound);
+    }
+
+    #[test]
+    fn set_notification_bundles() {
+        let mut app = Inboxly::default();
+        assert_eq!(app.notification_bundles, vec!["all".to_string()]);
+
+        let _ = app.update(Message::SetNotificationBundles(vec![
+            "Social".to_string(),
+            "Finance".to_string(),
+        ]));
+        assert_eq!(app.notification_bundles.len(), 2);
+        assert!(app.notification_bundles.contains(&"Social".to_string()));
+        assert!(app.notification_bundles.contains(&"Finance".to_string()));
+
+        let _ = app.update(Message::SetNotificationBundles(vec!["primary".to_string()]));
+        assert_eq!(app.notification_bundles, vec!["primary".to_string()]);
+    }
+
+    #[test]
+    fn toggle_bundle_visibility() {
+        let mut app = Inboxly::default();
+        app.settings_bundles.push(BundleRow {
+            id: "b1".to_string(),
+            category: "Social".to_string(),
+            name: "Social".to_string(),
+            color: "#1DA1F2".to_string(),
+            badge_color: "#1DA1F2".to_string(),
+            visibility: "visible".to_string(),
+            throttle: r#"{"mode":"Immediate"}"#.to_string(),
+            sort_order: 0,
+        });
+
+        let _ = app.update(Message::ToggleBundleVisibility("b1".to_string()));
+        assert_eq!(app.settings_bundles[0].visibility, "hidden");
+
+        let _ = app.update(Message::ToggleBundleVisibility("b1".to_string()));
+        assert_eq!(app.settings_bundles[0].visibility, "visible");
+    }
+
+    #[test]
+    fn toggle_bundle_visibility_unknown_id_is_noop() {
+        let mut app = Inboxly::default();
+        // No bundles -- should not panic
+        let _ = app.update(Message::ToggleBundleVisibility("nonexistent".to_string()));
+    }
+
+    #[test]
+    fn start_capture() {
+        let mut app = Inboxly::default();
+        assert!(app.capturing_shortcut.is_none());
+        let _ = app.update(Message::StartCapture(ShortcutAction::Done));
+        assert_eq!(app.capturing_shortcut, Some(ShortcutAction::Done));
+    }
+
+    #[test]
+    fn cancel_capture() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::StartCapture(ShortcutAction::Done));
+        assert!(app.capturing_shortcut.is_some());
+        let _ = app.update(Message::CancelCapture);
+        assert!(app.capturing_shortcut.is_none());
+    }
+
+    #[test]
+    fn set_shortcut() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::StartCapture(ShortcutAction::Done));
+        let _ = app.update(Message::SetShortcut {
+            action: ShortcutAction::Done,
+            binding: "d".to_string(),
+        });
+        assert_eq!(app.shortcuts.get(ShortcutAction::Done), "d");
+        assert!(app.capturing_shortcut.is_none());
+        assert!(app.shortcuts.is_customised(ShortcutAction::Done));
+    }
+
+    #[test]
+    fn reset_shortcut() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::SetShortcut {
+            action: ShortcutAction::Done,
+            binding: "d".to_string(),
+        });
+        assert_eq!(app.shortcuts.get(ShortcutAction::Done), "d");
+
+        let _ = app.update(Message::ResetShortcut(ShortcutAction::Done));
+        assert_eq!(app.shortcuts.get(ShortcutAction::Done), "e"); // default
+        assert!(!app.shortcuts.is_customised(ShortcutAction::Done));
+    }
+
+    #[test]
+    fn bundles_loaded_replaces_list() {
+        let mut app = Inboxly::default();
+        assert!(app.settings_bundles.is_empty());
+
+        let bundles = vec![
+            BundleRow {
+                id: "b1".to_string(),
+                category: "Social".to_string(),
+                name: "Social".to_string(),
+                color: "#1DA1F2".to_string(),
+                badge_color: "#1DA1F2".to_string(),
+                visibility: "visible".to_string(),
+                throttle: r#"{"mode":"Immediate"}"#.to_string(),
+                sort_order: 0,
+            },
+            BundleRow {
+                id: "b2".to_string(),
+                category: "Finance".to_string(),
+                name: "Finance".to_string(),
+                color: "#0f9d58".to_string(),
+                badge_color: "#0f9d58".to_string(),
+                visibility: "visible".to_string(),
+                throttle: r#"{"mode":"Immediate"}"#.to_string(),
+                sort_order: 1,
+            },
+        ];
+        let _ = app.update(Message::BundlesLoaded(bundles));
+        assert_eq!(app.settings_bundles.len(), 2);
+    }
+
+    #[test]
+    fn reorder_bundles() {
+        let mut app = Inboxly::default();
+        app.settings_bundles = vec![
+            BundleRow {
+                id: "b1".to_string(),
+                category: "Social".to_string(),
+                name: "Social".to_string(),
+                color: "#1DA1F2".to_string(),
+                badge_color: "#1DA1F2".to_string(),
+                visibility: "visible".to_string(),
+                throttle: r#"{"mode":"Immediate"}"#.to_string(),
+                sort_order: 0,
+            },
+            BundleRow {
+                id: "b2".to_string(),
+                category: "Finance".to_string(),
+                name: "Finance".to_string(),
+                color: "#0f9d58".to_string(),
+                badge_color: "#0f9d58".to_string(),
+                visibility: "visible".to_string(),
+                throttle: r#"{"mode":"Immediate"}"#.to_string(),
+                sort_order: 1,
+            },
+        ];
+
+        // Reverse the order
+        let _ = app.update(Message::ReorderBundles(vec![
+            "b2".to_string(),
+            "b1".to_string(),
+        ]));
+        assert_eq!(app.settings_bundles[0].id, "b2");
+        assert_eq!(app.settings_bundles[0].sort_order, 0);
+        assert_eq!(app.settings_bundles[1].id, "b1");
+        assert_eq!(app.settings_bundles[1].sort_order, 1);
+    }
+
+    #[test]
+    fn set_bundle_throttle() {
+        let mut app = Inboxly::default();
+        app.settings_bundles.push(BundleRow {
+            id: "b1".to_string(),
+            category: "Social".to_string(),
+            name: "Social".to_string(),
+            color: "#1DA1F2".to_string(),
+            badge_color: "#1DA1F2".to_string(),
+            visibility: "visible".to_string(),
+            throttle: r#"{"mode":"Immediate"}"#.to_string(),
+            sort_order: 0,
+        });
+
+        let daily_json = r#"{"mode":"Daily","delivery_time":"17:00:00"}"#.to_string();
+        let _ = app.update(Message::SetBundleThrottle {
+            bundle_id: "b1".to_string(),
+            throttle_json: daily_json.clone(),
+        });
+        assert_eq!(app.settings_bundles[0].throttle, daily_json);
+    }
+
+    #[test]
+    fn toggle_throttle_popup() {
+        let mut app = Inboxly::default();
+        assert!(app.throttle_popup_bundle_id.is_none());
+
+        let _ = app.update(Message::ToggleThrottlePopup(Some("b1".to_string())));
+        assert_eq!(app.throttle_popup_bundle_id, Some("b1".to_string()));
+
+        let _ = app.update(Message::ToggleThrottlePopup(None));
+        assert!(app.throttle_popup_bundle_id.is_none());
+    }
+
+    #[test]
+    fn shortcuts_loaded_replaces_map() {
+        let mut app = Inboxly::default();
+        let mut custom_map = ShortcutMap::defaults();
+        custom_map.set(ShortcutAction::Done, "x".to_owned());
+
+        let _ = app.update(Message::ShortcutsLoaded(custom_map));
+        assert_eq!(app.shortcuts.get(ShortcutAction::Done), "x");
+    }
 }
