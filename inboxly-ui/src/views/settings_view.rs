@@ -10,6 +10,7 @@ use inboxly_core::config::{AuthMethod, ThemePreference};
 use crate::app::{Inboxly, Message};
 use crate::theme::colors::ThemeColors;
 use crate::theme::{SettingsReader, SettingsWriter};
+use crate::views::{settings_bundles, settings_notifications, settings_shortcuts};
 
 // -- Constants --
 
@@ -119,8 +120,10 @@ pub fn settings_view(app: &Inboxly) -> Element<'_, Message> {
     let content: Element<'_, Message> = match app.settings_tab {
         SettingsTab::General => general_tab(app),
         SettingsTab::Accounts => accounts_tab(app),
+        SettingsTab::Bundles => settings_bundles::bundles_settings_tab(app),
+        SettingsTab::Notifications => settings_notifications::notifications_settings_tab(app),
+        SettingsTab::KeyboardShortcuts => settings_shortcuts::shortcuts_settings_tab(app),
         SettingsTab::DataStorage => data_storage_tab(app),
-        _ => placeholder_tab(app.settings_tab),
     };
 
     // Wrap content in scrollable with max width
@@ -811,32 +814,6 @@ fn data_storage_tab(app: &Inboxly) -> Element<'_, Message> {
     ]
     .spacing(8)
     .width(Length::Fill)
-    .into()
-}
-
-// ============================================================================
-// Placeholder tab for unimplemented tabs
-// ============================================================================
-
-/// Render a placeholder for tabs not yet implemented.
-fn placeholder_tab(tab: SettingsTab) -> Element<'static, Message> {
-    container(
-        column![
-            text(tab.label()).size(SECTION_HEADER_SIZE),
-            text("Coming in M30").size(14.0).color(Color {
-                r: 0.46,
-                g: 0.46,
-                b: 0.46,
-                a: 1.0,
-            }),
-        ]
-        .spacing(8)
-        .align_x(iced::Alignment::Center),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .align_x(iced::alignment::Horizontal::Center)
-    .align_y(iced::alignment::Vertical::Center)
     .into()
 }
 

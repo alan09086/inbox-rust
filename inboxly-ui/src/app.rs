@@ -4,9 +4,10 @@ use iced::widget::{column, container, row, text};
 use iced::{Element, Length, Task, Theme};
 
 use inboxly_core::config::{AccountConfig, AppConfig, AuthMethod, Paths, ThemePreference};
-use inboxly_store::Store;
+use inboxly_store::{BundleRow, Store};
 
 use crate::feed::{self, FeedSection};
+use crate::keyboard::{ShortcutAction, ShortcutMap};
 use crate::nav::{NavBundleCategory, NavTarget, default_bundle_categories};
 use crate::theme::{ActiveView, InboxlyTheme, SettingsReader};
 use crate::undo::{UndoAction, UndoState};
@@ -83,6 +84,26 @@ pub struct Inboxly {
     pub last_sync_display: String,
     /// Status message shown after an action (e.g., "Cache cleared", "Rebuilding...").
     pub data_action_status: Option<String>,
+
+    // -- Keyboard shortcuts state --
+    /// Runtime keyboard shortcut bindings.
+    pub shortcuts: ShortcutMap,
+    /// Action currently being re-bound (user is pressing a new key).
+    pub capturing_shortcut: Option<ShortcutAction>,
+
+    // -- Notification settings state --
+    /// Whether desktop notifications are enabled.
+    pub notifications_enabled: bool,
+    /// Whether notification sound is enabled.
+    pub notification_sound: bool,
+    /// Which bundles trigger notifications (["all"] = all bundles).
+    pub notification_bundles: Vec<String>,
+
+    // -- Bundle settings state --
+    /// All bundles loaded from the store (for the Bundles settings tab).
+    pub settings_bundles: Vec<BundleRow>,
+    /// Bundle whose throttle popup is currently open.
+    pub throttle_popup_bundle_id: Option<String>,
 }
 
 /// IMAP folder destinations for the "Move to..." action.
@@ -205,6 +226,45 @@ pub enum Message {
         maildir_size: String,
         last_sync: String,
     },
+
+    // -- Keyboard shortcuts tab --
+    /// Shortcuts loaded from store.
+    ShortcutsLoaded(ShortcutMap),
+    /// User set a new binding for an action.
+    SetShortcut {
+        action: ShortcutAction,
+        binding: String,
+    },
+    /// Reset an action to its default binding.
+    ResetShortcut(ShortcutAction),
+    /// Begin capturing a new key for the given action.
+    StartCapture(ShortcutAction),
+    /// Cancel capture mode.
+    CancelCapture,
+
+    // -- Notifications tab --
+    /// Toggle desktop notifications on/off.
+    ToggleNotifications,
+    /// Toggle notification sound on/off.
+    ToggleNotificationSound,
+    /// Set which bundles trigger notifications.
+    SetNotificationBundles(Vec<String>),
+
+    // -- Bundles tab --
+    /// Bundles loaded from store.
+    BundlesLoaded(Vec<BundleRow>),
+    /// Toggle a bundle's visibility (visible/hidden).
+    ToggleBundleVisibility(String),
+    /// Set a bundle's throttle JSON.
+    SetBundleThrottle {
+        bundle_id: String,
+        throttle_json: String,
+    },
+    /// Reorder bundles by their IDs (new order).
+    ReorderBundles(Vec<String>),
+    /// Open/close the throttle configuration popup.
+    ToggleThrottlePopup(Option<String>),
+
     /// Move thread to a folder.
     MoveTo {
         thread_id: String,
@@ -273,6 +333,16 @@ impl Default for Inboxly {
             maildir_size_display: String::new(),
             last_sync_display: "Never".to_owned(),
             data_action_status: None,
+            // Keyboard shortcuts
+            shortcuts: ShortcutMap::defaults(),
+            capturing_shortcut: None,
+            // Notifications
+            notifications_enabled: true,
+            notification_sound: true,
+            notification_bundles: vec!["all".to_string()],
+            // Bundle settings
+            settings_bundles: Vec::new(),
+            throttle_popup_bundle_id: None,
         }
     }
 }
@@ -662,6 +732,39 @@ impl Inboxly {
                         .flatten()
                         .and_then(|v| v.parse::<u32>().ok())
                         .unwrap_or(7);
+                    // Shortcuts
+                    self.shortcuts = store
+                        .get_setting("shortcuts")
+                        .ok()
+                        .flatten()
+                        .map(|json| ShortcutMap::from_overrides_json(&json))
+                        .unwrap_or_else(ShortcutMap::defaults);
+
+                    // Notification settings
+                    self.notifications_enabled = store
+                        .get_setting("notifications_enabled")
+                        .ok()
+                        .flatten()
+                        .map(|v| v != "false")
+                        .unwrap_or(true);
+                    self.notification_sound = store
+                        .get_setting("notification_sound")
+                        .ok()
+                        .flatten()
+                        .map(|v| v != "false")
+                        .unwrap_or(true);
+                    self.notification_bundles = store
+                        .get_setting("notification_bundles")
+                        .ok()
+                        .flatten()
+                        .and_then(|json| serde_json::from_str::<Vec<String>>(&json).ok())
+                        .unwrap_or_else(|| vec!["all".to_string()]);
+
+                    // Bundle settings
+                    match store.list_bundles() {
+                        Ok(bundles) => self.settings_bundles = bundles,
+                        Err(e) => tracing::warn!("failed to load bundles for settings: {e}"),
+                    }
                 }
                 // Load config for snooze presets and accounts
                 if let Ok(config) = AppConfig::load() {
@@ -926,6 +1029,124 @@ impl Inboxly {
                 self.index_size_display = index_size;
                 self.maildir_size_display = maildir_size;
                 self.last_sync_display = last_sync;
+            }
+
+            // -- Keyboard shortcuts handlers --
+            Message::ShortcutsLoaded(map) => {
+                self.shortcuts = map;
+            }
+            Message::SetShortcut { action, binding } => {
+                self.shortcuts.set(action, binding);
+                self.capturing_shortcut = None;
+                if let Some(ref store) = self.store {
+                    let json = self.shortcuts.to_overrides_json();
+                    if let Err(e) = store.set_setting("shortcuts", &json) {
+                        tracing::warn!("failed to persist shortcuts: {e}");
+                    }
+                }
+            }
+            Message::ResetShortcut(action) => {
+                self.shortcuts.reset(action);
+                if let Some(ref store) = self.store {
+                    let json = self.shortcuts.to_overrides_json();
+                    if let Err(e) = store.set_setting("shortcuts", &json) {
+                        tracing::warn!("failed to persist shortcuts: {e}");
+                    }
+                }
+            }
+            Message::StartCapture(action) => {
+                self.capturing_shortcut = Some(action);
+            }
+            Message::CancelCapture => {
+                self.capturing_shortcut = None;
+            }
+
+            // -- Notification settings handlers --
+            Message::ToggleNotifications => {
+                self.notifications_enabled = !self.notifications_enabled;
+                if let Some(ref store) = self.store {
+                    let val = if self.notifications_enabled {
+                        "true"
+                    } else {
+                        "false"
+                    };
+                    if let Err(e) = store.set_setting("notifications_enabled", val) {
+                        tracing::warn!("failed to persist notifications_enabled: {e}");
+                    }
+                }
+            }
+            Message::ToggleNotificationSound => {
+                self.notification_sound = !self.notification_sound;
+                if let Some(ref store) = self.store {
+                    let val = if self.notification_sound {
+                        "true"
+                    } else {
+                        "false"
+                    };
+                    if let Err(e) = store.set_setting("notification_sound", val) {
+                        tracing::warn!("failed to persist notification_sound: {e}");
+                    }
+                }
+            }
+            Message::SetNotificationBundles(bundles) => {
+                self.notification_bundles = bundles;
+                if let Some(ref store) = self.store {
+                    let json = serde_json::to_string(&self.notification_bundles)
+                        .unwrap_or_else(|_| r#"["all"]"#.to_owned());
+                    if let Err(e) = store.set_setting("notification_bundles", &json) {
+                        tracing::warn!("failed to persist notification_bundles: {e}");
+                    }
+                }
+            }
+
+            // -- Bundle settings handlers --
+            Message::BundlesLoaded(bundles) => {
+                self.settings_bundles = bundles;
+            }
+            Message::ToggleBundleVisibility(bundle_id) => {
+                if let Some(bundle) = self.settings_bundles.iter_mut().find(|b| b.id == bundle_id) {
+                    bundle.visibility = if bundle.visibility == "visible" {
+                        "hidden".to_owned()
+                    } else {
+                        "visible".to_owned()
+                    };
+                    if let Some(ref store) = self.store
+                        && let Err(e) = store.update_bundle(bundle)
+                    {
+                        tracing::warn!("failed to persist bundle visibility: {e}");
+                    }
+                }
+            }
+            Message::SetBundleThrottle {
+                bundle_id,
+                throttle_json,
+            } => {
+                if let Some(bundle) = self.settings_bundles.iter_mut().find(|b| b.id == bundle_id) {
+                    bundle.throttle = throttle_json;
+                    if let Some(ref store) = self.store
+                        && let Err(e) = store.update_bundle(bundle)
+                    {
+                        tracing::warn!("failed to persist bundle throttle: {e}");
+                    }
+                }
+            }
+            Message::ReorderBundles(ids) => {
+                // Reassign sort_order and persist each bundle.
+                for (order, id) in ids.iter().enumerate() {
+                    if let Some(bundle) = self.settings_bundles.iter_mut().find(|b| &b.id == id) {
+                        bundle.sort_order = order as i64;
+                        if let Some(ref store) = self.store
+                            && let Err(e) = store.update_bundle(bundle)
+                        {
+                            tracing::warn!("failed to persist bundle reorder: {e}");
+                        }
+                    }
+                }
+                // Re-sort the local list.
+                self.settings_bundles.sort_by_key(|b| b.sort_order);
+            }
+            Message::ToggleThrottlePopup(bundle_id) => {
+                self.throttle_popup_bundle_id = bundle_id;
             }
 
             Message::MoveTo {
@@ -1613,5 +1834,228 @@ mod tests {
         assert_eq!(format_size(1024 * 1024), "1.0 MB");
         assert_eq!(format_size(1024 * 1024 * 1024), "1.0 GB");
         assert_eq!(format_size(2 * 1024 * 1024 * 1024), "2.0 GB");
+    }
+
+    // -- M30 Batch 2: Notifications, bundles, and shortcuts settings tests --
+
+    #[test]
+    fn toggle_notifications() {
+        let mut app = Inboxly::default();
+        assert!(app.notifications_enabled);
+        let _ = app.update(Message::ToggleNotifications);
+        assert!(!app.notifications_enabled);
+        let _ = app.update(Message::ToggleNotifications);
+        assert!(app.notifications_enabled);
+    }
+
+    #[test]
+    fn toggle_notification_sound() {
+        let mut app = Inboxly::default();
+        assert!(app.notification_sound);
+        let _ = app.update(Message::ToggleNotificationSound);
+        assert!(!app.notification_sound);
+        let _ = app.update(Message::ToggleNotificationSound);
+        assert!(app.notification_sound);
+    }
+
+    #[test]
+    fn set_notification_bundles() {
+        let mut app = Inboxly::default();
+        assert_eq!(app.notification_bundles, vec!["all".to_string()]);
+
+        let _ = app.update(Message::SetNotificationBundles(vec![
+            "Social".to_string(),
+            "Finance".to_string(),
+        ]));
+        assert_eq!(app.notification_bundles.len(), 2);
+        assert!(app.notification_bundles.contains(&"Social".to_string()));
+        assert!(app.notification_bundles.contains(&"Finance".to_string()));
+
+        let _ = app.update(Message::SetNotificationBundles(vec!["primary".to_string()]));
+        assert_eq!(app.notification_bundles, vec!["primary".to_string()]);
+    }
+
+    #[test]
+    fn toggle_bundle_visibility() {
+        let mut app = Inboxly::default();
+        app.settings_bundles.push(BundleRow {
+            id: "b1".to_string(),
+            category: "Social".to_string(),
+            name: "Social".to_string(),
+            color: "#1DA1F2".to_string(),
+            badge_color: "#1DA1F2".to_string(),
+            visibility: "visible".to_string(),
+            throttle: r#"{"mode":"Immediate"}"#.to_string(),
+            sort_order: 0,
+        });
+
+        let _ = app.update(Message::ToggleBundleVisibility("b1".to_string()));
+        assert_eq!(app.settings_bundles[0].visibility, "hidden");
+
+        let _ = app.update(Message::ToggleBundleVisibility("b1".to_string()));
+        assert_eq!(app.settings_bundles[0].visibility, "visible");
+    }
+
+    #[test]
+    fn toggle_bundle_visibility_unknown_id_is_noop() {
+        let mut app = Inboxly::default();
+        // No bundles -- should not panic
+        let _ = app.update(Message::ToggleBundleVisibility("nonexistent".to_string()));
+    }
+
+    #[test]
+    fn start_capture() {
+        let mut app = Inboxly::default();
+        assert!(app.capturing_shortcut.is_none());
+        let _ = app.update(Message::StartCapture(ShortcutAction::Done));
+        assert_eq!(app.capturing_shortcut, Some(ShortcutAction::Done));
+    }
+
+    #[test]
+    fn cancel_capture() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::StartCapture(ShortcutAction::Done));
+        assert!(app.capturing_shortcut.is_some());
+        let _ = app.update(Message::CancelCapture);
+        assert!(app.capturing_shortcut.is_none());
+    }
+
+    #[test]
+    fn set_shortcut() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::StartCapture(ShortcutAction::Done));
+        let _ = app.update(Message::SetShortcut {
+            action: ShortcutAction::Done,
+            binding: "d".to_string(),
+        });
+        assert_eq!(app.shortcuts.get(ShortcutAction::Done), "d");
+        assert!(app.capturing_shortcut.is_none());
+        assert!(app.shortcuts.is_customised(ShortcutAction::Done));
+    }
+
+    #[test]
+    fn reset_shortcut() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::SetShortcut {
+            action: ShortcutAction::Done,
+            binding: "d".to_string(),
+        });
+        assert_eq!(app.shortcuts.get(ShortcutAction::Done), "d");
+
+        let _ = app.update(Message::ResetShortcut(ShortcutAction::Done));
+        assert_eq!(app.shortcuts.get(ShortcutAction::Done), "e"); // default
+        assert!(!app.shortcuts.is_customised(ShortcutAction::Done));
+    }
+
+    #[test]
+    fn bundles_loaded_replaces_list() {
+        let mut app = Inboxly::default();
+        assert!(app.settings_bundles.is_empty());
+
+        let bundles = vec![
+            BundleRow {
+                id: "b1".to_string(),
+                category: "Social".to_string(),
+                name: "Social".to_string(),
+                color: "#1DA1F2".to_string(),
+                badge_color: "#1DA1F2".to_string(),
+                visibility: "visible".to_string(),
+                throttle: r#"{"mode":"Immediate"}"#.to_string(),
+                sort_order: 0,
+            },
+            BundleRow {
+                id: "b2".to_string(),
+                category: "Finance".to_string(),
+                name: "Finance".to_string(),
+                color: "#0f9d58".to_string(),
+                badge_color: "#0f9d58".to_string(),
+                visibility: "visible".to_string(),
+                throttle: r#"{"mode":"Immediate"}"#.to_string(),
+                sort_order: 1,
+            },
+        ];
+        let _ = app.update(Message::BundlesLoaded(bundles));
+        assert_eq!(app.settings_bundles.len(), 2);
+    }
+
+    #[test]
+    fn reorder_bundles() {
+        let mut app = Inboxly::default();
+        app.settings_bundles = vec![
+            BundleRow {
+                id: "b1".to_string(),
+                category: "Social".to_string(),
+                name: "Social".to_string(),
+                color: "#1DA1F2".to_string(),
+                badge_color: "#1DA1F2".to_string(),
+                visibility: "visible".to_string(),
+                throttle: r#"{"mode":"Immediate"}"#.to_string(),
+                sort_order: 0,
+            },
+            BundleRow {
+                id: "b2".to_string(),
+                category: "Finance".to_string(),
+                name: "Finance".to_string(),
+                color: "#0f9d58".to_string(),
+                badge_color: "#0f9d58".to_string(),
+                visibility: "visible".to_string(),
+                throttle: r#"{"mode":"Immediate"}"#.to_string(),
+                sort_order: 1,
+            },
+        ];
+
+        // Reverse the order
+        let _ = app.update(Message::ReorderBundles(vec![
+            "b2".to_string(),
+            "b1".to_string(),
+        ]));
+        assert_eq!(app.settings_bundles[0].id, "b2");
+        assert_eq!(app.settings_bundles[0].sort_order, 0);
+        assert_eq!(app.settings_bundles[1].id, "b1");
+        assert_eq!(app.settings_bundles[1].sort_order, 1);
+    }
+
+    #[test]
+    fn set_bundle_throttle() {
+        let mut app = Inboxly::default();
+        app.settings_bundles.push(BundleRow {
+            id: "b1".to_string(),
+            category: "Social".to_string(),
+            name: "Social".to_string(),
+            color: "#1DA1F2".to_string(),
+            badge_color: "#1DA1F2".to_string(),
+            visibility: "visible".to_string(),
+            throttle: r#"{"mode":"Immediate"}"#.to_string(),
+            sort_order: 0,
+        });
+
+        let daily_json = r#"{"mode":"Daily","delivery_time":"17:00:00"}"#.to_string();
+        let _ = app.update(Message::SetBundleThrottle {
+            bundle_id: "b1".to_string(),
+            throttle_json: daily_json.clone(),
+        });
+        assert_eq!(app.settings_bundles[0].throttle, daily_json);
+    }
+
+    #[test]
+    fn toggle_throttle_popup() {
+        let mut app = Inboxly::default();
+        assert!(app.throttle_popup_bundle_id.is_none());
+
+        let _ = app.update(Message::ToggleThrottlePopup(Some("b1".to_string())));
+        assert_eq!(app.throttle_popup_bundle_id, Some("b1".to_string()));
+
+        let _ = app.update(Message::ToggleThrottlePopup(None));
+        assert!(app.throttle_popup_bundle_id.is_none());
+    }
+
+    #[test]
+    fn shortcuts_loaded_replaces_map() {
+        let mut app = Inboxly::default();
+        let mut custom_map = ShortcutMap::defaults();
+        custom_map.set(ShortcutAction::Done, "x".to_owned());
+
+        let _ = app.update(Message::ShortcutsLoaded(custom_map));
+        assert_eq!(app.shortcuts.get(ShortcutAction::Done), "x");
     }
 }
