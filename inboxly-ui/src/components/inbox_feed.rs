@@ -4,7 +4,9 @@ use dioxus::prelude::*;
 
 use crate::app::Inboxly;
 use crate::components::bundle_row::BundleRow;
+use crate::components::context_menu::ContextMenu;
 use crate::components::email_row::EmailRow;
+use crate::components::overflow_menu::OverflowMenu;
 use crate::components::section_header::SectionHeader;
 use crate::feed::FeedEntry;
 
@@ -32,5 +34,7 @@ pub fn InboxFeed() -> Element {
                 }
             }
         }
+        ContextMenu {}
+        OverflowMenu {}
     }
 }

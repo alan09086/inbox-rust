@@ -1770,6 +1770,69 @@ mod tests {
         let _ = app.update(Message::ReportSpam("t1".into()));
     }
 
+    // -- M33 Phase 7B: menu action tests --
+
+    #[test]
+    fn context_menu_reply_dispatches_reply_and_closes() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenContextMenu {
+            thread_id: "t1".into(),
+            sender_address: "a@b.com".into(),
+            position: Point::ORIGIN,
+        });
+        let _ = app.update(Message::Reply("t1".into()));
+        assert!(app.context_menu_thread.is_none());
+        assert!(app.menu_thread_sender.is_none());
+    }
+
+    #[test]
+    fn overflow_menu_mark_read_closes_menu() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenOverflowMenu {
+            thread_id: "t1".into(),
+            sender_address: "a@b.com".into(),
+            position: Point::ORIGIN,
+        });
+        let _ = app.update(Message::MarkReadState {
+            thread_id: "t1".into(),
+            read: true,
+        });
+        assert!(app.overflow_menu_thread.is_none());
+        assert!(app.menu_thread_sender.is_none());
+    }
+
+    #[test]
+    fn context_menu_add_to_bundle_closes_menu() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenContextMenu {
+            thread_id: "t1".into(),
+            sender_address: "a@b.com".into(),
+            position: Point::ORIGIN,
+        });
+        let _ = app.update(Message::AddToBundle {
+            thread_id: "t1".into(),
+            category: "Social".into(),
+        });
+        assert!(app.context_menu_thread.is_none());
+        assert!(app.menu_thread_sender.is_none());
+    }
+
+    #[test]
+    fn context_menu_block_sender_uses_menu_sender() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenContextMenu {
+            thread_id: "t1".into(),
+            sender_address: "a@b.com".into(),
+            position: Point::ORIGIN,
+        });
+        let _ = app.update(Message::BlockSender {
+            thread_id: "t1".into(),
+            sender_address: "a@b.com".into(),
+        });
+        assert!(app.context_menu_thread.is_none());
+        assert!(app.menu_thread_sender.is_none());
+    }
+
     // -- M28 account switcher data layer tests --
 
     fn make_test_account(email: &str, display_name: &str) -> inboxly_core::config::AccountConfig {
