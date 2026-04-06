@@ -5,6 +5,7 @@
 
 use std::sync::OnceLock;
 
+use dioxus::desktop::{Config, WindowBuilder};
 use inboxly_core::config::{AccountConfig, AppConfig};
 
 /// Accounts loaded from config, consumed once during app initialisation.
@@ -21,5 +22,9 @@ fn main() {
     };
     let _ = STARTUP_ACCOUNTS.set(accounts);
 
-    dioxus::launch(inboxly_ui::components::app::App);
+    let window = WindowBuilder::new().with_title("Inboxly");
+    let cfg = Config::new().with_window(window).with_menu(None);
+    dioxus::LaunchBuilder::desktop()
+        .with_cfg(cfg)
+        .launch(inboxly_ui::components::app::App);
 }
