@@ -1,6 +1,6 @@
 # 📬 Inboxly
 
-A recreation of [Inbox by Google](https://en.wikipedia.org/wiki/Inbox_by_Gmail) as a native desktop email client, built in Rust with [Iced](https://iced.rs/).
+A recreation of [Inbox by Google](https://en.wikipedia.org/wiki/Inbox_by_Gmail) as a native desktop email client, built in Rust with [Dioxus](https://dioxuslabs.com/).
 
 > *Google killed Inbox in April 2019. Nothing has replaced its unique approach to email — bundles, highlights, snooze, sweep, and smart extraction. Inboxly brings it back as a fully local, privacy-respecting desktop application.*
 

@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.33.0] - 2026-04-06
+
+### Added (M33 — Inbox feed + widgets on Dioxus)
+
+Restores the full inbox feed on the Dioxus 0.7 shell introduced by M32. Ten phases across seventeen commits bring the interactive email-client surface back after the framework migration.
+
+- **InboxFeed** component — date-grouped sections render `EmailRow` and `BundleRow` entries from the existing `feed_sections` model
+- **EmailRow** with avatar tile (letter + per-sender colour), sender name, subject + snippet, timestamp, attachment icon, message count badge, overflow button, and right-click context menu
+- **BundleRow** with category colour dot, sender previews, unread badge, expand chevron (bundle expand/collapse state lives in `Inboxly::expanded_bundles: HashSet<String>`)
+- **SectionHeader** component for date group labels (Today, This Week, Earlier, etc.)
+- **Hover actions** on EmailRow: Done (✓), Pin (📌), Snooze (⏰) — CSS `:hover` reveal, each with `aria_label` and `stop_propagation` on click, right-click on actions prevented from opening the row context menu
+- **ContextMenu** + **OverflowMenu** — 20-row menus covering Reply/Reply All/Forward, Mark Read/Unread, Move to Inbox/Trash/Spam, Mute, Add to Bundle (eight categories), Create Rule from Sender, Block Sender, Report Spam. Destructive actions styled with `.menu-item.destructive`. Both components share a `menu_actions::render_menu_body()` helper to avoid 229 lines of duplication
+- **Menu state foundation**: `OpenOverflowMenu` and `OpenContextMenu` restructured as struct variants carrying `thread_id`, `sender_address`, and `position`; new `overflow_menu_position` and `menu_thread_sender` fields; `Inboxly::close_menus()` helper centralizes the three-field menu-close invariant across eleven action handlers
+- **UndoSnackbar** — bottom-centre fixed snackbar with action description and Undo button, auto-expire timer via Dioxus `use_effect` + `tokio::time::sleep(UNDO_TIMEOUT)`. Guarded against stale timers firing against replacement actions via a `generation: u64` counter on `UndoState` — the timer captures the generation at spawn, peeks the current value at fire time, and no-ops if they differ. Reactive scope tightened with `use_memo` so the effect re-runs only on undo state transitions, not on every app mutation
+- **SpeedDialFab** — bottom-right Compose button with `aria_label: "Compose new email"`. The Compose action itself is out of M33 scope; onclick is a no-op placeholder for now
+- **SnoozePicker** — 2×2 preset grid (Later Today, Tomorrow, This Weekend, Next Week) computing `chrono::DateTime<Utc>` targets from `config.snooze` presets. Nine pure-function unit tests cover the date math, including the same-day edge cases (Later Today falls through to tomorrow morning if the evening hour has passed; This Weekend pushes forward seven days if today is already the weekend day and morning_hour has passed)
+- **SnoozeThread handler fix** — previously left the snooze picker open after a preset was chosen; now closes the picker as expected
+- **InboxZero** component — celebration view with 🎉 icon shown when the inbox is empty
+- **EmptyState** component — generic placeholder used for the Snoozed (⏰) and Done (✅) views with customizable icon and text props
+- **Exhaustive `ActiveView` match in `ContentArea`** — explicit arms for Inbox, Snoozed, Done, and Settings prevent silent fallthrough when new views are added
+- 242 inboxly-ui tests (up from 225 at the M32 merge); seventeen new tests cover menu state invariants, undo generation counter, snooze date math, and empty-state defaults
+
+### Framework note
+
+M33 builds on top of M32's Iced 0.14 → Dioxus 0.7 desktop conversion. M32 replaced the rendering framework but deleted the Iced views and widgets; M33 restores those widgets as Dioxus components. The state machine, message handlers, feed data model, and theme tokens were preserved throughout M32 and remained the contract M33 builds against.
+
 ## [0.30.0] - 2026-03-14
 
 ### Added (M30)
