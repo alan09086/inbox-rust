@@ -79,7 +79,7 @@ where
         {
             let store_guard = db.lock().await;
             let session_arc = Arc::new(Mutex::new(session));
-            match offline_replay::replay_offline_queue(&session_arc, &*store_guard, &well_known).await {
+            match offline_replay::replay_offline_queue(&session_arc, &store_guard, &well_known).await {
                 Ok(count) => {
                     if count > 0 {
                         tracing::info!(account_id = %account_id, count, "replayed offline actions");
@@ -271,7 +271,7 @@ where
                 {
                     let store_guard = db.lock().await;
                     let session_arc = Arc::new(Mutex::new(session));
-                    match offline_replay::replay_offline_queue(&session_arc, &*store_guard, well_known).await {
+                    match offline_replay::replay_offline_queue(&session_arc, &store_guard, well_known).await {
                         Ok(count) => {
                             if count > 0 {
                                 tracing::info!(
