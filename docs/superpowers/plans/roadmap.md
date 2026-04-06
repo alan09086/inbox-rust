@@ -1,11 +1,14 @@
 # Inboxly — Implementation Roadmap
 
-> **30 milestones**, each with its own detailed implementation plan.
+> **42 milestones (M1–M42)**, each with its own detailed implementation plan.
 > Plans are written upfront before any implementation begins.
 
 **Specs:**
 - `docs/superpowers/specs/2026-03-14-inboxly-design.md` (v1 core)
 - `docs/superpowers/specs/2026-03-14-qol-menus-settings-design.md` (QoL: menus, settings, dropdowns)
+- `docs/superpowers/specs/2026-04-06-inboxly-v2-full-client-design.md` (v2 daily-driver client)
+
+**Numbering note:** The v2 design spec (`8e49fd9`) was published with milestones labelled M31–M40. After M31 shipped, the project took a two-milestone framework-conversion detour (Iced → Dioxus) that was not in any spec — the actual M32 and M33 in git history are that detour and the widget restoration that followed it. The v2 spec's M32 onwards is therefore renumbered as M34 onwards in this roadmap. The v2 spec content stays the source of truth for the **what**; this roadmap is the source of truth for the **when** and **where in git history**.
 
 ---
 
@@ -44,6 +47,19 @@
 | M28 | Account Switcher | `ui` | [M28 Plan](./2026-03-14-m28-account-switcher.md) |
 | M29 | Settings: General + Accounts + Data | `ui`, `core`, `store` | [M29 Plan](./2026-03-14-m29-settings-general-accounts.md) |
 | M30 | Settings: Bundles + Notifications + Shortcuts | `ui`, `store`, `bundler` | [M30 Plan](./2026-03-14-m30-settings-bundles-shortcuts.md) |
+| | **v2: Daily-driver client** (post-Dioxus, source spec: `2026-04-06-inboxly-v2-full-client-design.md`) | | |
+| M31 ✅ | Store Trait Integration + IMAP Action Execution | `store`, `imap`, `ui` | [M31 Plan](./2026-04-06-m31-store-traits-action-execution.md) |
+| M32 ✅ | Iced → Dioxus Framework Conversion (unplanned detour) | `ui` (whole shell) | _no plan file — direct conversion_ |
+| M33 ✅ | Inbox Feed Widgets on Dioxus | `ui` | [M33 Plan](./2026-04-06-m33-inbox-feed-widgets.md) |
+| M34 | Thread Detail View + HTML Email Rendering | `ui` | _v2 spec §M32 (adapted for Dioxus — no wry needed)_ |
+| M35 | SMTP Engine + Compose View on Dioxus | `imap`, `ui` | _v2 spec §M33 (compose view created from scratch)_ |
+| M36 | Reply + Reply All + Forward | `imap`, `ui` | _v2 spec §M34_ |
+| M37 | Full Attachment Support | `imap`, `store`, `ui` | _v2 spec §M35_ |
+| M38 | Advanced Search | `store`, `ui` | _v2 spec §M36_ |
+| M39 | End-to-End Bundling | `bundler`, `imap`, `ui` | _v2 spec §M37_ |
+| M40 | Snooze System (real wakeups) | `snooze`, `imap`, `ui` | _v2 spec §M38_ |
+| M41 | Smart Highlights & Extraction | `extract`, `store`, `ui` | _v2 spec §M39_ |
+| M42 | Integration Polish & First Run | `core`, `ui` | _v2 spec §M40_ |
 
 ## Dependency Graph
 
@@ -69,7 +85,25 @@ M26 → M27
        M28
        ↓
 M29 → M30
+       ↓
+M31 → M32 (framework detour) → M33 (widget restoration on Dioxus)
+                                           ↓
+                                          M34 → M35 → M36
+                                                       ↓
+                                                      M37
+                                                       ↓
+                                                      M38
+                                                       ↓
+                                                      M39
+                                                       ↓
+                                                      M40
+                                                       ↓
+                                                      M41
+                                                       ↓
+                                                      M42
 ```
+
+**M34 → M35 → M36 chain notes:** Reply/Reply All/Forward (M36) requires both the thread detail view (M34) — to know which thread the user is replying from — and the SMTP/compose plumbing (M35). Attachments (M37) build on M34's HTML rendering for inline previews.
 
 ## Key Checkpoints
 
@@ -81,6 +115,12 @@ M29 → M30
 - **After M25**: Full Inboxly v1
 - **After M27**: Contextual menus working (overflow + right-click)
 - **After M30**: Polished desktop client with full settings
+- **After M31**: Triage actions actually sync to the IMAP server
+- **After M33**: Inbox feed restored on Dioxus (post-framework-conversion baseline)
+- **After M34**: User can read full email content (thread detail view)
+- **After M36**: Full bidirectional email client — read AND write/reply
+- **After M40**: Snoozes actually wake up at the right time
+- **After M42**: Daily-driver release candidate
 
 ## Licence
 
