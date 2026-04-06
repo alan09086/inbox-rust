@@ -15,6 +15,7 @@ chrono.workspace = true
 uuid.workspace = true
 toml = "0.8"
 dirs = "6"
+regex = "1"
 
 [dev-dependencies]
 tempfile = "3"

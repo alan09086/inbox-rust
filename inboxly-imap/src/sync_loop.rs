@@ -10,23 +10,25 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use rusqlite::Connection;
 use tokio::sync::{Mutex, mpsc};
 use tokio_util::sync::CancellationToken;
+
+use inboxly_store::Store;
 
 use crate::channel::SyncEvent;
 use crate::error::ImapError;
 use crate::folders::WellKnownFolders;
 use crate::idle::{IdleEvent, IdleLoopConfig, IdleWakeup, convert_idle_response};
 use crate::incremental::incremental_sync_folder;
+use crate::offline_replay;
 
 /// Periodic sync interval for non-INBOX folders (5 minutes).
 const PERIODIC_SYNC_INTERVAL_SECS: u64 = 300;
 
 /// Configuration for a per-account sync loop.
 pub struct AccountSyncConfig {
-    /// SQLite connection (wrapped in Arc<Mutex> for async safety).
-    pub db: Arc<Mutex<Connection>>,
+    /// Store (wrapped in Arc<Mutex> for async safety).
+    pub db: Arc<Mutex<Store>>,
     /// Account identifier.
     pub account_id: String,
     /// Whether the server supports CONDSTORE.
@@ -72,6 +74,30 @@ where
     // Phase 1: Initial incremental catch-up for all folders
     {
         let mut session = session_factory().await?;
+
+        // Replay any queued offline actions before pulling new state.
+        {
+            let store_guard = db.lock().await;
+            let session_arc = Arc::new(Mutex::new(session));
+            match offline_replay::replay_offline_queue(&session_arc, &store_guard, &well_known).await {
+                Ok(count) => {
+                    if count > 0 {
+                        tracing::info!(account_id = %account_id, count, "replayed offline actions");
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        account_id = %account_id,
+                        error = %e,
+                        "offline replay failed (will retry next sync)"
+                    );
+                }
+            }
+            session = Arc::try_unwrap(session_arc)
+                .expect("single Arc owner after replay")
+                .into_inner();
+        }
+
         let conn = db.lock().await;
 
         let folder_names = resolve_folder_list(&well_known);
@@ -83,7 +109,7 @@ where
 
             match incremental_sync_folder(
                 &mut session,
-                &conn,
+                conn.connection(),
                 &account_id,
                 folder,
                 has_condstore,
@@ -170,7 +196,7 @@ where
 
 /// Run the IDLE-based sync phase.
 async fn run_idle_phase<S, F, Fut>(
-    db: Arc<Mutex<Connection>>,
+    db: Arc<Mutex<Store>>,
     account_id: &str,
     has_condstore: bool,
     well_known: &WellKnownFolders,
@@ -232,7 +258,7 @@ where
                     | IdleWakeup::TimeoutCatchup { folder, .. } => folder.as_str(),
                 };
 
-                // Quick incremental catch-up
+                // Quick incremental catch-up (with offline replay on reconnect).
                 let mut session = match session_factory().await {
                     Ok(s) => s,
                     Err(e) => {
@@ -241,9 +267,36 @@ where
                     }
                 };
 
-                let conn = db.lock().await;
+                // Replay queued offline actions before syncing new state.
+                {
+                    let store_guard = db.lock().await;
+                    let session_arc = Arc::new(Mutex::new(session));
+                    match offline_replay::replay_offline_queue(&session_arc, &store_guard, well_known).await {
+                        Ok(count) => {
+                            if count > 0 {
+                                tracing::info!(
+                                    account_id,
+                                    count,
+                                    "replayed offline actions on IDLE reconnect"
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                account_id,
+                                error = %e,
+                                "offline replay failed on IDLE reconnect (will retry)"
+                            );
+                        }
+                    }
+                    session = Arc::try_unwrap(session_arc)
+                        .expect("single Arc owner after replay")
+                        .into_inner();
+                }
+
+                let store_guard = db.lock().await;
                 if let Err(e) = incremental_sync_folder(
-                    &mut session, &conn, account_id, folder, has_condstore, event_tx,
+                    &mut session, store_guard.connection(), account_id, folder, has_condstore, event_tx,
                 ).await {
                     tracing::warn!(account_id, folder, error = %e, "post-IDLE catch-up failed");
                 }
@@ -259,7 +312,7 @@ where
                     }
                 };
 
-                let conn = db.lock().await;
+                let store_guard = db.lock().await;
                 for folder in &folder_names {
                     if *folder == "INBOX" {
                         continue; // Handled by IDLE
@@ -268,7 +321,7 @@ where
                         break;
                     }
                     if let Err(e) = incremental_sync_folder(
-                        &mut session, &conn, account_id, folder, has_condstore, event_tx,
+                        &mut session, store_guard.connection(), account_id, folder, has_condstore, event_tx,
                     ).await {
                         tracing::warn!(account_id, folder, error = %e, "periodic sync failed");
                     }
@@ -315,9 +368,6 @@ where
         if cancel.is_cancelled() {
             return Ok(());
         }
-
-        // TODO(M19): On reconnect, drain offline_queue via
-        // offline_replay::replay_offline_actions()
 
         // Create a new session for IDLE
         let mut session = match session_factory().await {
@@ -482,7 +532,7 @@ where
 
 /// Run the polling-based sync phase (for servers without IDLE).
 async fn run_poll_phase<S, F, Fut>(
-    db: Arc<Mutex<Connection>>,
+    db: Arc<Mutex<Store>>,
     account_id: &str,
     has_condstore: bool,
     well_known: &WellKnownFolders,
@@ -514,13 +564,13 @@ where
                     }
                 };
 
-                let conn = db.lock().await;
+                let store_guard = db.lock().await;
                 for folder in &folder_names {
                     if cancel.is_cancelled() {
                         break;
                     }
                     if let Err(e) = incremental_sync_folder(
-                        &mut session, &conn, account_id, folder, has_condstore, event_tx,
+                        &mut session, store_guard.connection(), account_id, folder, has_condstore, event_tx,
                     ).await {
                         tracing::warn!(account_id, folder, error = %e, "poll sync failed");
                     }
@@ -575,6 +625,7 @@ mod tests {
             drafts: Some("[Gmail]/Drafts".to_string()),
             trash: Some("[Gmail]/Trash".to_string()),
             spam: Some("[Gmail]/Spam".to_string()),
+            archive: None,
         };
         let folders = resolve_folder_list(&wk);
         assert_eq!(folders.len(), 5);
@@ -590,6 +641,7 @@ mod tests {
             drafts: None,
             trash: None,
             spam: None,
+            archive: None,
         };
         let folders = resolve_folder_list(&wk);
         assert_eq!(folders.len(), 2);

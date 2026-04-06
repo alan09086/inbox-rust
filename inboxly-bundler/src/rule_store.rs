@@ -1,137 +1,13 @@
 //! CRUD operations for user-defined bundle rules.
 //!
-//! Defines [`RuleStore`] trait and supporting types for persisting
-//! [`BundleRule`]s.  The trait is implemented by `inboxly-store::Store`
-//! for production use and by [`mock::MockRuleStore`] for testing.
+//! The type definitions and [`RuleStore`] trait have moved to
+//! [`inboxly_core::store_traits`].  This module re-exports everything for
+//! backwards compatibility.
 
-use crate::user_rules::{BundleRule, RuleId, UserRuleField, UserRuleOp};
-use uuid::Uuid;
-
-/// Error type for rule store operations.
-#[derive(Debug, thiserror::Error)]
-pub enum RuleStoreError {
-    /// The requested rule was not found.
-    #[error("rule not found: {0}")]
-    NotFound(RuleId),
-
-    /// The rule field string could not be parsed.
-    #[error("invalid rule field: {0}")]
-    InvalidField(String),
-
-    /// The rule operator string could not be parsed.
-    #[error("invalid rule operator: {0}")]
-    InvalidOperator(String),
-
-    /// The rule contains an invalid regex pattern.
-    #[error("invalid regex pattern: {0}")]
-    InvalidRegex(String),
-
-    /// An error from the underlying database.
-    #[error("database error: {0}")]
-    Database(String),
-}
-
-/// Parameters for creating a new bundle rule.
-pub struct CreateRuleParams {
-    /// Which bundle this rule assigns emails to.
-    pub bundle_id: Uuid,
-    /// Which email field to examine.
-    pub field: UserRuleField,
-    /// How to compare field value against the rule's value.
-    pub operator: UserRuleOp,
-    /// The value to match against.
-    pub value: String,
-    /// Priority (higher = evaluated first).
-    pub priority: i64,
-}
-
-/// Parameters for updating an existing rule.  All fields are optional --
-/// only `Some` values are applied.
-pub struct UpdateRuleParams {
-    /// New field selector.
-    pub field: Option<UserRuleField>,
-    /// New operator.
-    pub operator: Option<UserRuleOp>,
-    /// New match value.
-    pub value: Option<String>,
-    /// New priority.
-    pub priority: Option<i64>,
-    /// New target bundle.
-    pub bundle_id: Option<Uuid>,
-}
-
-/// Validate rule parameters before persisting.
-///
-/// # Errors
-///
-/// Returns [`RuleStoreError::InvalidRegex`] if the operator is `Matches`
-/// and the value is not a valid regex pattern.
-pub fn validate_rule(
-    _field: &UserRuleField,
-    operator: &UserRuleOp,
-    value: &str,
-) -> Result<(), RuleStoreError> {
-    if *operator == UserRuleOp::Matches {
-        regex::Regex::new(value).map_err(|e| RuleStoreError::InvalidRegex(e.to_string()))?;
-    }
-    Ok(())
-}
-
-/// Trait for bundle rule persistence.
-///
-/// Implemented by `inboxly-store::Store` for production use.
-/// A mock implementation is used in tests.
-pub trait RuleStore {
-    /// Create a new rule.  Returns the created rule with generated ID.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`RuleStoreError::InvalidRegex`] if `operator` is `Matches`
-    /// and `value` is not a valid regex.  Returns [`RuleStoreError::Database`]
-    /// on database failure.
-    fn create_rule(&self, params: CreateRuleParams) -> Result<BundleRule, RuleStoreError>;
-
-    /// Get a rule by ID.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`RuleStoreError::NotFound`] if the rule does not exist.
-    fn get_rule(&self, id: RuleId) -> Result<BundleRule, RuleStoreError>;
-
-    /// List all rules, ordered by priority descending (highest first).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`RuleStoreError::Database`] on database failure.
-    fn list_rules(&self) -> Result<Vec<BundleRule>, RuleStoreError>;
-
-    /// List rules for a specific bundle, ordered by priority descending.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`RuleStoreError::Database`] on database failure.
-    fn list_rules_for_bundle(&self, bundle_id: Uuid) -> Result<Vec<BundleRule>, RuleStoreError>;
-
-    /// Update a rule.  Only fields that are `Some` in `params` are changed.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`RuleStoreError::NotFound`] if the rule does not exist.
-    /// Returns [`RuleStoreError::InvalidRegex`] if updating operator to
-    /// `Matches` with an invalid regex value.
-    fn update_rule(
-        &self,
-        id: RuleId,
-        params: UpdateRuleParams,
-    ) -> Result<BundleRule, RuleStoreError>;
-
-    /// Delete a rule by ID.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`RuleStoreError::NotFound`] if the rule does not exist.
-    fn delete_rule(&self, id: RuleId) -> Result<(), RuleStoreError>;
-}
+pub use inboxly_core::store_traits::{
+    BundleRule, CreateRuleParams, RuleId, RuleStore, RuleStoreError, UpdateRuleParams,
+    UserRuleField, UserRuleOp, validate_rule,
+};
 
 // ---------------------------------------------------------------------------
 // In-memory mock for tests
@@ -141,6 +17,7 @@ pub trait RuleStore {
 pub(crate) mod mock {
     use super::*;
     use std::sync::Mutex;
+    use uuid::Uuid;
 
     /// In-memory mock implementation of [`RuleStore`] for unit tests.
     pub struct MockRuleStore {
@@ -250,6 +127,7 @@ pub(crate) mod mock {
 mod tests {
     use super::*;
     use mock::MockRuleStore;
+    use uuid::Uuid;
 
     #[test]
     fn create_and_get_rule() {

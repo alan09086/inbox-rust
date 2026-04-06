@@ -16,7 +16,7 @@ pub struct BundleRow {
 }
 
 impl Store {
-    pub fn insert_bundle(&self, bundle: &BundleRow) -> Result<()> {
+    pub fn insert_bundle_row(&self, bundle: &BundleRow) -> Result<()> {
         self.conn().execute(
             "INSERT INTO bundles (id, category, name, color, badge_color, visibility, throttle, sort_order)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
@@ -34,7 +34,7 @@ impl Store {
         Ok(())
     }
 
-    pub fn get_bundle(&self, id: &str) -> Result<BundleRow> {
+    pub fn get_bundle_row(&self, id: &str) -> Result<BundleRow> {
         self.conn()
             .query_row(
                 "SELECT id, category, name, color, badge_color, visibility, throttle, sort_order
@@ -51,7 +51,7 @@ impl Store {
     }
 
     /// Get all bundles ordered by sort_order.
-    pub fn list_bundles(&self) -> Result<Vec<BundleRow>> {
+    pub fn list_bundle_rows(&self) -> Result<Vec<BundleRow>> {
         let mut stmt = self.conn().prepare(
             "SELECT id, category, name, color, badge_color, visibility, throttle, sort_order
              FROM bundles ORDER BY sort_order ASC",
@@ -77,7 +77,7 @@ impl Store {
         }
     }
 
-    pub fn update_bundle(&self, bundle: &BundleRow) -> Result<()> {
+    pub fn update_bundle_row(&self, bundle: &BundleRow) -> Result<()> {
         let changed = self.conn().execute(
             "UPDATE bundles SET category = ?2, name = ?3, color = ?4, badge_color = ?5,
              visibility = ?6, throttle = ?7, sort_order = ?8
@@ -99,7 +99,7 @@ impl Store {
         Ok(())
     }
 
-    pub fn delete_bundle(&self, id: &str) -> Result<()> {
+    pub fn delete_bundle_row(&self, id: &str) -> Result<()> {
         let changed = self
             .conn()
             .execute("DELETE FROM bundles WHERE id = ?1", params![id])?;

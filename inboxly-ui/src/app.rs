@@ -4,6 +4,7 @@ use iced::widget::{column, container, row, text};
 use iced::{Element, Length, Task, Theme};
 
 use inboxly_core::config::{AccountConfig, AppConfig, AuthMethod, Paths, ThemePreference};
+use inboxly_core::offline::OfflineAction;
 use inboxly_store::{BundleRow, Store};
 
 use crate::feed::{self, FeedSection};
@@ -590,6 +591,14 @@ impl Inboxly {
                         tracing::warn!("failed to mark done: {e}");
                     }
                 }
+                // Enqueue IMAP archive actions for all emails in thread.
+                self.enqueue_thread_actions(&thread_id, |account_id, folder, imap_uid| {
+                    OfflineAction::MarkDone {
+                        account_id: account_id.to_string(),
+                        folder: folder.to_string(),
+                        imap_uid,
+                    }
+                });
                 self.undo_state.push(UndoAction::MarkDone { thread_id });
                 self.reload_feed();
             }
@@ -761,7 +770,7 @@ impl Inboxly {
                         .unwrap_or_else(|| vec!["all".to_string()]);
 
                     // Bundle settings
-                    match store.list_bundles() {
+                    match store.list_bundle_rows() {
                         Ok(bundles) => self.settings_bundles = bundles,
                         Err(e) => tracing::warn!("failed to load bundles for settings: {e}"),
                     }
@@ -1111,7 +1120,7 @@ impl Inboxly {
                         "visible".to_owned()
                     };
                     if let Some(ref store) = self.store
-                        && let Err(e) = store.update_bundle(bundle)
+                        && let Err(e) = store.update_bundle_row(bundle)
                     {
                         tracing::warn!("failed to persist bundle visibility: {e}");
                     }
@@ -1124,7 +1133,7 @@ impl Inboxly {
                 if let Some(bundle) = self.settings_bundles.iter_mut().find(|b| b.id == bundle_id) {
                     bundle.throttle = throttle_json;
                     if let Some(ref store) = self.store
-                        && let Err(e) = store.update_bundle(bundle)
+                        && let Err(e) = store.update_bundle_row(bundle)
                     {
                         tracing::warn!("failed to persist bundle throttle: {e}");
                     }
@@ -1136,7 +1145,7 @@ impl Inboxly {
                     if let Some(bundle) = self.settings_bundles.iter_mut().find(|b| &b.id == id) {
                         bundle.sort_order = order as i64;
                         if let Some(ref store) = self.store
-                            && let Err(e) = store.update_bundle(bundle)
+                            && let Err(e) = store.update_bundle_row(bundle)
                         {
                             tracing::warn!("failed to persist bundle reorder: {e}");
                         }
@@ -1154,11 +1163,68 @@ impl Inboxly {
                 destination,
             } => {
                 tracing::info!("move thread {thread_id} to {destination:?}");
+                // Enqueue IMAP move actions for all emails in thread.
+                match destination {
+                    MoveDestination::Trash => {
+                        self.enqueue_thread_actions(
+                            &thread_id,
+                            |account_id, folder, imap_uid| OfflineAction::MoveToTrash {
+                                account_id: account_id.to_string(),
+                                folder: folder.to_string(),
+                                imap_uid,
+                            },
+                        );
+                    }
+                    MoveDestination::Inbox => {
+                        let to = "INBOX".to_string();
+                        self.enqueue_thread_actions(
+                            &thread_id,
+                            |account_id, folder, imap_uid| OfflineAction::MoveToFolder {
+                                account_id: account_id.to_string(),
+                                from_folder: folder.to_string(),
+                                to_folder: to.clone(),
+                                imap_uid,
+                            },
+                        );
+                    }
+                    MoveDestination::Spam => {
+                        let to = "Spam".to_string();
+                        self.enqueue_thread_actions(
+                            &thread_id,
+                            |account_id, folder, imap_uid| OfflineAction::MoveToFolder {
+                                account_id: account_id.to_string(),
+                                from_folder: folder.to_string(),
+                                to_folder: to.clone(),
+                                imap_uid,
+                            },
+                        );
+                    }
+                }
                 self.overflow_menu_thread = None;
                 self.context_menu_thread = None;
             }
             Message::MarkReadState { thread_id, read } => {
                 tracing::info!("mark thread {thread_id} read={read}");
+                // Enqueue IMAP read/unread actions for all emails in thread.
+                if read {
+                    self.enqueue_thread_actions(
+                        &thread_id,
+                        |account_id, folder, imap_uid| OfflineAction::MarkRead {
+                            account_id: account_id.to_string(),
+                            folder: folder.to_string(),
+                            imap_uid,
+                        },
+                    );
+                } else {
+                    self.enqueue_thread_actions(
+                        &thread_id,
+                        |account_id, folder, imap_uid| OfflineAction::MarkUnread {
+                            account_id: account_id.to_string(),
+                            folder: folder.to_string(),
+                            imap_uid,
+                        },
+                    );
+                }
                 self.overflow_menu_thread = None;
                 self.context_menu_thread = None;
             }
@@ -1205,6 +1271,17 @@ impl Inboxly {
             }
             Message::ReportSpam(thread_id) => {
                 tracing::info!("report spam: thread {thread_id}");
+                // Enqueue IMAP move-to-spam actions for all emails in thread.
+                let spam_folder = "Spam".to_string();
+                self.enqueue_thread_actions(
+                    &thread_id,
+                    |account_id, folder, imap_uid| OfflineAction::MoveToFolder {
+                        account_id: account_id.to_string(),
+                        from_folder: folder.to_string(),
+                        to_folder: spam_folder.clone(),
+                        imap_uid,
+                    },
+                );
                 self.overflow_menu_thread = None;
                 self.context_menu_thread = None;
             }
@@ -1320,6 +1397,50 @@ impl Inboxly {
                     self.feed_sections = Vec::new();
                 }
             }
+        }
+    }
+
+    /// Enqueue offline actions for all emails in a thread.
+    ///
+    /// Looks up every email belonging to `thread_id` and calls `make_action`
+    /// for each one, serialising the resulting [`OfflineAction`] into the
+    /// SQLite offline queue.  The entire batch is wrapped in a transaction
+    /// for atomicity.
+    fn enqueue_thread_actions(
+        &self,
+        thread_id: &str,
+        make_action: impl Fn(&str, &str, u32) -> OfflineAction,
+    ) {
+        let Some(ref store) = self.store else { return };
+        let emails = match store.get_emails_by_thread(thread_id) {
+            Ok(emails) => emails,
+            Err(e) => {
+                tracing::warn!("failed to get emails for thread {thread_id}: {e}");
+                return;
+            }
+        };
+        if emails.is_empty() {
+            tracing::warn!("no emails found for thread {thread_id}");
+            return;
+        }
+        // Wrap in a transaction for atomicity.
+        let conn = store.connection();
+        if let Err(e) = conn.execute_batch("BEGIN") {
+            tracing::warn!("failed to begin transaction for offline queue: {e}");
+            return;
+        }
+        for email in &emails {
+            let uid = email.imap_uid as u32;
+            let action = make_action(&email.account_id, &email.imap_folder, uid);
+            let payload = serde_json::to_string(&action).expect("serialize OfflineAction");
+            if let Err(e) = store.enqueue_offline_action(action.variant_name(), &payload) {
+                tracing::warn!("failed to enqueue offline action: {e}");
+                let _ = conn.execute_batch("ROLLBACK");
+                return;
+            }
+        }
+        if let Err(e) = conn.execute_batch("COMMIT") {
+            tracing::warn!("failed to commit offline queue transaction: {e}");
         }
     }
 }

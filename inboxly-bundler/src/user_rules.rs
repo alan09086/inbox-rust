@@ -5,199 +5,18 @@
 //! [`crate::rules_toml`]. User rules are persisted in SQLite via
 //! [`crate::rule_store::RuleStore`] and take highest precedence in the
 //! evaluation pipeline.
-
-use std::fmt;
-use std::str::FromStr;
+//!
+//! The core data types ([`BundleRule`], [`RuleId`], [`UserRuleField`],
+//! [`UserRuleOp`], [`RuleMatchable`]) have moved to
+//! [`inboxly_core::store_traits`] and are re-exported here for
+//! backwards compatibility.
 
 use regex::Regex;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
-// ---------------------------------------------------------------------------
-// RuleField
-// ---------------------------------------------------------------------------
-
-/// Which part of an email a user rule examines.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum UserRuleField {
-    /// Match against the From address (e.g., "alice@example.com").
-    From,
-    /// Match against any To address.
-    To,
-    /// Match against the Subject line.
-    Subject,
-    /// Match against a specific header by name (e.g., "X-Mailer").
-    Header(String),
-    /// Match against the plaintext body.  Note: body may not be available
-    /// during initial sync Phase 1 -- rule will be re-evaluated in Phase 2.
-    Body,
-}
-
-impl fmt::Display for UserRuleField {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::From => write!(f, "from"),
-            Self::To => write!(f, "to"),
-            Self::Subject => write!(f, "subject"),
-            Self::Header(name) => write!(f, "header:{name}"),
-            Self::Body => write!(f, "body"),
-        }
-    }
-}
-
-impl FromStr for UserRuleField {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "from" => Ok(Self::From),
-            "to" => Ok(Self::To),
-            "subject" => Ok(Self::Subject),
-            "body" => Ok(Self::Body),
-            other if other.starts_with("header:") => {
-                let header_name = other.get(7..).unwrap_or_default();
-                Ok(Self::Header(header_name.to_owned()))
-            }
-            _ => Err(format!("unknown user rule field: {s}")),
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// UserRuleOp
-// ---------------------------------------------------------------------------
-
-/// How to compare the rule's value against the email field.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum UserRuleOp {
-    /// Field contains the value as a case-insensitive substring.
-    Contains,
-    /// Field equals the value exactly (case-insensitive).
-    Equals,
-    /// Field matches the value as a regular expression.
-    Matches,
-    /// From-address domain equals the value (e.g., "example.com").
-    /// Only meaningful with [`UserRuleField::From`].
-    Domain,
-}
-
-impl fmt::Display for UserRuleOp {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Contains => write!(f, "contains"),
-            Self::Equals => write!(f, "equals"),
-            Self::Matches => write!(f, "matches"),
-            Self::Domain => write!(f, "domain"),
-        }
-    }
-}
-
-impl FromStr for UserRuleOp {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "contains" => Ok(Self::Contains),
-            "equals" => Ok(Self::Equals),
-            "matches" => Ok(Self::Matches),
-            "domain" => Ok(Self::Domain),
-            _ => Err(format!("unknown user rule operator: {s}")),
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// RuleMatchable trait
-// ---------------------------------------------------------------------------
-
-/// Trait providing access to email fields for rule matching.
-///
-/// Implemented by core types (via bridge functions) and by test doubles
-/// for unit testing the rule engine in isolation.
-pub trait RuleMatchable {
-    /// The sender's From address (e.g., "alice@example.com").
-    fn sender_address(&self) -> &str;
-    /// All To addresses.
-    fn to_addresses(&self) -> &[String];
-    /// The Subject line.
-    fn subject(&self) -> &str;
-    /// Get a specific header value by name.  Returns `None` if not present.
-    fn header(&self, name: &str) -> Option<&str>;
-    /// The plaintext body.  Returns `None` if body not yet fetched (Phase 1).
-    fn body_text(&self) -> Option<&str>;
-}
-
-// ---------------------------------------------------------------------------
-// BundleRule
-// ---------------------------------------------------------------------------
-
-/// A unique identifier for a bundle rule (UUID v4 string in the database).
-pub type RuleId = Uuid;
-
-/// A user-defined rule that assigns emails to a specific bundle.
-///
-/// Rules are evaluated in priority order (highest priority first).
-/// The first matching rule wins.  User rules take precedence over
-/// sender learning and header heuristics.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BundleRule {
-    /// Unique identifier for this rule.
-    pub id: RuleId,
-    /// Which bundle this rule assigns emails to.
-    pub bundle_id: Uuid,
-    /// Which email field to examine.
-    pub field: UserRuleField,
-    /// How to compare field value against the rule's value.
-    pub operator: UserRuleOp,
-    /// The value to match against (substring, exact, regex pattern, or domain).
-    pub value: String,
-    /// Higher priority rules are evaluated first.  Ties broken by insertion order.
-    pub priority: i64,
-}
-
-impl BundleRule {
-    /// Test whether this rule matches the given email.
-    ///
-    /// Returns `true` if the rule's field/operator/value match the email.
-    /// Returns `false` if the required field is not available (e.g., body
-    /// during Phase 1 sync, or a header that doesn't exist).
-    ///
-    /// Note: this recompiles regex on every call for `Matches` rules.
-    /// External callers should use [`UserCompiledRule::matches()`] instead,
-    /// which caches the compiled regex.
-    pub(crate) fn matches(&self, email: &dyn RuleMatchable) -> bool {
-        match &self.field {
-            UserRuleField::From => self.test_value(email.sender_address()),
-            UserRuleField::To => email
-                .to_addresses()
-                .iter()
-                .any(|addr| self.test_value(addr)),
-            UserRuleField::Subject => self.test_value(email.subject()),
-            UserRuleField::Header(name) => email.header(name).is_some_and(|v| self.test_value(v)),
-            UserRuleField::Body => email.body_text().is_some_and(|v| self.test_value(v)),
-        }
-    }
-
-    /// Apply the operator to test a single string value.
-    fn test_value(&self, field_value: &str) -> bool {
-        match &self.operator {
-            UserRuleOp::Contains => field_value
-                .to_lowercase()
-                .contains(&self.value.to_lowercase()),
-            UserRuleOp::Equals => field_value.eq_ignore_ascii_case(&self.value),
-            UserRuleOp::Matches => {
-                // Compile regex on each call.  For hot paths, callers should
-                // pre-compile via UserCompiledRule.
-                Regex::new(&self.value).is_ok_and(|re| re.is_match(field_value))
-            }
-            UserRuleOp::Domain => {
-                // Extract domain from email address: "user@example.com" -> "example.com"
-                let domain = field_value.rsplit_once('@').map_or(field_value, |(_, d)| d);
-                domain.eq_ignore_ascii_case(&self.value)
-            }
-        }
-    }
-}
+// Re-export the core types for backwards compatibility.
+pub use inboxly_core::store_traits::{
+    BundleRule, RuleId, RuleMatchable, UserRuleField, UserRuleOp,
+};
 
 // ---------------------------------------------------------------------------
 // UserCompiledRule -- pre-compiled regex cache
@@ -263,6 +82,7 @@ mod tests {
 
     #[test]
     fn rule_field_roundtrip() {
+        use std::str::FromStr;
         let cases = [
             (UserRuleField::From, "from"),
             (UserRuleField::To, "to"),
@@ -281,6 +101,7 @@ mod tests {
 
     #[test]
     fn rule_op_roundtrip() {
+        use std::str::FromStr;
         let cases = [
             (UserRuleOp::Contains, "contains"),
             (UserRuleOp::Equals, "equals"),
@@ -295,11 +116,13 @@ mod tests {
 
     #[test]
     fn unknown_field_returns_error() {
+        use std::str::FromStr;
         assert!(UserRuleField::from_str("unknown").is_err());
     }
 
     #[test]
     fn unknown_op_returns_error() {
+        use std::str::FromStr;
         assert!(UserRuleOp::from_str("unknown").is_err());
     }
 

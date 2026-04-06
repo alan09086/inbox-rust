@@ -260,15 +260,15 @@ fn test_bundle_crud() {
         throttle: "Immediate".into(),
         sort_order: 0,
     };
-    store.insert_bundle(&bundle).unwrap();
+    store.insert_bundle_row(&bundle).unwrap();
 
-    let fetched = store.get_bundle("bundle-001").unwrap();
+    let fetched = store.get_bundle_row("bundle-001").unwrap();
     assert_eq!(fetched.category, "Social");
 
     let by_cat = store.get_bundle_by_category("Social").unwrap();
     assert!(by_cat.is_some());
 
-    let all = store.list_bundles().unwrap();
+    let all = store.list_bundle_rows().unwrap();
     assert_eq!(all.len(), 1);
 }
 
@@ -287,7 +287,7 @@ fn test_bundle_rule_crud() {
         throttle: "Immediate".into(),
         sort_order: 0,
     };
-    store.insert_bundle(&bundle).unwrap();
+    store.insert_bundle_row(&bundle).unwrap();
 
     let rule = BundleRuleRow {
         id: "rule-001".into(),

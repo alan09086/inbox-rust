@@ -11,6 +11,7 @@ pub mod highlight;
 pub mod id;
 pub mod inbox;
 pub mod offline;
+pub mod store_traits;
 pub mod thread;
 pub mod throttle;
 pub mod traits;
