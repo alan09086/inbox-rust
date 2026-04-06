@@ -6,6 +6,7 @@ pub mod content_area;
 pub mod context_menu;
 pub mod email_row;
 pub mod inbox_feed;
+pub mod menu_actions;
 pub mod nav_drawer;
 pub mod overflow_menu;
 pub mod section_header;

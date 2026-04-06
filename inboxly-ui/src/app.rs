@@ -1822,12 +1822,14 @@ mod tests {
         let mut app = Inboxly::default();
         let _ = app.update(Message::OpenContextMenu {
             thread_id: "t1".into(),
-            sender_address: "a@b.com".into(),
+            sender_address: "menu@sender.com".into(),
             position: Point::ORIGIN,
         });
+        // Verify state captured the sender correctly BEFORE BlockSender fires.
+        assert_eq!(app.menu_thread_sender, Some("menu@sender.com".into()));
         let _ = app.update(Message::BlockSender {
             thread_id: "t1".into(),
-            sender_address: "a@b.com".into(),
+            sender_address: "menu@sender.com".into(),
         });
         assert!(app.context_menu_thread.is_none());
         assert!(app.menu_thread_sender.is_none());
