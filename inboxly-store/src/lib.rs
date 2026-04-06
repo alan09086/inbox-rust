@@ -6,6 +6,7 @@
 mod error;
 mod migrations;
 mod store;
+mod trait_impls;
 
 pub mod maildir_store;
 
