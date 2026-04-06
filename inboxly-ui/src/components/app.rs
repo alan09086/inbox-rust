@@ -63,9 +63,6 @@ pub fn App() -> Element {
 
         if active_view != ActiveView::Settings {
             SpeedDialFab {}
-        }
-
-        if active_view != ActiveView::Settings {
             SnoozePicker {}
         }
     }

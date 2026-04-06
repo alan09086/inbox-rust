@@ -14,6 +14,7 @@ pub fn SpeedDialFab() -> Element {
     rsx! {
         button {
             class: "fab",
+            aria_label: "Compose new email",
             // No app_state needed — onclick is currently a no-op.
             // Eventually this will dispatch a Compose action.
             onclick: move |evt: Event<MouseData>| {

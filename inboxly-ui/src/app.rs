@@ -705,6 +705,7 @@ impl Inboxly {
                     }
                 }
                 self.reload_feed();
+                self.snooze_picker_thread = None;
             }
             Message::OpenOverflowMenu {
                 thread_id,
@@ -2391,11 +2392,6 @@ mod tests {
 
     #[test]
     fn snooze_thread_closes_picker() {
-        // BUG (pre-existing): SnoozeThread handler does not call
-        // `self.snooze_picker_thread = None`, so the picker stays open
-        // after dispatching a snooze. The assertion below documents the
-        // actual (broken) behaviour. Fix in a follow-up milestone by adding
-        // `self.snooze_picker_thread = None;` to the SnoozeThread branch.
         let mut app = Inboxly::default();
         let _ = app.update(Message::OpenSnoozePicker {
             thread_id: "t1".into(),
@@ -2406,13 +2402,7 @@ mod tests {
             thread_id: "t1".into(),
             until: chrono::Utc::now() + chrono::Duration::hours(1),
         });
-        // BUG: should be `assert!(app.snooze_picker_thread.is_none())`.
-        // Once the handler is fixed this assertion must be flipped.
-        assert_eq!(
-            app.snooze_picker_thread,
-            Some("t1".into()),
-            "BUG: SnoozeThread should close the picker but does not"
-        );
+        assert!(app.snooze_picker_thread.is_none(), "SnoozeThread should close the picker");
     }
 
     #[test]

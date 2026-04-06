@@ -178,7 +178,23 @@ pub fn snooze_tomorrow(now: DateTime<Local>, presets: &SnoozePresets) -> DateTim
 pub fn snooze_this_weekend(now: DateTime<Local>, presets: &SnoozePresets) -> DateTime<Utc> {
     let target_weekday = weekday_from_preset(presets.weekend_day);
     let today_weekday = now.weekday();
-    let days_until = days_until_next(today_weekday, target_weekday);
+    let raw_days_until = days_until_next(today_weekday, target_weekday);
+
+    // If today IS the weekend day, check whether morning_hour has already passed.
+    // If it has, push to next week's occurrence instead of returning a past timestamp.
+    let days_until = if raw_days_until == 0 {
+        let morning_today = now
+            .date_naive()
+            .and_hms_opt(presets.morning_hour as u32, 0, 0)
+            .and_then(|t| Local.from_local_datetime(&t).single());
+        match morning_today {
+            Some(t) if t > now => 0, // morning still ahead today
+            _ => 7,                  // already past, or parse failure — push forward
+        }
+    } else {
+        raw_days_until
+    };
+
     let target_date = now.date_naive() + Duration::days(days_until as i64);
     let target = target_date
         .and_hms_opt(presets.morning_hour as u32, 0, 0)
@@ -294,15 +310,21 @@ mod tests {
     }
 
     #[test]
-    fn this_weekend_from_saturday_is_same_day() {
-        let now = local_at(2026, 4, 11, 10, 0); // Saturday
+    fn this_weekend_from_saturday_morning_is_same_day() {
+        // Saturday 06:00 — morning_hour (08:00) still ahead, snooze to today 08:00.
+        let now = local_at(2026, 4, 11, 6, 0); // Saturday
         let result = snooze_this_weekend(now, &fixed_presets());
-        // days_until_next(Sat, Sat) = 0, so target_date = today
         let expected = local_at(2026, 4, 11, 8, 0).with_timezone(&Utc);
         assert_eq!(result, expected);
-        // NOTE: this may be in the past (10:00 > 8:00). The handler should
-        // handle snooze-to-the-past as a no-op or immediate-unsnooze, but
-        // that's out of scope for this component.
+    }
+
+    #[test]
+    fn this_weekend_from_saturday_afternoon_pushes_to_next_weekend() {
+        // Saturday 14:00 — morning_hour (08:00) already passed, push to next Saturday.
+        let now = local_at(2026, 4, 11, 14, 0); // Saturday
+        let result = snooze_this_weekend(now, &fixed_presets());
+        let expected = local_at(2026, 4, 18, 8, 0).with_timezone(&Utc); // next Saturday
+        assert_eq!(result, expected);
     }
 
     #[test]
