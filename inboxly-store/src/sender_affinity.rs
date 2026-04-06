@@ -73,6 +73,27 @@ impl Store {
         Ok(())
     }
 
+    /// List all sender affinities.
+    pub fn list_all_sender_affinities(&self) -> Result<Vec<SenderAffinityRow>> {
+        let mut stmt = self.conn().prepare(
+            "SELECT sender_domain, sender_address, bundle_category, confidence, learned_at
+             FROM sender_affinity",
+        )?;
+        let rows = stmt
+            .query_map([], Self::row_to_sender_affinity)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Delete all affinities for a sender address (regardless of bundle_category).
+    pub fn delete_sender_affinity_by_address(&self, sender_address: &str) -> Result<()> {
+        self.conn().execute(
+            "DELETE FROM sender_affinity WHERE sender_address = ?1",
+            params![sender_address],
+        )?;
+        Ok(())
+    }
+
     fn row_to_sender_affinity(row: &rusqlite::Row<'_>) -> rusqlite::Result<SenderAffinityRow> {
         Ok(SenderAffinityRow {
             sender_domain: row.get(0)?,
