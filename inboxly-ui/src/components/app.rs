@@ -5,10 +5,14 @@ use dioxus::prelude::*;
 use crate::app::Inboxly;
 use crate::components::content_area::ContentArea;
 use crate::components::nav_drawer::NavDrawer;
+use crate::components::snooze_picker::SnoozePicker;
+use crate::components::speed_dial_fab::SpeedDialFab;
 use crate::components::toolbar::Toolbar;
+use crate::components::undo_snackbar::UndoSnackbar;
 use crate::theme::{ActiveView, ThemeConfig};
 
-/// Window title — updates reactively based on active view.
+/// Window title -- updates reactively based on active view.
+#[allow(dead_code)]
 fn window_title(view: ActiveView) -> String {
     format!("Inboxly \u{2014} {}", view.title())
 }
@@ -53,6 +57,13 @@ pub fn App() -> Element {
 
                 ContentArea {}
             }
+        }
+
+        UndoSnackbar {}
+
+        if active_view != ActiveView::Settings {
+            SpeedDialFab {}
+            SnoozePicker {}
         }
     }
 }

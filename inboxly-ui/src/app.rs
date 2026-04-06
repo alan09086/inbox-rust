@@ -1,5 +1,7 @@
 //! Core application state machine -- no framework dependencies.
 
+use std::collections::HashSet;
+
 use inboxly_core::config::{AccountConfig, AppConfig, AuthMethod, Paths, ThemePreference};
 use inboxly_core::offline::OfflineAction;
 use inboxly_store::{BundleRow, Store};
@@ -107,10 +109,15 @@ pub struct Inboxly {
     pub undo_state: UndoState,
     /// Thread ID whose overflow (three-dot) menu is currently open.
     pub overflow_menu_thread: Option<String>,
+    /// Cursor position where the overflow menu was triggered (popup anchor).
+    pub overflow_menu_position: Point,
     /// Thread ID whose right-click context menu is currently open.
     pub context_menu_thread: Option<String>,
     /// Cursor position where the context menu was triggered.
     pub context_menu_position: Point,
+    /// Sender address of the thread whose menu is open (for BlockSender, CreateRuleFromSender).
+    /// Shared between overflow and context menus — they are mutually exclusive.
+    pub menu_thread_sender: Option<String>,
 
     // -- Settings state --
     /// Active settings tab (only relevant when active_view == Settings).
@@ -169,6 +176,14 @@ pub struct Inboxly {
     pub settings_bundles: Vec<BundleRow>,
     /// Bundle whose throttle popup is currently open.
     pub throttle_popup_bundle_id: Option<String>,
+
+    // -- Feed interaction state --
+    /// Set of bundle IDs that are currently expanded in the inbox feed.
+    pub expanded_bundles: HashSet<String>,
+    /// Thread ID whose snooze date-picker popup is currently open.
+    pub snooze_picker_thread: Option<String>,
+    /// Cursor position where the snooze picker was triggered (popup anchor).
+    pub snooze_picker_position: Point,
 }
 
 /// IMAP folder destinations for the "Move to..." action.
@@ -213,12 +228,17 @@ pub enum Message {
         until: chrono::DateTime<chrono::Utc>,
     },
     /// Open the overflow (three-dot) menu for a specific thread.
-    OpenOverflowMenu(String),
+    OpenOverflowMenu {
+        thread_id: String,
+        sender_address: String,
+        position: Point,
+    },
     /// Close the overflow menu.
     CloseOverflowMenu,
     /// Open the right-click context menu for a thread at a cursor position.
     OpenContextMenu {
         thread_id: String,
+        sender_address: String,
         position: Point,
     },
     /// Close the right-click context menu.
@@ -360,6 +380,17 @@ pub enum Message {
     },
     /// Report thread as spam.
     ReportSpam(String),
+
+    // -- Feed interaction --
+    /// Toggle the expanded/collapsed state of a bundle row in the inbox feed.
+    ToggleBundleExpand(String),
+    /// Open the snooze date-picker for a thread at a cursor position.
+    OpenSnoozePicker {
+        thread_id: String,
+        position: Point,
+    },
+    /// Close the snooze date-picker popup.
+    CloseSnoozePicker,
 }
 
 impl Default for Inboxly {
@@ -378,8 +409,10 @@ impl Default for Inboxly {
             feed_sections: Vec::new(),
             undo_state: UndoState::new(),
             overflow_menu_thread: None,
+            overflow_menu_position: Point::ORIGIN,
             context_menu_thread: None,
             context_menu_position: Point::ORIGIN,
+            menu_thread_sender: None,
             // Settings state
             settings_tab: SettingsTab::General,
             drawer_was_open: true,
@@ -406,6 +439,10 @@ impl Default for Inboxly {
             // Bundle settings
             settings_bundles: Vec::new(),
             throttle_popup_bundle_id: None,
+            // Feed interaction
+            expanded_bundles: HashSet::new(),
+            snooze_picker_thread: None,
+            snooze_picker_position: Point::ORIGIN,
         }
     }
 }
@@ -668,24 +705,35 @@ impl Inboxly {
                     }
                 }
                 self.reload_feed();
+                self.snooze_picker_thread = None;
             }
-            Message::OpenOverflowMenu(thread_id) => {
+            Message::OpenOverflowMenu {
+                thread_id,
+                sender_address,
+                position,
+            } => {
                 self.context_menu_thread = None;
                 self.overflow_menu_thread = Some(thread_id);
+                self.overflow_menu_position = position;
+                self.menu_thread_sender = Some(sender_address);
             }
             Message::CloseOverflowMenu => {
                 self.overflow_menu_thread = None;
+                self.menu_thread_sender = None;
             }
             Message::OpenContextMenu {
                 thread_id,
+                sender_address,
                 position,
             } => {
                 self.overflow_menu_thread = None;
                 self.context_menu_thread = Some(thread_id);
                 self.context_menu_position = position;
+                self.menu_thread_sender = Some(sender_address);
             }
             Message::CloseContextMenu => {
                 self.context_menu_thread = None;
+                self.menu_thread_sender = None;
             }
             Message::NavigateToSettings => {
                 self.previous_view = self.active_view;
@@ -1181,8 +1229,7 @@ impl Inboxly {
                         );
                     }
                 }
-                self.overflow_menu_thread = None;
-                self.context_menu_thread = None;
+                self.close_menus();
             }
             Message::MarkReadState { thread_id, read } => {
                 tracing::info!("mark thread {thread_id} read={read}");
@@ -1206,49 +1253,41 @@ impl Inboxly {
                         },
                     );
                 }
-                self.overflow_menu_thread = None;
-                self.context_menu_thread = None;
+                self.close_menus();
             }
             Message::MuteThread(thread_id) => {
                 tracing::info!("mute thread {thread_id}");
-                self.overflow_menu_thread = None;
-                self.context_menu_thread = None;
+                self.close_menus();
             }
             Message::Reply(thread_id) => {
                 tracing::info!("reply to thread {thread_id}");
-                self.overflow_menu_thread = None;
-                self.context_menu_thread = None;
+                self.close_menus();
             }
             Message::ReplyAll(thread_id) => {
                 tracing::info!("reply all to thread {thread_id}");
-                self.overflow_menu_thread = None;
-                self.context_menu_thread = None;
+                self.close_menus();
             }
             Message::Forward(thread_id) => {
                 tracing::info!("forward thread {thread_id}");
-                self.overflow_menu_thread = None;
-                self.context_menu_thread = None;
+                self.close_menus();
             }
             Message::AddToBundle {
                 thread_id,
                 category,
             } => {
                 tracing::info!("add thread {thread_id} to bundle {category}");
-                self.overflow_menu_thread = None;
-                self.context_menu_thread = None;
+                self.close_menus();
             }
             Message::CreateRuleFromSender(sender) => {
                 tracing::info!("create rule from sender: {sender} (coming soon)");
-                self.overflow_menu_thread = None;
-                self.context_menu_thread = None;
+                self.close_menus();
             }
             Message::BlockSender {
                 thread_id,
                 sender_address,
             } => {
                 tracing::info!("block sender {sender_address} (thread {thread_id})");
-                self.overflow_menu_thread = None;
-                self.context_menu_thread = None;
+                self.close_menus();
             }
             Message::ReportSpam(thread_id) => {
                 tracing::info!("report spam: thread {thread_id}");
@@ -1263,8 +1302,25 @@ impl Inboxly {
                         imap_uid,
                     },
                 );
-                self.overflow_menu_thread = None;
-                self.context_menu_thread = None;
+                self.close_menus();
+            }
+            Message::ToggleBundleExpand(id) => {
+                if self.expanded_bundles.contains(&id) {
+                    self.expanded_bundles.remove(&id);
+                } else {
+                    self.expanded_bundles.insert(id);
+                }
+            }
+            Message::OpenSnoozePicker {
+                thread_id,
+                position,
+            } => {
+                self.close_menus();
+                self.snooze_picker_thread = Some(thread_id);
+                self.snooze_picker_position = position;
+            }
+            Message::CloseSnoozePicker => {
+                self.snooze_picker_thread = None;
             }
         }
     }
@@ -1285,6 +1341,29 @@ impl Inboxly {
                 }
             }
         }
+        // Prune expanded bundles that are no longer in the feed.
+        let active_bundle_ids: HashSet<String> = self
+            .feed_sections
+            .iter()
+            .flat_map(|s| s.items.iter())
+            .filter_map(|e| match e {
+                crate::feed::FeedEntry::Bundle(b) => Some(b.bundle_id.clone()),
+                _ => None,
+            })
+            .collect();
+        self.expanded_bundles
+            .retain(|id| active_bundle_ids.contains(id));
+    }
+
+    /// Clear both menus (overflow + context) and their shared sender field.
+    ///
+    /// Every message handler that resolves a thread action should call this
+    /// so the three-field menu-state invariant stays self-enforcing — new
+    /// handlers can't accidentally clear only two of the three fields.
+    fn close_menus(&mut self) {
+        self.overflow_menu_thread = None;
+        self.context_menu_thread = None;
+        self.menu_thread_sender = None;
     }
 
     /// Enqueue offline actions for all emails in a thread.
@@ -1523,24 +1602,90 @@ mod tests {
     #[test]
     fn open_overflow_menu_sets_state() {
         let mut app = Inboxly::default();
-        let _ = app.update(Message::OpenOverflowMenu("t1".into()));
+        let _ = app.update(Message::OpenOverflowMenu {
+            thread_id: "t1".into(),
+            sender_address: "a@b.com".into(),
+            position: Point::ORIGIN,
+        });
         assert_eq!(app.overflow_menu_thread, Some("t1".into()));
+    }
+
+    #[test]
+    fn open_overflow_menu_sets_position_and_sender() {
+        let mut app = Inboxly::default();
+        let pos = Point::new(42.0, 100.0);
+        let _ = app.update(Message::OpenOverflowMenu {
+            thread_id: "t1".into(),
+            sender_address: "sender@example.com".into(),
+            position: pos,
+        });
+        assert_eq!(app.overflow_menu_thread, Some("t1".into()));
+        assert_eq!(app.overflow_menu_position, pos);
+        assert_eq!(app.menu_thread_sender, Some("sender@example.com".into()));
+    }
+
+    #[test]
+    fn open_context_menu_sets_sender() {
+        let mut app = Inboxly::default();
+        let pos = Point::new(10.0, 20.0);
+        let _ = app.update(Message::OpenContextMenu {
+            thread_id: "t2".into(),
+            sender_address: "ctx@example.com".into(),
+            position: pos,
+        });
+        assert_eq!(app.context_menu_thread, Some("t2".into()));
+        assert_eq!(app.context_menu_position, pos);
+        assert_eq!(app.menu_thread_sender, Some("ctx@example.com".into()));
     }
 
     #[test]
     fn close_overflow_menu_clears_state() {
         let mut app = Inboxly::default();
-        let _ = app.update(Message::OpenOverflowMenu("t1".into()));
+        let _ = app.update(Message::OpenOverflowMenu {
+            thread_id: "t1".into(),
+            sender_address: "a@b.com".into(),
+            position: Point::ORIGIN,
+        });
         let _ = app.update(Message::CloseOverflowMenu);
         assert!(app.overflow_menu_thread.is_none());
     }
 
     #[test]
+    fn close_overflow_menu_clears_sender() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenOverflowMenu {
+            thread_id: "t1".into(),
+            sender_address: "a@b.com".into(),
+            position: Point::ORIGIN,
+        });
+        let _ = app.update(Message::CloseOverflowMenu);
+        assert!(app.menu_thread_sender.is_none());
+    }
+
+    #[test]
+    fn close_context_menu_clears_sender() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenContextMenu {
+            thread_id: "t1".into(),
+            sender_address: "a@b.com".into(),
+            position: Point::ORIGIN,
+        });
+        let _ = app.update(Message::CloseContextMenu);
+        assert!(app.context_menu_thread.is_none());
+        assert!(app.menu_thread_sender.is_none());
+    }
+
+    #[test]
     fn open_context_menu_closes_overflow() {
         let mut app = Inboxly::default();
-        let _ = app.update(Message::OpenOverflowMenu("t1".into()));
+        let _ = app.update(Message::OpenOverflowMenu {
+            thread_id: "t1".into(),
+            sender_address: "a@b.com".into(),
+            position: Point::ORIGIN,
+        });
         let _ = app.update(Message::OpenContextMenu {
             thread_id: "t2".into(),
+            sender_address: "ctx@b.com".into(),
             position: Point::new(100.0, 200.0),
         });
         assert!(app.overflow_menu_thread.is_none());
@@ -1548,26 +1693,55 @@ mod tests {
     }
 
     #[test]
+    fn opening_context_menu_clears_overflow_sender() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenOverflowMenu {
+            thread_id: "t1".into(),
+            sender_address: "overflow@b.com".into(),
+            position: Point::ORIGIN,
+        });
+        let _ = app.update(Message::OpenContextMenu {
+            thread_id: "t2".into(),
+            sender_address: "ctx@b.com".into(),
+            position: Point::new(5.0, 10.0),
+        });
+        assert!(app.overflow_menu_thread.is_none());
+        // sender reflects the context menu opener, not the overflow one
+        assert_eq!(app.menu_thread_sender, Some("ctx@b.com".into()));
+    }
+
+    #[test]
     fn open_overflow_closes_context_menu() {
         let mut app = Inboxly::default();
         let _ = app.update(Message::OpenContextMenu {
             thread_id: "t1".into(),
+            sender_address: "a@b.com".into(),
             position: Point::ORIGIN,
         });
-        let _ = app.update(Message::OpenOverflowMenu("t2".into()));
+        let _ = app.update(Message::OpenOverflowMenu {
+            thread_id: "t2".into(),
+            sender_address: "b@b.com".into(),
+            position: Point::ORIGIN,
+        });
         assert!(app.context_menu_thread.is_none());
         assert_eq!(app.overflow_menu_thread, Some("t2".into()));
+        assert_eq!(app.menu_thread_sender, Some("b@b.com".into()));
     }
 
     #[test]
     fn thread_actions_close_menus() {
         let mut app = Inboxly::default();
-        let _ = app.update(Message::OpenOverflowMenu("t1".into()));
+        let _ = app.update(Message::OpenOverflowMenu {
+            thread_id: "t1".into(),
+            sender_address: "a@b.com".into(),
+            position: Point::ORIGIN,
+        });
         let _ = app.update(Message::MoveTo {
             thread_id: "t1".into(),
             destination: MoveDestination::Inbox,
         });
         assert!(app.overflow_menu_thread.is_none());
+        assert!(app.menu_thread_sender.is_none());
     }
 
     #[test]
@@ -1595,6 +1769,71 @@ mod tests {
             sender_address: "a@b.com".into(),
         });
         let _ = app.update(Message::ReportSpam("t1".into()));
+    }
+
+    // -- M33 Phase 7B: menu action tests --
+
+    #[test]
+    fn context_menu_reply_dispatches_reply_and_closes() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenContextMenu {
+            thread_id: "t1".into(),
+            sender_address: "a@b.com".into(),
+            position: Point::ORIGIN,
+        });
+        let _ = app.update(Message::Reply("t1".into()));
+        assert!(app.context_menu_thread.is_none());
+        assert!(app.menu_thread_sender.is_none());
+    }
+
+    #[test]
+    fn overflow_menu_mark_read_closes_menu() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenOverflowMenu {
+            thread_id: "t1".into(),
+            sender_address: "a@b.com".into(),
+            position: Point::ORIGIN,
+        });
+        let _ = app.update(Message::MarkReadState {
+            thread_id: "t1".into(),
+            read: true,
+        });
+        assert!(app.overflow_menu_thread.is_none());
+        assert!(app.menu_thread_sender.is_none());
+    }
+
+    #[test]
+    fn context_menu_add_to_bundle_closes_menu() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenContextMenu {
+            thread_id: "t1".into(),
+            sender_address: "a@b.com".into(),
+            position: Point::ORIGIN,
+        });
+        let _ = app.update(Message::AddToBundle {
+            thread_id: "t1".into(),
+            category: "Social".into(),
+        });
+        assert!(app.context_menu_thread.is_none());
+        assert!(app.menu_thread_sender.is_none());
+    }
+
+    #[test]
+    fn context_menu_block_sender_uses_menu_sender() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenContextMenu {
+            thread_id: "t1".into(),
+            sender_address: "menu@sender.com".into(),
+            position: Point::ORIGIN,
+        });
+        // Verify state captured the sender correctly BEFORE BlockSender fires.
+        assert_eq!(app.menu_thread_sender, Some("menu@sender.com".into()));
+        let _ = app.update(Message::BlockSender {
+            thread_id: "t1".into(),
+            sender_address: "menu@sender.com".into(),
+        });
+        assert!(app.context_menu_thread.is_none());
+        assert!(app.menu_thread_sender.is_none());
     }
 
     // -- M28 account switcher data layer tests --
@@ -2065,5 +2304,148 @@ mod tests {
 
         let _ = app.update(Message::ShortcutsLoaded(custom_map));
         assert_eq!(app.shortcuts.get(ShortcutAction::Done), "x");
+    }
+
+    // -- M33 bundle expand and snooze picker tests --
+
+    #[test]
+    fn toggle_bundle_expand_adds_and_removes() {
+        let mut app = Inboxly::default();
+        assert!(app.expanded_bundles.is_empty());
+
+        // First toggle inserts the bundle ID.
+        let _ = app.update(Message::ToggleBundleExpand("b1".into()));
+        assert!(app.expanded_bundles.contains("b1"));
+
+        // Second toggle removes it.
+        let _ = app.update(Message::ToggleBundleExpand("b1".into()));
+        assert!(!app.expanded_bundles.contains("b1"));
+    }
+
+    #[test]
+    fn mark_done_pushes_undo_state() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::MarkDone("t1".into()));
+        // MarkDone should push an undo action (no store in test, DB ops are skipped).
+        assert!(app.undo_state.is_active());
+        assert_eq!(
+            app.undo_state.description().as_deref(),
+            Some("Conversation marked done")
+        );
+    }
+
+    #[test]
+    fn toggle_pin_pushes_undo_state() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::TogglePin("t1".into()));
+        // TogglePin with no store defaults was_pinned=false → "Pinned".
+        assert!(app.undo_state.is_active());
+        assert_eq!(app.undo_state.description().as_deref(), Some("Pinned"));
+    }
+
+    #[test]
+    fn open_snooze_picker_sets_state() {
+        let mut app = Inboxly::default();
+        let pos = Point::new(42.0, 84.0);
+        let _ = app.update(Message::OpenSnoozePicker {
+            thread_id: "t1".into(),
+            position: pos,
+        });
+        assert_eq!(app.snooze_picker_thread, Some("t1".into()));
+        assert_eq!(app.snooze_picker_position, pos);
+    }
+
+    #[test]
+    fn close_snooze_picker_clears_state() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenSnoozePicker {
+            thread_id: "t1".into(),
+            position: Point::new(10.0, 20.0),
+        });
+        let _ = app.update(Message::CloseSnoozePicker);
+        assert!(app.snooze_picker_thread.is_none());
+    }
+
+    #[test]
+    fn open_snooze_picker_closes_other_menus() {
+        let mut app = Inboxly::default();
+        // Prime both overflow and context menus.
+        let _ = app.update(Message::OpenOverflowMenu {
+            thread_id: "t0".into(),
+            sender_address: "a@b.com".into(),
+            position: Point::ORIGIN,
+        });
+        let _ = app.update(Message::OpenContextMenu {
+            thread_id: "t0".into(),
+            sender_address: "a@b.com".into(),
+            position: Point::ORIGIN,
+        });
+        // Opening the snooze picker must close both.
+        let _ = app.update(Message::OpenSnoozePicker {
+            thread_id: "t1".into(),
+            position: Point::new(5.0, 5.0),
+        });
+        assert!(app.overflow_menu_thread.is_none());
+        assert!(app.context_menu_thread.is_none());
+        assert_eq!(app.snooze_picker_thread, Some("t1".into()));
+    }
+
+    #[test]
+    fn snooze_thread_closes_picker() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenSnoozePicker {
+            thread_id: "t1".into(),
+            position: Point::ORIGIN,
+        });
+        assert_eq!(app.snooze_picker_thread, Some("t1".into()));
+        let _ = app.update(Message::SnoozeThread {
+            thread_id: "t1".into(),
+            until: chrono::Utc::now() + chrono::Duration::hours(1),
+        });
+        assert!(app.snooze_picker_thread.is_none(), "SnoozeThread should close the picker");
+    }
+
+    #[test]
+    fn undo_message_reverses_mark_done() {
+        let mut app = Inboxly::default();
+        // Push a MarkDone undo action (no store in tests, DB ops are skipped).
+        let _ = app.update(Message::MarkDone("t1".into()));
+        assert!(app.undo_state.is_active());
+
+        // Dispatching Undo should consume the pending action and clear state.
+        let _ = app.update(Message::Undo);
+        assert!(!app.undo_state.is_active());
+    }
+
+    #[test]
+    fn undo_expired_clears_state() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::MarkDone("t1".into()));
+        assert!(app.undo_state.is_active());
+
+        // UndoExpired fires when the snackbar timer expires.
+        let _ = app.update(Message::UndoExpired);
+        assert!(!app.undo_state.is_active());
+    }
+
+    #[test]
+    fn undo_state_reusable_after_expire() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::MarkDone("t1".into()));
+        assert!(app.undo_state.is_active());
+        let _ = app.update(Message::UndoExpired);
+        assert!(!app.undo_state.is_active());
+        let _ = app.update(Message::MarkDone("t2".into()));
+        assert!(app.undo_state.is_active());
+    }
+
+    // -- M33 Phase 10: InboxZero rendering gate --
+
+    #[test]
+    fn inbox_feed_sections_empty_by_default() {
+        // ContentArea branches on feed_sections.is_empty() to show InboxZero.
+        // Verify the default state satisfies this gate condition.
+        let app = Inboxly::default();
+        assert!(app.feed_sections.is_empty());
     }
 }
