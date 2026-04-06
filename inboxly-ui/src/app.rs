@@ -1,5 +1,7 @@
 //! Core application state machine -- no framework dependencies.
 
+use std::collections::HashSet;
+
 use inboxly_core::config::{AccountConfig, AppConfig, AuthMethod, Paths, ThemePreference};
 use inboxly_core::offline::OfflineAction;
 use inboxly_store::{BundleRow, Store};
@@ -169,6 +171,14 @@ pub struct Inboxly {
     pub settings_bundles: Vec<BundleRow>,
     /// Bundle whose throttle popup is currently open.
     pub throttle_popup_bundle_id: Option<String>,
+
+    // -- Feed interaction state --
+    /// Set of bundle IDs that are currently expanded in the inbox feed.
+    pub expanded_bundles: HashSet<String>,
+    /// Thread ID whose snooze date-picker popup is currently open.
+    pub snooze_picker_thread: Option<String>,
+    /// Cursor position where the snooze picker was triggered (popup anchor).
+    pub snooze_picker_position: Point,
 }
 
 /// IMAP folder destinations for the "Move to..." action.
@@ -360,6 +370,17 @@ pub enum Message {
     },
     /// Report thread as spam.
     ReportSpam(String),
+
+    // -- Feed interaction --
+    /// Toggle the expanded/collapsed state of a bundle row in the inbox feed.
+    ToggleBundleExpand(String),
+    /// Open the snooze date-picker for a thread at a cursor position.
+    OpenSnoozePicker {
+        thread_id: String,
+        position: Point,
+    },
+    /// Close the snooze date-picker popup.
+    CloseSnoozePicker,
 }
 
 impl Default for Inboxly {
@@ -406,6 +427,10 @@ impl Default for Inboxly {
             // Bundle settings
             settings_bundles: Vec::new(),
             throttle_popup_bundle_id: None,
+            // Feed interaction
+            expanded_bundles: HashSet::new(),
+            snooze_picker_thread: None,
+            snooze_picker_position: Point::ORIGIN,
         }
     }
 }
@@ -1266,6 +1291,25 @@ impl Inboxly {
                 self.overflow_menu_thread = None;
                 self.context_menu_thread = None;
             }
+            Message::ToggleBundleExpand(id) => {
+                if self.expanded_bundles.contains(&id) {
+                    self.expanded_bundles.remove(&id);
+                } else {
+                    self.expanded_bundles.insert(id);
+                }
+            }
+            Message::OpenSnoozePicker {
+                thread_id,
+                position,
+            } => {
+                self.overflow_menu_thread = None;
+                self.context_menu_thread = None;
+                self.snooze_picker_thread = Some(thread_id);
+                self.snooze_picker_position = position;
+            }
+            Message::CloseSnoozePicker => {
+                self.snooze_picker_thread = None;
+            }
         }
     }
 
@@ -1285,6 +1329,18 @@ impl Inboxly {
                 }
             }
         }
+        // Prune expanded bundles that are no longer in the feed.
+        let active_bundle_ids: HashSet<String> = self
+            .feed_sections
+            .iter()
+            .flat_map(|s| s.items.iter())
+            .filter_map(|e| match e {
+                crate::feed::FeedEntry::Bundle(b) => Some(b.bundle_id.clone()),
+                _ => None,
+            })
+            .collect();
+        self.expanded_bundles
+            .retain(|id| active_bundle_ids.contains(id));
     }
 
     /// Enqueue offline actions for all emails in a thread.
@@ -2065,5 +2121,63 @@ mod tests {
 
         let _ = app.update(Message::ShortcutsLoaded(custom_map));
         assert_eq!(app.shortcuts.get(ShortcutAction::Done), "x");
+    }
+
+    // -- M33 bundle expand and snooze picker tests --
+
+    #[test]
+    fn toggle_bundle_expand_adds_and_removes() {
+        let mut app = Inboxly::default();
+        assert!(app.expanded_bundles.is_empty());
+
+        // First toggle inserts the bundle ID.
+        let _ = app.update(Message::ToggleBundleExpand("b1".into()));
+        assert!(app.expanded_bundles.contains("b1"));
+
+        // Second toggle removes it.
+        let _ = app.update(Message::ToggleBundleExpand("b1".into()));
+        assert!(!app.expanded_bundles.contains("b1"));
+    }
+
+    #[test]
+    fn open_snooze_picker_sets_state() {
+        let mut app = Inboxly::default();
+        let pos = Point::new(42.0, 84.0);
+        let _ = app.update(Message::OpenSnoozePicker {
+            thread_id: "t1".into(),
+            position: pos,
+        });
+        assert_eq!(app.snooze_picker_thread, Some("t1".into()));
+        assert_eq!(app.snooze_picker_position, pos);
+    }
+
+    #[test]
+    fn close_snooze_picker_clears_state() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenSnoozePicker {
+            thread_id: "t1".into(),
+            position: Point::new(10.0, 20.0),
+        });
+        let _ = app.update(Message::CloseSnoozePicker);
+        assert!(app.snooze_picker_thread.is_none());
+    }
+
+    #[test]
+    fn open_snooze_picker_closes_other_menus() {
+        let mut app = Inboxly::default();
+        // Prime both overflow and context menus.
+        let _ = app.update(Message::OpenOverflowMenu("t0".into()));
+        let _ = app.update(Message::OpenContextMenu {
+            thread_id: "t0".into(),
+            position: Point::ORIGIN,
+        });
+        // Opening the snooze picker must close both.
+        let _ = app.update(Message::OpenSnoozePicker {
+            thread_id: "t1".into(),
+            position: Point::new(5.0, 5.0),
+        });
+        assert!(app.overflow_menu_thread.is_none());
+        assert!(app.context_menu_thread.is_none());
+        assert_eq!(app.snooze_picker_thread, Some("t1".into()));
     }
 }
