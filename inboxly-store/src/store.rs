@@ -46,6 +46,13 @@ impl Store {
         &self.conn
     }
 
+    /// Access the raw connection from external crates that need it.
+    ///
+    /// Prefer Store methods over direct connection access where possible.
+    pub fn connection(&self) -> &Connection {
+        &self.conn
+    }
+
     /// Execute a closure inside a transaction. Commits on Ok, rolls back on Err.
     pub fn transaction<T, F>(&mut self, f: F) -> Result<T>
     where
