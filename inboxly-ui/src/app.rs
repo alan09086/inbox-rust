@@ -2438,4 +2438,14 @@ mod tests {
         let _ = app.update(Message::MarkDone("t2".into()));
         assert!(app.undo_state.is_active());
     }
+
+    // -- M33 Phase 10: InboxZero rendering gate --
+
+    #[test]
+    fn inbox_feed_sections_empty_by_default() {
+        // ContentArea branches on feed_sections.is_empty() to show InboxZero.
+        // Verify the default state satisfies this gate condition.
+        let app = Inboxly::default();
+        assert!(app.feed_sections.is_empty());
+    }
 }
