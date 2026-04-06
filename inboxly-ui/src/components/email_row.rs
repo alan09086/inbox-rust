@@ -27,7 +27,7 @@ pub fn EmailRow(item: FeedItem) -> Element {
     // thread_id itself is moved into the overflow closure below.
     let sender_arc: Arc<str> = Arc::from(item.sender_address.as_str());
     let sender_ctx = Arc::clone(&sender_arc);
-    // sender_arc itself is moved into the overflow closure below.
+    let sender_overflow = sender_arc; // transfer ownership for the last user
 
     rsx! {
         div {
@@ -122,7 +122,7 @@ pub fn EmailRow(item: FeedItem) -> Element {
                     let position = Point::new(coords.x as f32, coords.y as f32);
                     app_state.write().update(Message::OpenOverflowMenu {
                         thread_id: thread_id.to_string(),
-                        sender_address: sender_arc.to_string(),
+                        sender_address: sender_overflow.to_string(),
                         position,
                     });
                 },

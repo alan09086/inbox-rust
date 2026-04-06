@@ -1228,9 +1228,7 @@ impl Inboxly {
                         );
                     }
                 }
-                self.overflow_menu_thread = None;
-                self.context_menu_thread = None;
-                self.menu_thread_sender = None;
+                self.close_menus();
             }
             Message::MarkReadState { thread_id, read } => {
                 tracing::info!("mark thread {thread_id} read={read}");
@@ -1254,57 +1252,41 @@ impl Inboxly {
                         },
                     );
                 }
-                self.overflow_menu_thread = None;
-                self.context_menu_thread = None;
-                self.menu_thread_sender = None;
+                self.close_menus();
             }
             Message::MuteThread(thread_id) => {
                 tracing::info!("mute thread {thread_id}");
-                self.overflow_menu_thread = None;
-                self.context_menu_thread = None;
-                self.menu_thread_sender = None;
+                self.close_menus();
             }
             Message::Reply(thread_id) => {
                 tracing::info!("reply to thread {thread_id}");
-                self.overflow_menu_thread = None;
-                self.context_menu_thread = None;
-                self.menu_thread_sender = None;
+                self.close_menus();
             }
             Message::ReplyAll(thread_id) => {
                 tracing::info!("reply all to thread {thread_id}");
-                self.overflow_menu_thread = None;
-                self.context_menu_thread = None;
-                self.menu_thread_sender = None;
+                self.close_menus();
             }
             Message::Forward(thread_id) => {
                 tracing::info!("forward thread {thread_id}");
-                self.overflow_menu_thread = None;
-                self.context_menu_thread = None;
-                self.menu_thread_sender = None;
+                self.close_menus();
             }
             Message::AddToBundle {
                 thread_id,
                 category,
             } => {
                 tracing::info!("add thread {thread_id} to bundle {category}");
-                self.overflow_menu_thread = None;
-                self.context_menu_thread = None;
-                self.menu_thread_sender = None;
+                self.close_menus();
             }
             Message::CreateRuleFromSender(sender) => {
                 tracing::info!("create rule from sender: {sender} (coming soon)");
-                self.overflow_menu_thread = None;
-                self.context_menu_thread = None;
-                self.menu_thread_sender = None;
+                self.close_menus();
             }
             Message::BlockSender {
                 thread_id,
                 sender_address,
             } => {
                 tracing::info!("block sender {sender_address} (thread {thread_id})");
-                self.overflow_menu_thread = None;
-                self.context_menu_thread = None;
-                self.menu_thread_sender = None;
+                self.close_menus();
             }
             Message::ReportSpam(thread_id) => {
                 tracing::info!("report spam: thread {thread_id}");
@@ -1319,9 +1301,7 @@ impl Inboxly {
                         imap_uid,
                     },
                 );
-                self.overflow_menu_thread = None;
-                self.context_menu_thread = None;
-                self.menu_thread_sender = None;
+                self.close_menus();
             }
             Message::ToggleBundleExpand(id) => {
                 if self.expanded_bundles.contains(&id) {
@@ -1334,9 +1314,7 @@ impl Inboxly {
                 thread_id,
                 position,
             } => {
-                self.overflow_menu_thread = None;
-                self.context_menu_thread = None;
-                self.menu_thread_sender = None;
+                self.close_menus();
                 self.snooze_picker_thread = Some(thread_id);
                 self.snooze_picker_position = position;
             }
@@ -1374,6 +1352,17 @@ impl Inboxly {
             .collect();
         self.expanded_bundles
             .retain(|id| active_bundle_ids.contains(id));
+    }
+
+    /// Clear both menus (overflow + context) and their shared sender field.
+    ///
+    /// Every message handler that resolves a thread action should call this
+    /// so the three-field menu-state invariant stays self-enforcing — new
+    /// handlers can't accidentally clear only two of the three fields.
+    fn close_menus(&mut self) {
+        self.overflow_menu_thread = None;
+        self.context_menu_thread = None;
+        self.menu_thread_sender = None;
     }
 
     /// Enqueue offline actions for all emails in a thread.
@@ -1735,6 +1724,7 @@ mod tests {
         });
         assert!(app.context_menu_thread.is_none());
         assert_eq!(app.overflow_menu_thread, Some("t2".into()));
+        assert_eq!(app.menu_thread_sender, Some("b@b.com".into()));
     }
 
     #[test]
@@ -1750,6 +1740,7 @@ mod tests {
             destination: MoveDestination::Inbox,
         });
         assert!(app.overflow_menu_thread.is_none());
+        assert!(app.menu_thread_sender.is_none());
     }
 
     #[test]
