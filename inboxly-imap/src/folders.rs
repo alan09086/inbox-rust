@@ -29,7 +29,7 @@ pub struct ImapFolder {
     pub attributes: Vec<String>,
 }
 
-/// The five well-known folders Inboxly syncs in v1.
+/// The five well-known folders Inboxly syncs in v1, plus the archive folder.
 #[derive(Debug, Clone, Default)]
 pub struct WellKnownFolders {
     /// IMAP name for Inbox (always "INBOX" per RFC 3501).
@@ -42,6 +42,8 @@ pub struct WellKnownFolders {
     pub trash: Option<String>,
     /// IMAP name for Spam/Junk folder.
     pub spam: Option<String>,
+    /// IMAP name for Archive folder (provider-specific: `[Gmail]/All Mail` or `Archive`).
+    pub archive: Option<String>,
 }
 
 impl WellKnownFolders {
@@ -155,6 +157,11 @@ pub fn resolve_folder_role_by_name(name: &str) -> Option<FolderRole> {
         return Some(FolderRole::Spam);
     }
 
+    // Archive folder variants (includes Gmail's "All Mail")
+    if lower == "archive" || lower == "all mail" || lower == "[gmail]/all mail" {
+        return Some(FolderRole::Archive);
+    }
+
     None
 }
 
@@ -184,6 +191,13 @@ pub fn map_well_known_folders(folders: &[ImapFolder]) -> WellKnownFolders {
                 }
                 FolderRole::Spam => {
                     wk.spam.get_or_insert(folder.name.clone());
+                }
+                // \Archive takes precedence over \All (which on Gmail includes everything)
+                FolderRole::Archive => {
+                    wk.archive = Some(folder.name.clone());
+                }
+                FolderRole::All => {
+                    wk.archive.get_or_insert(folder.name.clone());
                 }
                 _ => {}
             };
@@ -219,6 +233,9 @@ pub fn map_well_known_folders(folders: &[ImapFolder]) -> WellKnownFolders {
                 FolderRole::Spam if wk.spam.is_none() => {
                     wk.spam = Some(folder.name.clone());
                 }
+                FolderRole::Archive if wk.archive.is_none() => {
+                    wk.archive = Some(folder.name.clone());
+                }
                 _ => {}
             }
         }
@@ -236,6 +253,71 @@ pub fn map_well_known_folders(folders: &[ImapFolder]) -> WellKnownFolders {
     }
 
     wk
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a minimal `ImapFolder` with a given name and optional SPECIAL-USE attribute.
+    fn make_folder(name: &str, special_use_attr: Option<&str>) -> ImapFolder {
+        let role = special_use_attr
+            .and_then(parse_special_use_attr)
+            .or_else(|| resolve_folder_role_by_name(name));
+        ImapFolder {
+            name: name.to_string(),
+            delimiter: Some('/'),
+            role,
+            attributes: special_use_attr
+                .map(|a| vec![a.to_string()])
+                .unwrap_or_default(),
+        }
+    }
+
+    #[test]
+    fn resolve_gmail_archive_folder() {
+        // Gmail exposes "[Gmail]/All Mail" with the \All SPECIAL-USE attribute.
+        let folders = vec![
+            make_folder("INBOX", Some("\\Inbox")),
+            make_folder("[Gmail]/Sent Mail", Some("\\Sent")),
+            make_folder("[Gmail]/Drafts", Some("\\Drafts")),
+            make_folder("[Gmail]/Trash", Some("\\Trash")),
+            make_folder("[Gmail]/Spam", Some("\\Junk")),
+            make_folder("[Gmail]/All Mail", Some("\\All")),
+        ];
+        let wkf = map_well_known_folders(&folders);
+        assert_eq!(wkf.archive, Some("[Gmail]/All Mail".to_string()));
+    }
+
+    #[test]
+    fn resolve_outlook_archive_folder() {
+        // Outlook exposes "Archive" with the \Archive SPECIAL-USE attribute.
+        let folders = vec![
+            make_folder("INBOX", Some("\\Inbox")),
+            make_folder("Sent Items", Some("\\Sent")),
+            make_folder("Drafts", Some("\\Drafts")),
+            make_folder("Deleted Items", Some("\\Trash")),
+            make_folder("Junk Email", Some("\\Junk")),
+            make_folder("Archive", Some("\\Archive")),
+        ];
+        let wkf = map_well_known_folders(&folders);
+        assert_eq!(wkf.archive, Some("Archive".to_string()));
+    }
+
+    #[test]
+    fn resolve_archive_by_name_heuristic() {
+        // No SPECIAL-USE attributes — name heuristic only.
+        let folders = vec![
+            make_folder("INBOX", None),
+            make_folder("Sent", None),
+            make_folder("Drafts", None),
+            make_folder("Trash", None),
+            make_folder("Spam", None),
+            make_folder("Archive", None),
+        ];
+        let wkf = map_well_known_folders(&folders);
+        assert_eq!(wkf.archive, Some("Archive".to_string()));
+    }
 }
 
 /// List all folders from an authenticated IMAP session and resolve roles.

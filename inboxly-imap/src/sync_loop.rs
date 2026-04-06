@@ -575,6 +575,7 @@ mod tests {
             drafts: Some("[Gmail]/Drafts".to_string()),
             trash: Some("[Gmail]/Trash".to_string()),
             spam: Some("[Gmail]/Spam".to_string()),
+            archive: None,
         };
         let folders = resolve_folder_list(&wk);
         assert_eq!(folders.len(), 5);
@@ -590,6 +591,7 @@ mod tests {
             drafts: None,
             trash: None,
             spam: None,
+            archive: None,
         };
         let folders = resolve_folder_list(&wk);
         assert_eq!(folders.len(), 2);
