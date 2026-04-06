@@ -1,5 +1,7 @@
 //! Email thread row component with avatar, sender, subject, snippet, and badges.
 
+use std::sync::Arc;
+
 use dioxus::prelude::*;
 
 use crate::app::{Inboxly, Message, Point};
@@ -17,11 +19,12 @@ pub fn EmailRow(item: FeedItem) -> Element {
     // Compute avatar background colour from sender's first letter.
     let avatar_color = avatar_colors::for_letter(item.avatar_letter).to_css();
     let is_unread = item.is_unread;
-    let thread_id_overflow = item.thread_id.clone();
-    let thread_id_ctx = item.thread_id.clone();
-    let thread_id_done = item.thread_id.clone();
-    let thread_id_pin = item.thread_id.clone();
-    let thread_id_snooze = item.thread_id.clone();
+    let thread_id: Arc<str> = Arc::from(item.thread_id.as_str());
+    let tid_ctx = Arc::clone(&thread_id);
+    let tid_done = Arc::clone(&thread_id);
+    let tid_pin = Arc::clone(&thread_id);
+    let tid_snooze = Arc::clone(&thread_id);
+    // thread_id itself is moved into the overflow closure below.
     let sender_address = item.sender_address.clone();
     // Suppress unused variable warning -- sender_address will be used by
     // future block/rule actions.
@@ -34,7 +37,7 @@ pub fn EmailRow(item: FeedItem) -> Element {
                 evt.prevent_default();
                 let coords = evt.client_coordinates();
                 app_state.write().update(Message::OpenContextMenu {
-                    thread_id: thread_id_ctx.clone(),
+                    thread_id: tid_ctx.to_string(),
                     position: Point::new(coords.x as f32, coords.y as f32),
                 });
             },
@@ -74,29 +77,36 @@ pub fn EmailRow(item: FeedItem) -> Element {
             // Hover actions: Done, Pin, Snooze
             div {
                 class: "hover-actions",
+                oncontextmenu: move |evt: Event<MouseData>| {
+                    evt.prevent_default();
+                    evt.stop_propagation();
+                },
                 button {
                     class: "hover-action-btn",
+                    aria_label: "Mark done",
                     onclick: move |evt: Event<MouseData>| {
                         evt.stop_propagation();
-                        app_state.write().update(Message::MarkDone(thread_id_done.clone()));
+                        app_state.write().update(Message::MarkDone(tid_done.to_string()));
                     },
                     "\u{2713}"
                 }
                 button {
                     class: "hover-action-btn",
+                    aria_label: "Toggle pin",
                     onclick: move |evt: Event<MouseData>| {
                         evt.stop_propagation();
-                        app_state.write().update(Message::TogglePin(thread_id_pin.clone()));
+                        app_state.write().update(Message::TogglePin(tid_pin.to_string()));
                     },
                     "\u{1F4CC}"
                 }
                 button {
                     class: "hover-action-btn",
+                    aria_label: "Snooze",
                     onclick: move |evt: Event<MouseData>| {
                         evt.stop_propagation();
                         let coords = evt.client_coordinates();
                         app_state.write().update(Message::OpenSnoozePicker {
-                            thread_id: thread_id_snooze.clone(),
+                            thread_id: tid_snooze.to_string(),
                             position: Point::new(coords.x as f32, coords.y as f32),
                         });
                     },
@@ -108,7 +118,7 @@ pub fn EmailRow(item: FeedItem) -> Element {
                 class: "overflow-btn",
                 onclick: move |evt: Event<MouseData>| {
                     evt.stop_propagation();
-                    app_state.write().update(Message::OpenOverflowMenu(thread_id_overflow.clone()));
+                    app_state.write().update(Message::OpenOverflowMenu(thread_id.to_string()));
                 },
                 "\u{22EE}"
             }
