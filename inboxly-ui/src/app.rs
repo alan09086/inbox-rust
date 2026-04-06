@@ -2388,4 +2388,27 @@ mod tests {
         assert!(app.context_menu_thread.is_none());
         assert_eq!(app.snooze_picker_thread, Some("t1".into()));
     }
+
+    #[test]
+    fn undo_message_reverses_mark_done() {
+        let mut app = Inboxly::default();
+        // Push a MarkDone undo action (no store in tests, DB ops are skipped).
+        let _ = app.update(Message::MarkDone("t1".into()));
+        assert!(app.undo_state.is_active());
+
+        // Dispatching Undo should consume the pending action and clear state.
+        let _ = app.update(Message::Undo);
+        assert!(!app.undo_state.is_active());
+    }
+
+    #[test]
+    fn undo_expired_clears_state() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::MarkDone("t1".into()));
+        assert!(app.undo_state.is_active());
+
+        // UndoExpired fires when the snackbar timer expires.
+        let _ = app.update(Message::UndoExpired);
+        assert!(!app.undo_state.is_active());
+    }
 }

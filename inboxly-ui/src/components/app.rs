@@ -6,6 +6,7 @@ use crate::app::Inboxly;
 use crate::components::content_area::ContentArea;
 use crate::components::nav_drawer::NavDrawer;
 use crate::components::toolbar::Toolbar;
+use crate::components::undo_snackbar::UndoSnackbar;
 use crate::theme::{ActiveView, ThemeConfig};
 
 /// Window title -- updates reactively based on active view.
@@ -55,5 +56,7 @@ pub fn App() -> Element {
                 ContentArea {}
             }
         }
+
+        UndoSnackbar {}
     }
 }
