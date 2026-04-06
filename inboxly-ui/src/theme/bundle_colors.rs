@@ -2,8 +2,7 @@
 //!
 //! Spec reference: Theme System > Bundle Category Colours table.
 
-use iced::Color;
-
+use super::color_type::Color;
 use super::colors::hex;
 
 /// Bundle category title and badge colour pair.

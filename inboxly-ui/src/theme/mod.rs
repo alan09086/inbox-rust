@@ -5,15 +5,16 @@
 //! ```text
 //! ThemePreference (config)     SystemColorScheme (D-Bus)
 //!        \                        /
-//!         +--- InboxlyTheme -----+
-//!              |           |
-//!         ThemeColors    iced::Theme::Custom
+//!         +--- ThemeConfig ------+
+//!              |
+//!         ThemeColors
 //!              |
 //!   light() / dark() colour tokens
 //! ```
 //!
 //! # Modules
 //!
+//! - [`color_type`] -- Framework-agnostic RGBA colour type
 //! - [`colors`] -- Light/dark colour tokens (`ThemeColors`)
 //! - [`bundle_colors`] -- Bundle category colours (constant across themes)
 //! - [`avatar_colors`] -- Avatar letter tile A-Z palette (constant across themes)
@@ -23,16 +24,15 @@
 
 pub mod avatar_colors;
 pub mod bundle_colors;
+pub mod color_type;
 pub mod colors;
 pub mod dimensions;
 pub mod system;
 pub mod typography;
 
+pub use color_type::Color;
 pub use colors::ThemeColors;
 pub use system::{SystemColorScheme, SystemThemeError, query_system_color_scheme};
-
-use iced::theme::Palette;
-use iced::{Color, Theme};
 
 use inboxly_core::config::ThemePreference;
 
@@ -69,25 +69,31 @@ impl ActiveView {
     /// Toolbar background colour for this view (light theme).
     pub fn toolbar_color(&self) -> Color {
         match self {
-            Self::Inbox => color_from_hex(0x42, 0x85, 0xf4), // #4285f4
-            Self::Snoozed => color_from_hex(0xef, 0x6c, 0x00), // #ef6c00
-            Self::Done => color_from_hex(0x0f, 0x9d, 0x58),  // #0f9d58
+            Self::Inbox => color_from_hex(0x42, 0x85, 0xf4),    // #4285f4
+            Self::Snoozed => color_from_hex(0xef, 0x6c, 0x00),  // #ef6c00
+            Self::Done => color_from_hex(0x0f, 0x9d, 0x58),     // #0f9d58
             Self::Settings => color_from_hex(0x45, 0x5a, 0x64),
         }
     }
 
     /// Toolbar background colour for this view, theme-aware.
-    pub fn toolbar_color_themed(&self, theme: &InboxlyTheme) -> Color {
+    pub fn toolbar_color_themed(&self, theme: &ThemeConfig) -> Color {
+        let colors = theme.colors();
         match self {
-            Self::Inbox => theme.colors.toolbar_inbox,
-            Self::Snoozed => theme.colors.toolbar_snoozed,
-            Self::Done => theme.colors.toolbar_done,
-            Self::Settings => theme.colors.toolbar_settings,
+            Self::Inbox => colors.toolbar_inbox,
+            Self::Snoozed => colors.toolbar_snoozed,
+            Self::Done => colors.toolbar_done,
+            Self::Settings => colors.toolbar_settings,
         }
+    }
+
+    /// CSS colour string for the toolbar background (theme-aware).
+    pub fn toolbar_css(&self, theme: &ThemeConfig) -> String {
+        self.toolbar_color_themed(theme).to_css()
     }
 }
 
-/// Convert RGB bytes to `iced::Color` (0.0..1.0 range).
+/// Convert RGB bytes to `Color` (0.0..1.0 range).
 pub fn color_from_hex(r: u8, g: u8, b: u8) -> Color {
     Color::from_rgb(
         f32::from(r) / 255.0,
@@ -192,7 +198,7 @@ pub fn category_color(category: &str) -> CategoryColor {
 }
 
 // ============================================================================
-// InboxlyTheme -- the app-level theme with Iced integration
+// ThemeConfig -- framework-agnostic theme configuration
 // ============================================================================
 
 /// Trait for reading settings -- abstracts over the SQLite store.
@@ -218,23 +224,20 @@ pub trait SettingsWriter {
     fn set_setting(&self, key: &str, value: &str) -> Result<(), Box<dyn std::error::Error>>;
 }
 
-/// The main theme struct for the Inboxly application.
+/// Framework-agnostic theme configuration.
 ///
-/// Wraps `ThemeColors` (the BigTop colour tokens) and provides conversion
-/// to Iced's `Theme` type for widget styling.
+/// Wraps `ThemeColors` and provides theme resolution from system/user
+/// preferences. Replaces the Iced-coupled `InboxlyTheme`.
 #[derive(Debug, Clone)]
-pub struct InboxlyTheme {
+pub struct ThemeConfig {
     /// The colour tokens for this theme variant.
     pub colors: ThemeColors,
-    /// Cached Iced `Theme` for widget styling.
-    iced_theme: Theme,
 }
 
-impl InboxlyTheme {
+impl ThemeConfig {
     /// Create a theme from the given colour tokens.
     pub fn new(colors: ThemeColors) -> Self {
-        let iced_theme = Self::build_iced_theme(&colors);
-        Self { colors, iced_theme }
+        Self { colors }
     }
 
     /// BigTop light theme.
@@ -247,25 +250,20 @@ impl InboxlyTheme {
         Self::new(ThemeColors::dark())
     }
 
-    /// Get the Iced `Theme` for use in widget styling.
-    pub fn iced_theme(&self) -> &Theme {
-        &self.iced_theme
+    /// Get the colour tokens.
+    pub fn colors(&self) -> &ThemeColors {
+        &self.colors
     }
 
-    /// Convert to an owned Iced `Theme`.
-    pub fn into_iced_theme(self) -> Theme {
-        self.iced_theme
+    /// Whether this is a dark theme.
+    pub fn is_dark(&self) -> bool {
+        self.colors.is_dark
     }
 
     /// Detect system theme preference and return the matching theme.
     ///
     /// Queries `org.freedesktop.portal.Settings` for `color-scheme`.
-    /// Falls back to light theme if:
-    /// - D-Bus is unavailable
-    /// - The portal doesn't support the setting
-    /// - The system reports "no preference"
-    ///
-    /// This is synchronous and safe to call from any context (no Tokio needed).
+    /// Falls back to light theme if detection fails.
     pub fn from_system() -> Self {
         match system::query_system_color_scheme() {
             Ok(SystemColorScheme::Dark) => {
@@ -283,11 +281,7 @@ impl InboxlyTheme {
         }
     }
 
-    /// Resolve theme from user preference (blocking).
-    ///
-    /// - `ThemePreference::Light` -> light theme
-    /// - `ThemePreference::Dark` -> dark theme
-    /// - `ThemePreference::System` -> queries D-Bus portal (blocking Tokio runtime)
+    /// Resolve theme from user preference.
     pub fn from_preference(pref: ThemePreference) -> Self {
         match pref {
             ThemePreference::Light => Self::light(),
@@ -297,9 +291,6 @@ impl InboxlyTheme {
     }
 
     /// Resolve theme from a preference stored in the settings table.
-    ///
-    /// Reads `"theme"` key from the settings store. If not found or
-    /// not parseable, falls back to `ThemePreference::System`.
     pub fn from_settings(settings: &dyn SettingsReader) -> Self {
         let pref = settings
             .get_setting("theme")
@@ -317,9 +308,6 @@ impl InboxlyTheme {
     }
 
     /// Toggle between light and dark themes.
-    ///
-    /// Returns the new theme. Does not persist -- call `save_preference`
-    /// afterwards to persist the choice.
     pub fn toggle(&self) -> Self {
         if self.colors.is_dark {
             Self::light()
@@ -329,9 +317,6 @@ impl InboxlyTheme {
     }
 
     /// Save the current theme preference to the settings store.
-    ///
-    /// Stores `"light"` or `"dark"` under the `"theme"` key.
-    /// When the user explicitly picks a theme, this overrides system detection.
     ///
     /// # Errors
     ///
@@ -354,35 +339,10 @@ impl InboxlyTheme {
     ) -> Result<(), Box<dyn std::error::Error>> {
         settings.set_setting("theme", "system")
     }
-
-    /// Build an Iced `Theme::Custom` from our colour tokens.
-    ///
-    /// Maps our tokens to Iced's `Palette`:
-    /// - `background` -> our `background`
-    /// - `text` -> our `text_primary`
-    /// - `primary` -> our `toolbar_inbox` (the app's primary accent)
-    /// - `success` -> our `toolbar_done` (green for success actions)
-    /// - `warning` -> our `toolbar_snoozed` (orange for snooze/warning)
-    /// - `danger` -> Social bundle red (used for delete/error)
-    fn build_iced_theme(colors: &ThemeColors) -> Theme {
-        let palette = Palette {
-            background: colors.background,
-            text: colors.text_primary,
-            primary: colors.toolbar_inbox,
-            success: colors.toolbar_done,
-            warning: colors.toolbar_snoozed,
-            danger: bundle_colors::SOCIAL.title,
-        };
-
-        let name = if colors.is_dark {
-            "Inboxly Dark"
-        } else {
-            "Inboxly Light"
-        };
-
-        Theme::custom(name.to_owned(), palette)
-    }
 }
+
+/// Backward-compatible alias for `ThemeConfig`.
+pub type InboxlyTheme = ThemeConfig;
 
 // ============================================================================
 // Tests
@@ -454,86 +414,70 @@ mod tests {
         assert!((DIVIDER_THICKNESS - 1.0).abs() < f32::EPSILON);
     }
 
-    // -- M16 InboxlyTheme tests --
+    // -- ThemeConfig tests --
 
     #[test]
     fn light_theme_creates_successfully() {
-        let theme = InboxlyTheme::light();
-        assert!(!theme.colors.is_dark);
+        let theme = ThemeConfig::light();
+        assert!(!theme.is_dark());
     }
 
     #[test]
     fn dark_theme_creates_successfully() {
-        let theme = InboxlyTheme::dark();
-        assert!(theme.colors.is_dark);
+        let theme = ThemeConfig::dark();
+        assert!(theme.is_dark());
     }
 
     #[test]
     fn toggle_light_to_dark() {
-        let light = InboxlyTheme::light();
+        let light = ThemeConfig::light();
         let dark = light.toggle();
-        assert!(dark.colors.is_dark);
+        assert!(dark.is_dark());
     }
 
     #[test]
     fn toggle_dark_to_light() {
-        let dark = InboxlyTheme::dark();
+        let dark = ThemeConfig::dark();
         let light = dark.toggle();
-        assert!(!light.colors.is_dark);
+        assert!(!light.is_dark());
     }
 
     #[test]
     fn toggle_is_involution() {
-        let original = InboxlyTheme::light();
+        let original = ThemeConfig::light();
         let toggled_twice = original.toggle().toggle();
-        assert_eq!(original.colors.is_dark, toggled_twice.colors.is_dark);
+        assert_eq!(original.is_dark(), toggled_twice.is_dark());
     }
 
     #[test]
-    fn iced_theme_is_custom_variant() {
-        let theme = InboxlyTheme::light();
-        let iced = theme.iced_theme();
-        let palette = iced.palette();
-        let bg = palette.background;
+    fn colors_returns_correct_tokens() {
+        let light = ThemeConfig::light();
+        let colors = light.colors();
         let expected = ThemeColors::light().background;
         assert!(
-            (bg.r - expected.r).abs() < 0.01
-                && (bg.g - expected.g).abs() < 0.01
-                && (bg.b - expected.b).abs() < 0.01,
-            "Iced theme palette background doesn't match light theme"
+            (colors.background.r - expected.r).abs() < 0.01
+                && (colors.background.g - expected.g).abs() < 0.01
+                && (colors.background.b - expected.b).abs() < 0.01,
+            "ThemeConfig colors background doesn't match light theme"
         );
     }
 
     #[test]
-    fn iced_theme_dark_palette() {
-        let theme = InboxlyTheme::dark();
-        let palette = theme.iced_theme().palette();
-        let bg = palette.background;
+    fn dark_colors_returns_correct_tokens() {
+        let dark = ThemeConfig::dark();
+        let colors = dark.colors();
         let expected = ThemeColors::dark().background;
         assert!(
-            (bg.r - expected.r).abs() < 0.01
-                && (bg.g - expected.g).abs() < 0.01
-                && (bg.b - expected.b).abs() < 0.01,
-            "Iced theme palette background doesn't match dark theme"
-        );
-    }
-
-    #[test]
-    fn iced_theme_primary_is_toolbar_inbox() {
-        let theme = InboxlyTheme::light();
-        let palette = theme.iced_theme().palette();
-        let primary = palette.primary;
-        let expected = ThemeColors::light().toolbar_inbox;
-        assert!(
-            (primary.r - expected.r).abs() < 0.01
-                && (primary.g - expected.g).abs() < 0.01
-                && (primary.b - expected.b).abs() < 0.01,
+            (colors.background.r - expected.r).abs() < 0.01
+                && (colors.background.g - expected.g).abs() < 0.01
+                && (colors.background.b - expected.b).abs() < 0.01,
+            "ThemeConfig colors background doesn't match dark theme"
         );
     }
 
     #[test]
     fn themed_toolbar_color_uses_theme_values() {
-        let dark = InboxlyTheme::dark();
+        let dark = ThemeConfig::dark();
         let inbox_color = ActiveView::Inbox.toolbar_color_themed(&dark);
         let expected = ThemeColors::dark().toolbar_inbox;
         assert!(
@@ -541,6 +485,13 @@ mod tests {
                 && (inbox_color.g - expected.g).abs() < 0.01
                 && (inbox_color.b - expected.b).abs() < 0.01,
         );
+    }
+
+    #[test]
+    fn toolbar_css_returns_hex_string() {
+        let light = ThemeConfig::light();
+        let css = ActiveView::Inbox.toolbar_css(&light);
+        assert_eq!(css, "#4285f4");
     }
 
     // -- Mock settings tests --
@@ -563,14 +514,14 @@ mod tests {
 
     #[test]
     fn from_preference_light() {
-        let theme = InboxlyTheme::from_preference(ThemePreference::Light);
-        assert!(!theme.colors.is_dark);
+        let theme = ThemeConfig::from_preference(ThemePreference::Light);
+        assert!(!theme.is_dark());
     }
 
     #[test]
     fn from_preference_dark() {
-        let theme = InboxlyTheme::from_preference(ThemePreference::Dark);
-        assert!(theme.colors.is_dark);
+        let theme = ThemeConfig::from_preference(ThemePreference::Dark);
+        assert!(theme.is_dark());
     }
 
     #[test]
@@ -578,8 +529,8 @@ mod tests {
         let settings = MockSettings {
             value: Some("dark".to_owned()),
         };
-        let theme = InboxlyTheme::from_settings(&settings);
-        assert!(theme.colors.is_dark);
+        let theme = ThemeConfig::from_settings(&settings);
+        assert!(theme.is_dark());
     }
 
     #[test]
@@ -587,15 +538,14 @@ mod tests {
         let settings = MockSettings {
             value: Some("light".to_owned()),
         };
-        let theme = InboxlyTheme::from_settings(&settings);
-        assert!(!theme.colors.is_dark);
+        let theme = ThemeConfig::from_settings(&settings);
+        assert!(!theme.is_dark());
     }
 
     #[test]
     fn from_settings_missing_key_defaults_to_system() {
         let settings = MockSettings { value: None };
-        // System detection may or may not work in test, but should not panic.
-        let _theme = InboxlyTheme::from_settings(&settings);
+        let _theme = ThemeConfig::from_settings(&settings);
     }
 
     #[test]
@@ -603,7 +553,7 @@ mod tests {
         let settings = MockSettings {
             value: Some("purple".to_owned()),
         };
-        let _theme = InboxlyTheme::from_settings(&settings);
+        let _theme = ThemeConfig::from_settings(&settings);
     }
 
     #[test]

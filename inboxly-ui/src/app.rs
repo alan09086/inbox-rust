@@ -1,7 +1,4 @@
-//! Core application state and Iced elm-architecture implementation.
-
-use iced::widget::{column, container, row, text};
-use iced::{Element, Length, Task, Theme};
+//! Core application state machine -- no framework dependencies.
 
 use inboxly_core::config::{AccountConfig, AppConfig, AuthMethod, Paths, ThemePreference};
 use inboxly_core::offline::OfflineAction;
@@ -12,8 +9,75 @@ use crate::keyboard::{ShortcutAction, ShortcutMap};
 use crate::nav::{NavBundleCategory, NavTarget, default_bundle_categories};
 use crate::theme::{ActiveView, InboxlyTheme, SettingsReader};
 use crate::undo::{UndoAction, UndoState};
-use crate::views::inbox_view::{InboxViewMessage, inbox_view};
-use crate::views::settings_view::{SettingsTab, StoreSettingsAdapter, settings_view};
+
+/// A 2D point (replaces `iced::Point`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Point {
+    pub x: f32,
+    pub y: f32,
+}
+
+impl Point {
+    pub const ORIGIN: Self = Self { x: 0.0, y: 0.0 };
+
+    pub fn new(x: f32, y: f32) -> Self {
+        Self { x, y }
+    }
+}
+
+/// Settings sidebar tab (moved from `settings_view.rs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum SettingsTab {
+    #[default]
+    General,
+    Accounts,
+    Bundles,
+    Notifications,
+    KeyboardShortcuts,
+    DataStorage,
+}
+
+impl SettingsTab {
+    /// Display label for the sidebar.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::General => "General",
+            Self::Accounts => "Accounts",
+            Self::Bundles => "Bundles",
+            Self::Notifications => "Notifications",
+            Self::KeyboardShortcuts => "Keyboard Shortcuts",
+            Self::DataStorage => "Data & Storage",
+        }
+    }
+
+    /// All tabs in display order.
+    pub fn all() -> &'static [Self] {
+        &[
+            Self::General,
+            Self::Accounts,
+            Self::Bundles,
+            Self::Notifications,
+            Self::KeyboardShortcuts,
+            Self::DataStorage,
+        ]
+    }
+}
+
+/// Adapter that wraps a [`Store`] reference and implements
+/// [`SettingsReader`] from `crate::theme`.
+///
+/// This avoids a circular dependency between `inboxly-store` and `inboxly-ui`.
+pub struct StoreSettingsAdapter<'a> {
+    pub store: &'a Store,
+}
+
+impl SettingsReader for StoreSettingsAdapter<'_> {
+    fn get_setting(&self, key: &str) -> Result<Option<String>, Box<dyn std::error::Error>> {
+        self.store
+            .get_setting(key)
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+    }
+}
 
 /// Top-level application state.
 pub struct Inboxly {
@@ -46,7 +110,7 @@ pub struct Inboxly {
     /// Thread ID whose right-click context menu is currently open.
     pub context_menu_thread: Option<String>,
     /// Cursor position where the context menu was triggered.
-    pub context_menu_position: iced::Point,
+    pub context_menu_position: Point,
 
     // -- Settings state --
     /// Active settings tab (only relevant when active_view == Settings).
@@ -133,8 +197,6 @@ pub enum Message {
     ThemeChanged(InboxlyTheme),
     /// Reload the inbox feed from the store.
     ReloadFeed,
-    /// Message from the inbox view (bundle toggle, etc.).
-    InboxView(InboxViewMessage),
     /// Mark a thread as Done (archive).
     MarkDone(String),
     /// Toggle pin state for a thread.
@@ -157,7 +219,7 @@ pub enum Message {
     /// Open the right-click context menu for a thread at a cursor position.
     OpenContextMenu {
         thread_id: String,
-        position: iced::Point,
+        position: Point,
     },
     /// Close the right-click context menu.
     CloseContextMenu,
@@ -317,7 +379,7 @@ impl Default for Inboxly {
             undo_state: UndoState::new(),
             overflow_menu_thread: None,
             context_menu_thread: None,
-            context_menu_position: iced::Point::ORIGIN,
+            context_menu_position: Point::ORIGIN,
             // Settings state
             settings_tab: SettingsTab::General,
             drawer_was_open: true,
@@ -403,18 +465,17 @@ fn format_size(bytes: u64) -> String {
 }
 
 impl Inboxly {
-    /// Create the app with initial state. Returns (Self, startup Task).
+    /// Create the app with initial state.
     ///
     /// Theme should be resolved before calling this (via
-    /// `InboxlyTheme::from_system()`) since zbus requires Tokio
-    /// and Iced doesn't provide one.
-    pub fn new() -> (Self, Task<Message>) {
+    /// `InboxlyTheme::from_system()`) since zbus requires Tokio.
+    pub fn new() -> Self {
         let mut app = Self {
             theme: InboxlyTheme::from_system(),
             ..Self::default()
         };
         app.reload_feed();
-        (app, Task::none())
+        app
     }
 
     /// Create the app with pre-loaded account configs.
@@ -426,14 +487,14 @@ impl Inboxly {
     }
 
     /// Create the app with a store instance (called from binary crate).
-    pub fn with_store(store: Store) -> (Self, Task<Message>) {
+    pub fn with_store(store: Store) -> Self {
         let mut app = Self {
             store: Some(store),
             theme: InboxlyTheme::from_system(),
             ..Self::default()
         };
         app.reload_feed();
-        (app, Task::none())
+        app
     }
 
     /// Returns the currently active account config.
@@ -461,8 +522,8 @@ impl Inboxly {
             .unwrap_or("No account")
     }
 
-    /// Iced update function -- handle messages and mutate state.
-    pub fn update(&mut self, message: Message) -> Task<Message> {
+    /// Handle a message and mutate state accordingly.
+    pub fn update(&mut self, message: Message) {
         match message {
             Message::Navigate(target) => {
                 if let NavTarget::View(view) = &target {
@@ -502,86 +563,6 @@ impl Inboxly {
             Message::ReloadFeed => {
                 self.reload_feed();
             }
-            Message::InboxView(inbox_msg) => match inbox_msg {
-                InboxViewMessage::ToggleBundle(bundle_id) => {
-                    tracing::debug!("toggle bundle: {bundle_id}");
-                }
-                InboxViewMessage::HoverDone(tid) => {
-                    return self.update(Message::MarkDone(tid));
-                }
-                InboxViewMessage::HoverPin(tid) => {
-                    return self.update(Message::TogglePin(tid));
-                }
-                InboxViewMessage::HoverSnooze(tid) => {
-                    tracing::debug!("hover snooze: {tid}");
-                }
-                InboxViewMessage::OpenOverflow(tid) => {
-                    return self.update(Message::OpenOverflowMenu(tid));
-                }
-                InboxViewMessage::CloseOverflow => {
-                    return self.update(Message::CloseOverflowMenu);
-                }
-                InboxViewMessage::OpenContextMenu {
-                    thread_id,
-                    position,
-                } => {
-                    return self.update(Message::OpenContextMenu {
-                        thread_id,
-                        position,
-                    });
-                }
-                InboxViewMessage::CloseContextMenu => {
-                    return self.update(Message::CloseContextMenu);
-                }
-                InboxViewMessage::MoveTo {
-                    thread_id,
-                    destination,
-                } => {
-                    return self.update(Message::MoveTo {
-                        thread_id,
-                        destination,
-                    });
-                }
-                InboxViewMessage::MarkReadState { thread_id, read } => {
-                    return self.update(Message::MarkReadState { thread_id, read });
-                }
-                InboxViewMessage::MuteThread(tid) => {
-                    return self.update(Message::MuteThread(tid));
-                }
-                InboxViewMessage::ReplyThread(tid) => {
-                    return self.update(Message::Reply(tid));
-                }
-                InboxViewMessage::ReplyAllThread(tid) => {
-                    return self.update(Message::ReplyAll(tid));
-                }
-                InboxViewMessage::ForwardThread(tid) => {
-                    return self.update(Message::Forward(tid));
-                }
-                InboxViewMessage::AddToBundle {
-                    thread_id,
-                    category,
-                } => {
-                    return self.update(Message::AddToBundle {
-                        thread_id,
-                        category,
-                    });
-                }
-                InboxViewMessage::CreateRuleFromSender(sender) => {
-                    return self.update(Message::CreateRuleFromSender(sender));
-                }
-                InboxViewMessage::BlockSender {
-                    thread_id,
-                    sender_address,
-                } => {
-                    return self.update(Message::BlockSender {
-                        thread_id,
-                        sender_address,
-                    });
-                }
-                InboxViewMessage::ReportSpam(tid) => {
-                    return self.update(Message::ReportSpam(tid));
-                }
-            },
             Message::MarkDone(thread_id) => {
                 if let Some(ref store) = self.store {
                     if let Err(e) = store.get_or_create_thread_state(&thread_id) {
@@ -930,7 +911,7 @@ impl Inboxly {
                     || form.smtp_host.is_empty()
                 {
                     // Invalid -- do nothing (UI should show inline validation hints)
-                    return Task::none();
+                    return;
                 }
 
                 if self.adding_account {
@@ -1286,105 +1267,11 @@ impl Inboxly {
                 self.context_menu_thread = None;
             }
         }
-        Task::none()
-    }
-
-    /// Iced view function -- render the entire UI.
-    pub fn view(&self) -> Element<'_, Message> {
-        use crate::nav::view_drawer;
-        use crate::toolbar::view_toolbar;
-
-        let toolbar = view_toolbar(self);
-
-        // Hide nav drawer when Settings is active.
-        let drawer = if self.drawer_open && self.active_view != ActiveView::Settings {
-            Some(view_drawer(self))
-        } else {
-            None
-        };
-
-        // Bundle category names for menu submenus.
-        let bundle_cat_names: Vec<String> = self
-            .bundle_categories
-            .iter()
-            .map(|c| c.name.clone())
-            .collect();
-
-        // Render content area depending on active view.
-        let content_area: Element<Message> = if self.active_view == ActiveView::Settings {
-            settings_view(self)
-        } else if self.active_view == ActiveView::Inbox {
-            inbox_view(
-                &self.feed_sections,
-                self.theme.colors.text_primary,
-                self.theme.colors.text_secondary,
-                self.theme.colors.surface,
-                self.theme.colors.divider,
-                self.theme.colors.toolbar_inbox,
-                self.overflow_menu_thread.as_deref(),
-                self.context_menu_thread.as_deref(),
-                self.context_menu_position,
-                &bundle_cat_names,
-                &self.theme.colors,
-            )
-            .map(Message::InboxView)
-        } else {
-            container(
-                text(format!(
-                    "{} -- content area placeholder",
-                    self.active_view.title()
-                ))
-                .size(16.0),
-            )
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding(crate::theme::DEFAULT_PADDING)
-            .into()
-        };
-
-        // Dismiss account switcher when clicking in the content area.
-        let content_area: Element<Message> = if self.account_switcher_open {
-            iced::widget::mouse_area(content_area)
-                .on_press(Message::ToggleAccountSwitcher)
-                .into()
-        } else {
-            content_area
-        };
-
-        let body: Element<Message> = match drawer {
-            Some(drawer_el) => row![drawer_el, content_area]
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into(),
-            None => content_area,
-        };
-
-        let mut main_column = column![toolbar, body]
-            .width(Length::Fill)
-            .height(Length::Fill);
-
-        // Undo snackbar at the bottom.
-        if let Some(desc) = self.undo_state.description() {
-            main_column = main_column.push(crate::widgets::undo_snackbar::undo_snackbar(
-                &desc,
-                Message::Undo,
-                self.theme.colors.surface,
-                self.theme.colors.text_primary,
-                self.theme.colors.toolbar_inbox,
-            ));
-        }
-
-        main_column.into()
     }
 
     /// Window title.
     pub fn title(&self) -> String {
         format!("Inboxly -- {}", self.active_view.title())
-    }
-
-    /// Iced theme -- returns the current theme for widget styling.
-    pub fn theme(&self) -> Theme {
-        self.theme.iced_theme().clone()
     }
 
     /// Reload the feed from the store (synchronous, fast).
@@ -1590,7 +1477,7 @@ mod tests {
     #[test]
     fn reload_feed_with_store() {
         let store = Store::open_in_memory().expect("in-memory store");
-        let (app, _) = Inboxly::with_store(store);
+        let app = Inboxly::with_store(store);
         assert!(app.feed_sections.is_empty());
     }
 
@@ -1654,7 +1541,7 @@ mod tests {
         let _ = app.update(Message::OpenOverflowMenu("t1".into()));
         let _ = app.update(Message::OpenContextMenu {
             thread_id: "t2".into(),
-            position: iced::Point::new(100.0, 200.0),
+            position: Point::new(100.0, 200.0),
         });
         assert!(app.overflow_menu_thread.is_none());
         assert_eq!(app.context_menu_thread, Some("t2".into()));
@@ -1665,7 +1552,7 @@ mod tests {
         let mut app = Inboxly::default();
         let _ = app.update(Message::OpenContextMenu {
             thread_id: "t1".into(),
-            position: iced::Point::ORIGIN,
+            position: Point::ORIGIN,
         });
         let _ = app.update(Message::OpenOverflowMenu("t2".into()));
         assert!(app.context_menu_thread.is_none());

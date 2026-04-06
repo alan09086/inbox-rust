@@ -3,7 +3,7 @@
 //! All values derived from the BigTop APK colour palette.
 //! Spec reference: Theme System > Light Theme / Dark Theme tables.
 
-use iced::Color;
+use super::color_type::Color;
 
 /// All colour tokens that vary between light and dark themes.
 ///

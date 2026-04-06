@@ -6,7 +6,29 @@
 //!
 //! Spec reference: Theme System > Typography table.
 
-use iced::font::Weight;
+/// Font weight for CSS rendering.
+///
+/// Replaces `iced::font::Weight` — maps to CSS `font-weight` values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Weight {
+    /// Normal weight (CSS 400).
+    Normal,
+    /// Medium weight (CSS 500).
+    Medium,
+    /// Bold weight (CSS 700).
+    Bold,
+}
+
+impl Weight {
+    /// CSS `font-weight` numeric value.
+    pub const fn css_value(&self) -> u16 {
+        match self {
+            Self::Normal => 400,
+            Self::Medium => 500,
+            Self::Bold => 700,
+        }
+    }
+}
 
 /// Toolbar title text.
 pub const TOOLBAR_TITLE_SIZE: f32 = 20.0;

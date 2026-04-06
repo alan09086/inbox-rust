@@ -3,8 +3,7 @@
 //! These are constant across light and dark themes.
 //! Spec reference: Theme System > Avatar Letter Tile Colours.
 
-use iced::Color;
-
+use super::color_type::Color;
 use super::colors::hex;
 
 /// Avatar letter tile colours for A-Z plus a default (index 26).
