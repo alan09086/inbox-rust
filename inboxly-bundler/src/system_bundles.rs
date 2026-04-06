@@ -153,7 +153,7 @@ pub fn ensure_system_bundles(store: &Store) -> crate::Result<Vec<BundleId>> {
             sort_order: def.sort_order,
         };
 
-        store.insert_bundle(&row)?;
+        store.insert_bundle_row(&row)?;
         tracing::info!(bundle_name = def.name, "created system bundle");
         ids.push(id);
     }
@@ -276,7 +276,7 @@ mod tests {
         assert_eq!(ids.len(), 8);
 
         // Verify each exists
-        let all = store.list_bundles().expect("list bundles");
+        let all = store.list_bundle_rows().expect("list bundles");
         assert_eq!(all.len(), 8);
     }
 
@@ -290,7 +290,7 @@ mod tests {
         assert_eq!(ids1, ids2, "bundle IDs should be identical across calls");
 
         // Should still only have 8 bundles total
-        let all = store.list_bundles().expect("list bundles");
+        let all = store.list_bundle_rows().expect("list bundles");
         assert_eq!(all.len(), 8);
     }
 

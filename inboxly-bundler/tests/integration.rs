@@ -118,7 +118,7 @@ fn ensure_system_bundles_creates_all_eight() {
     assert_eq!(ids.len(), 8);
 
     // Verify each bundle exists in the store
-    let all = store.list_bundles().expect("list");
+    let all = store.list_bundle_rows().expect("list");
     assert_eq!(all.len(), 8);
 }
 
@@ -132,7 +132,7 @@ fn ensure_system_bundles_is_idempotent() {
     assert_eq!(ids1, ids2, "bundle IDs should be identical across calls");
 
     // Should still only have 8 bundles total
-    let all = store.list_bundles().expect("list");
+    let all = store.list_bundle_rows().expect("list");
     assert_eq!(all.len(), 8);
 }
 

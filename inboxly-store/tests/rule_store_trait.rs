@@ -17,7 +17,7 @@ fn make_bundle_id() -> Uuid {
 /// Insert a bundle row to satisfy the foreign-key constraint on bundle_rules.
 fn insert_bundle(store: &Store, bundle_id: Uuid) {
     store
-        .insert_bundle(&BundleRow {
+        .insert_bundle_row(&BundleRow {
             id: bundle_id.to_string(),
             category: "user".to_string(),
             name: "Test Bundle".to_string(),

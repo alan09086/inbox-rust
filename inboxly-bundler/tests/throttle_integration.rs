@@ -41,7 +41,7 @@ fn insert_throttled_bundle(store: &Store, name: &str, throttle: &BundleThrottle)
     let id = BundleId::new();
     let json = serde_json::to_string(throttle).expect("serialize throttle");
     store
-        .insert_bundle(&inboxly_store::BundleRow {
+        .insert_bundle_row(&inboxly_store::BundleRow {
             id: id.to_string(),
             category: name.to_string(),
             name: name.to_string(),

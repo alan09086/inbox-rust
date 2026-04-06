@@ -761,7 +761,7 @@ impl Inboxly {
                         .unwrap_or_else(|| vec!["all".to_string()]);
 
                     // Bundle settings
-                    match store.list_bundles() {
+                    match store.list_bundle_rows() {
                         Ok(bundles) => self.settings_bundles = bundles,
                         Err(e) => tracing::warn!("failed to load bundles for settings: {e}"),
                     }
@@ -1111,7 +1111,7 @@ impl Inboxly {
                         "visible".to_owned()
                     };
                     if let Some(ref store) = self.store
-                        && let Err(e) = store.update_bundle(bundle)
+                        && let Err(e) = store.update_bundle_row(bundle)
                     {
                         tracing::warn!("failed to persist bundle visibility: {e}");
                     }
@@ -1124,7 +1124,7 @@ impl Inboxly {
                 if let Some(bundle) = self.settings_bundles.iter_mut().find(|b| b.id == bundle_id) {
                     bundle.throttle = throttle_json;
                     if let Some(ref store) = self.store
-                        && let Err(e) = store.update_bundle(bundle)
+                        && let Err(e) = store.update_bundle_row(bundle)
                     {
                         tracing::warn!("failed to persist bundle throttle: {e}");
                     }
@@ -1136,7 +1136,7 @@ impl Inboxly {
                     if let Some(bundle) = self.settings_bundles.iter_mut().find(|b| &b.id == id) {
                         bundle.sort_order = order as i64;
                         if let Some(ref store) = self.store
-                            && let Err(e) = store.update_bundle(bundle)
+                            && let Err(e) = store.update_bundle_row(bundle)
                         {
                             tracing::warn!("failed to persist bundle reorder: {e}");
                         }
