@@ -25,10 +25,9 @@ pub fn EmailRow(item: FeedItem) -> Element {
     let tid_pin = Arc::clone(&thread_id);
     let tid_snooze = Arc::clone(&thread_id);
     // thread_id itself is moved into the overflow closure below.
-    let sender_address = item.sender_address.clone();
-    // Suppress unused variable warning -- sender_address will be used by
-    // future block/rule actions.
-    let _ = sender_address;
+    let sender_arc: Arc<str> = Arc::from(item.sender_address.as_str());
+    let sender_ctx = Arc::clone(&sender_arc);
+    // sender_arc itself is moved into the overflow closure below.
 
     rsx! {
         div {
@@ -38,6 +37,7 @@ pub fn EmailRow(item: FeedItem) -> Element {
                 let coords = evt.client_coordinates();
                 app_state.write().update(Message::OpenContextMenu {
                     thread_id: tid_ctx.to_string(),
+                    sender_address: sender_ctx.to_string(),
                     position: Point::new(coords.x as f32, coords.y as f32),
                 });
             },
@@ -118,7 +118,13 @@ pub fn EmailRow(item: FeedItem) -> Element {
                 class: "overflow-btn",
                 onclick: move |evt: Event<MouseData>| {
                     evt.stop_propagation();
-                    app_state.write().update(Message::OpenOverflowMenu(thread_id.to_string()));
+                    let coords = evt.client_coordinates();
+                    let position = Point::new(coords.x as f32, coords.y as f32);
+                    app_state.write().update(Message::OpenOverflowMenu {
+                        thread_id: thread_id.to_string(),
+                        sender_address: sender_arc.to_string(),
+                        position,
+                    });
                 },
                 "\u{22EE}"
             }

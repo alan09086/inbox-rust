@@ -109,10 +109,15 @@ pub struct Inboxly {
     pub undo_state: UndoState,
     /// Thread ID whose overflow (three-dot) menu is currently open.
     pub overflow_menu_thread: Option<String>,
+    /// Cursor position where the overflow menu was triggered (popup anchor).
+    pub overflow_menu_position: Point,
     /// Thread ID whose right-click context menu is currently open.
     pub context_menu_thread: Option<String>,
     /// Cursor position where the context menu was triggered.
     pub context_menu_position: Point,
+    /// Sender address of the thread whose menu is open (for BlockSender, CreateRuleFromSender).
+    /// Shared between overflow and context menus — they are mutually exclusive.
+    pub menu_thread_sender: Option<String>,
 
     // -- Settings state --
     /// Active settings tab (only relevant when active_view == Settings).
@@ -223,12 +228,17 @@ pub enum Message {
         until: chrono::DateTime<chrono::Utc>,
     },
     /// Open the overflow (three-dot) menu for a specific thread.
-    OpenOverflowMenu(String),
+    OpenOverflowMenu {
+        thread_id: String,
+        sender_address: String,
+        position: Point,
+    },
     /// Close the overflow menu.
     CloseOverflowMenu,
     /// Open the right-click context menu for a thread at a cursor position.
     OpenContextMenu {
         thread_id: String,
+        sender_address: String,
         position: Point,
     },
     /// Close the right-click context menu.
@@ -399,8 +409,10 @@ impl Default for Inboxly {
             feed_sections: Vec::new(),
             undo_state: UndoState::new(),
             overflow_menu_thread: None,
+            overflow_menu_position: Point::ORIGIN,
             context_menu_thread: None,
             context_menu_position: Point::ORIGIN,
+            menu_thread_sender: None,
             // Settings state
             settings_tab: SettingsTab::General,
             drawer_was_open: true,
@@ -694,23 +706,33 @@ impl Inboxly {
                 }
                 self.reload_feed();
             }
-            Message::OpenOverflowMenu(thread_id) => {
+            Message::OpenOverflowMenu {
+                thread_id,
+                sender_address,
+                position,
+            } => {
                 self.context_menu_thread = None;
                 self.overflow_menu_thread = Some(thread_id);
+                self.overflow_menu_position = position;
+                self.menu_thread_sender = Some(sender_address);
             }
             Message::CloseOverflowMenu => {
                 self.overflow_menu_thread = None;
+                self.menu_thread_sender = None;
             }
             Message::OpenContextMenu {
                 thread_id,
+                sender_address,
                 position,
             } => {
                 self.overflow_menu_thread = None;
                 self.context_menu_thread = Some(thread_id);
                 self.context_menu_position = position;
+                self.menu_thread_sender = Some(sender_address);
             }
             Message::CloseContextMenu => {
                 self.context_menu_thread = None;
+                self.menu_thread_sender = None;
             }
             Message::NavigateToSettings => {
                 self.previous_view = self.active_view;
@@ -1208,6 +1230,7 @@ impl Inboxly {
                 }
                 self.overflow_menu_thread = None;
                 self.context_menu_thread = None;
+                self.menu_thread_sender = None;
             }
             Message::MarkReadState { thread_id, read } => {
                 tracing::info!("mark thread {thread_id} read={read}");
@@ -1233,26 +1256,31 @@ impl Inboxly {
                 }
                 self.overflow_menu_thread = None;
                 self.context_menu_thread = None;
+                self.menu_thread_sender = None;
             }
             Message::MuteThread(thread_id) => {
                 tracing::info!("mute thread {thread_id}");
                 self.overflow_menu_thread = None;
                 self.context_menu_thread = None;
+                self.menu_thread_sender = None;
             }
             Message::Reply(thread_id) => {
                 tracing::info!("reply to thread {thread_id}");
                 self.overflow_menu_thread = None;
                 self.context_menu_thread = None;
+                self.menu_thread_sender = None;
             }
             Message::ReplyAll(thread_id) => {
                 tracing::info!("reply all to thread {thread_id}");
                 self.overflow_menu_thread = None;
                 self.context_menu_thread = None;
+                self.menu_thread_sender = None;
             }
             Message::Forward(thread_id) => {
                 tracing::info!("forward thread {thread_id}");
                 self.overflow_menu_thread = None;
                 self.context_menu_thread = None;
+                self.menu_thread_sender = None;
             }
             Message::AddToBundle {
                 thread_id,
@@ -1261,11 +1289,13 @@ impl Inboxly {
                 tracing::info!("add thread {thread_id} to bundle {category}");
                 self.overflow_menu_thread = None;
                 self.context_menu_thread = None;
+                self.menu_thread_sender = None;
             }
             Message::CreateRuleFromSender(sender) => {
                 tracing::info!("create rule from sender: {sender} (coming soon)");
                 self.overflow_menu_thread = None;
                 self.context_menu_thread = None;
+                self.menu_thread_sender = None;
             }
             Message::BlockSender {
                 thread_id,
@@ -1274,6 +1304,7 @@ impl Inboxly {
                 tracing::info!("block sender {sender_address} (thread {thread_id})");
                 self.overflow_menu_thread = None;
                 self.context_menu_thread = None;
+                self.menu_thread_sender = None;
             }
             Message::ReportSpam(thread_id) => {
                 tracing::info!("report spam: thread {thread_id}");
@@ -1290,6 +1321,7 @@ impl Inboxly {
                 );
                 self.overflow_menu_thread = None;
                 self.context_menu_thread = None;
+                self.menu_thread_sender = None;
             }
             Message::ToggleBundleExpand(id) => {
                 if self.expanded_bundles.contains(&id) {
@@ -1304,6 +1336,7 @@ impl Inboxly {
             } => {
                 self.overflow_menu_thread = None;
                 self.context_menu_thread = None;
+                self.menu_thread_sender = None;
                 self.snooze_picker_thread = Some(thread_id);
                 self.snooze_picker_position = position;
             }
@@ -1579,24 +1612,90 @@ mod tests {
     #[test]
     fn open_overflow_menu_sets_state() {
         let mut app = Inboxly::default();
-        let _ = app.update(Message::OpenOverflowMenu("t1".into()));
+        let _ = app.update(Message::OpenOverflowMenu {
+            thread_id: "t1".into(),
+            sender_address: "a@b.com".into(),
+            position: Point::ORIGIN,
+        });
         assert_eq!(app.overflow_menu_thread, Some("t1".into()));
+    }
+
+    #[test]
+    fn open_overflow_menu_sets_position_and_sender() {
+        let mut app = Inboxly::default();
+        let pos = Point::new(42.0, 100.0);
+        let _ = app.update(Message::OpenOverflowMenu {
+            thread_id: "t1".into(),
+            sender_address: "sender@example.com".into(),
+            position: pos,
+        });
+        assert_eq!(app.overflow_menu_thread, Some("t1".into()));
+        assert_eq!(app.overflow_menu_position, pos);
+        assert_eq!(app.menu_thread_sender, Some("sender@example.com".into()));
+    }
+
+    #[test]
+    fn open_context_menu_sets_sender() {
+        let mut app = Inboxly::default();
+        let pos = Point::new(10.0, 20.0);
+        let _ = app.update(Message::OpenContextMenu {
+            thread_id: "t2".into(),
+            sender_address: "ctx@example.com".into(),
+            position: pos,
+        });
+        assert_eq!(app.context_menu_thread, Some("t2".into()));
+        assert_eq!(app.context_menu_position, pos);
+        assert_eq!(app.menu_thread_sender, Some("ctx@example.com".into()));
     }
 
     #[test]
     fn close_overflow_menu_clears_state() {
         let mut app = Inboxly::default();
-        let _ = app.update(Message::OpenOverflowMenu("t1".into()));
+        let _ = app.update(Message::OpenOverflowMenu {
+            thread_id: "t1".into(),
+            sender_address: "a@b.com".into(),
+            position: Point::ORIGIN,
+        });
         let _ = app.update(Message::CloseOverflowMenu);
         assert!(app.overflow_menu_thread.is_none());
     }
 
     #[test]
+    fn close_overflow_menu_clears_sender() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenOverflowMenu {
+            thread_id: "t1".into(),
+            sender_address: "a@b.com".into(),
+            position: Point::ORIGIN,
+        });
+        let _ = app.update(Message::CloseOverflowMenu);
+        assert!(app.menu_thread_sender.is_none());
+    }
+
+    #[test]
+    fn close_context_menu_clears_sender() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenContextMenu {
+            thread_id: "t1".into(),
+            sender_address: "a@b.com".into(),
+            position: Point::ORIGIN,
+        });
+        let _ = app.update(Message::CloseContextMenu);
+        assert!(app.context_menu_thread.is_none());
+        assert!(app.menu_thread_sender.is_none());
+    }
+
+    #[test]
     fn open_context_menu_closes_overflow() {
         let mut app = Inboxly::default();
-        let _ = app.update(Message::OpenOverflowMenu("t1".into()));
+        let _ = app.update(Message::OpenOverflowMenu {
+            thread_id: "t1".into(),
+            sender_address: "a@b.com".into(),
+            position: Point::ORIGIN,
+        });
         let _ = app.update(Message::OpenContextMenu {
             thread_id: "t2".into(),
+            sender_address: "ctx@b.com".into(),
             position: Point::new(100.0, 200.0),
         });
         assert!(app.overflow_menu_thread.is_none());
@@ -1604,13 +1703,36 @@ mod tests {
     }
 
     #[test]
+    fn opening_context_menu_clears_overflow_sender() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenOverflowMenu {
+            thread_id: "t1".into(),
+            sender_address: "overflow@b.com".into(),
+            position: Point::ORIGIN,
+        });
+        let _ = app.update(Message::OpenContextMenu {
+            thread_id: "t2".into(),
+            sender_address: "ctx@b.com".into(),
+            position: Point::new(5.0, 10.0),
+        });
+        assert!(app.overflow_menu_thread.is_none());
+        // sender reflects the context menu opener, not the overflow one
+        assert_eq!(app.menu_thread_sender, Some("ctx@b.com".into()));
+    }
+
+    #[test]
     fn open_overflow_closes_context_menu() {
         let mut app = Inboxly::default();
         let _ = app.update(Message::OpenContextMenu {
             thread_id: "t1".into(),
+            sender_address: "a@b.com".into(),
             position: Point::ORIGIN,
         });
-        let _ = app.update(Message::OpenOverflowMenu("t2".into()));
+        let _ = app.update(Message::OpenOverflowMenu {
+            thread_id: "t2".into(),
+            sender_address: "b@b.com".into(),
+            position: Point::ORIGIN,
+        });
         assert!(app.context_menu_thread.is_none());
         assert_eq!(app.overflow_menu_thread, Some("t2".into()));
     }
@@ -1618,7 +1740,11 @@ mod tests {
     #[test]
     fn thread_actions_close_menus() {
         let mut app = Inboxly::default();
-        let _ = app.update(Message::OpenOverflowMenu("t1".into()));
+        let _ = app.update(Message::OpenOverflowMenu {
+            thread_id: "t1".into(),
+            sender_address: "a@b.com".into(),
+            position: Point::ORIGIN,
+        });
         let _ = app.update(Message::MoveTo {
             thread_id: "t1".into(),
             destination: MoveDestination::Inbox,
@@ -2187,9 +2313,14 @@ mod tests {
     fn open_snooze_picker_closes_other_menus() {
         let mut app = Inboxly::default();
         // Prime both overflow and context menus.
-        let _ = app.update(Message::OpenOverflowMenu("t0".into()));
+        let _ = app.update(Message::OpenOverflowMenu {
+            thread_id: "t0".into(),
+            sender_address: "a@b.com".into(),
+            position: Point::ORIGIN,
+        });
         let _ = app.update(Message::OpenContextMenu {
             thread_id: "t0".into(),
+            sender_address: "a@b.com".into(),
             position: Point::ORIGIN,
         });
         // Opening the snooze picker must close both.
