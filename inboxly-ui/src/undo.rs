@@ -63,6 +63,13 @@ pub struct UndoState {
     action: Option<UndoAction>,
     /// When the undo window started.
     started_at: Option<Instant>,
+    /// Monotonically increasing counter, incremented on each `push()`.
+    ///
+    /// The UI's undo-expire timer captures this value when spawned and
+    /// compares it when firing — if they differ, a newer action has
+    /// replaced the one the timer was spawned for, so the timer does
+    /// nothing (the newer action's timer will handle its own expiry).
+    generation: u64,
 }
 
 impl Default for UndoState {
@@ -77,14 +84,25 @@ impl UndoState {
         Self {
             action: None,
             started_at: None,
+            generation: 0,
         }
     }
 
     /// Record an undoable action. Replaces any existing pending action
     /// (which is implicitly committed).
     pub fn push(&mut self, action: UndoAction) {
+        self.generation = self.generation.wrapping_add(1);
         self.action = Some(action);
         self.started_at = Some(Instant::now());
+    }
+
+    /// Return the current generation counter.
+    ///
+    /// The UI's expire timer captures this on spawn and re-checks it
+    /// when the sleep finishes; a mismatch means a newer push has
+    /// occurred, so the old timer should no-op.
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     /// Take the pending action (for undo). Returns None if no action or if expired.
@@ -242,5 +260,45 @@ mod tests {
         state.started_at = Some(Instant::now() - UNDO_TIMEOUT - Duration::from_secs(1));
         assert!(!state.is_active());
         assert!(state.take().is_none());
+    }
+
+    #[test]
+    fn generation_increments_on_push() {
+        let mut state = UndoState::new();
+        assert_eq!(state.generation(), 0);
+        state.push(UndoAction::MarkDone {
+            thread_id: "t1".into(),
+        });
+        let gen1 = state.generation();
+        assert_eq!(gen1, 1);
+        state.push(UndoAction::MarkDone {
+            thread_id: "t2".into(),
+        });
+        assert!(state.generation() > gen1);
+    }
+
+    #[test]
+    fn generation_preserved_on_take_and_clear() {
+        let mut state = UndoState::new();
+        state.push(UndoAction::MarkDone {
+            thread_id: "t1".into(),
+        });
+        let gen_before = state.generation();
+        let _ = state.take();
+        assert_eq!(
+            state.generation(),
+            gen_before,
+            "take must not change generation"
+        );
+        state.push(UndoAction::MarkDone {
+            thread_id: "t2".into(),
+        });
+        assert!(state.generation() > gen_before);
+        state.clear();
+        assert_eq!(
+            state.generation(),
+            gen_before + 1,
+            "clear must not change generation"
+        );
     }
 }

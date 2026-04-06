@@ -17,28 +17,36 @@ use crate::undo::UNDO_TIMEOUT;
 pub fn UndoSnackbar() -> Element {
     let mut app_state = use_context::<Signal<Inboxly>>();
 
-    let description = app_state.read().undo_state.description();
-    let Some(description) = description else {
-        return rsx! {};
-    };
+    // Derived signals scoped to just the undo state.
+    // use_memo re-computes only when its reactive reads actually change,
+    // so the effect below re-runs only on undo state transitions — not
+    // on every app-state mutation.
+    let active = use_memo(move || app_state.read().undo_state.is_active());
+    let generation = use_memo(move || app_state.read().undo_state.generation());
+    let description_sig = use_memo(move || app_state.read().undo_state.description());
 
-    // Spawn a 7-second timer that dispatches UndoExpired.
-    // use_effect re-runs whenever the reactive reads inside it change,
-    // so a fresh timer fires for each new undo action.
+    // Spawn a fresh timer each time a new undo action is pushed.
+    // The captured generation lets the timer no-op if a newer action
+    // has replaced it — otherwise stale timers from rapid successive
+    // actions would prematurely expire the newest snackbar.
     use_effect(move || {
-        // Reading is_active() establishes a reactive dependency so this
-        // effect re-runs whenever undo_state changes (new action pushed).
-        let active = app_state.read().undo_state.is_active();
-        if active {
+        if *active.read() {
+            let gen_at_spawn = *generation.read();
             spawn(async move {
                 tokio::time::sleep(UNDO_TIMEOUT).await;
-                // By the time the timer fires the state may already be
-                // cleared (user clicked Undo, or a new action replaced it).
-                // UndoExpired calls undo_state.clear(), which is idempotent.
-                app_state.write().update(Message::UndoExpired);
+                // peek() reads without subscribing -- safe inside async.
+                let current_gen = app_state.peek().undo_state.generation();
+                if current_gen == gen_at_spawn {
+                    app_state.write().update(Message::UndoExpired);
+                }
             });
         }
     });
+
+    // Early return when no active undo.
+    let Some(description) = description_sig.read().clone() else {
+        return rsx! {};
+    };
 
     rsx! {
         div {

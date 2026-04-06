@@ -2411,4 +2411,15 @@ mod tests {
         let _ = app.update(Message::UndoExpired);
         assert!(!app.undo_state.is_active());
     }
+
+    #[test]
+    fn undo_state_reusable_after_expire() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::MarkDone("t1".into()));
+        assert!(app.undo_state.is_active());
+        let _ = app.update(Message::UndoExpired);
+        assert!(!app.undo_state.is_active());
+        let _ = app.update(Message::MarkDone("t2".into()));
+        assert!(app.undo_state.is_active());
+    }
 }
