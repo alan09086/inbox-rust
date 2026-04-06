@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.33.1] - 2026-04-06
+
+### Fixed (post-M33 polish)
+
+Three small rough edges caught on the first real run of the Dioxus build:
+
+- **Window title** — M32 left the window titled "Dioxus App" (the launcher default). Now set to "Inboxly" via `dioxus::LaunchBuilder::desktop().with_cfg(Config::new().with_window(WindowBuilder::new().with_title("Inboxly")))`.
+- **Default WebKitGTK menu bar hidden** — the "Window / Edit / Help" menu that shipped with M32 is now suppressed via `Config::with_menu(None)`.
+- **Dark mode background cascade** — the `body { background: var(--bg-color); }` rule was outside the `[data-theme="dark"]` scope (the attribute lives on `.app-shell`, not on `body` or `html`), so the content area rendered with the light-mode `--bg-color` even when dark mode was active. Added `background: var(--bg-color); color: var(--text-primary);` to `.app-shell` so the custom-property lookup resolves inside the dark-mode scope.
+
 ## [0.33.0] - 2026-04-06
 
 ### Added (M33 — Inbox feed + widgets on Dioxus)
