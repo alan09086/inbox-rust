@@ -5,6 +5,8 @@ use dioxus::prelude::*;
 use crate::app::Inboxly;
 use crate::components::content_area::ContentArea;
 use crate::components::nav_drawer::NavDrawer;
+use crate::components::snooze_picker::SnoozePicker;
+use crate::components::speed_dial_fab::SpeedDialFab;
 use crate::components::toolbar::Toolbar;
 use crate::components::undo_snackbar::UndoSnackbar;
 use crate::theme::{ActiveView, ThemeConfig};
@@ -58,5 +60,13 @@ pub fn App() -> Element {
         }
 
         UndoSnackbar {}
+
+        if active_view != ActiveView::Settings {
+            SpeedDialFab {}
+        }
+
+        if active_view != ActiveView::Settings {
+            SnoozePicker {}
+        }
     }
 }

@@ -10,5 +10,7 @@ pub mod menu_actions;
 pub mod nav_drawer;
 pub mod overflow_menu;
 pub mod section_header;
+pub mod snooze_picker;
+pub mod speed_dial_fab;
 pub mod toolbar;
 pub mod undo_snackbar;
