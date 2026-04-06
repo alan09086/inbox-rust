@@ -7,7 +7,7 @@ use crate::error::Result;
 use crate::store::Store;
 
 /// Summary of a bundle for the inbox feed (collapsed row data).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BundleSummary {
     /// Bundle ID (string UUID).
     pub bundle_id: String,
@@ -26,7 +26,7 @@ pub struct BundleSummary {
 }
 
 /// A sender name for the collapsed bundle preview line.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SenderPreview {
     /// Display name (or email address if no name).
     pub name: String,

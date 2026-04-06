@@ -8,7 +8,8 @@ use crate::components::nav_drawer::NavDrawer;
 use crate::components::toolbar::Toolbar;
 use crate::theme::{ActiveView, ThemeConfig};
 
-/// Window title — updates reactively based on active view.
+/// Window title -- updates reactively based on active view.
+#[allow(dead_code)]
 fn window_title(view: ActiveView) -> String {
     format!("Inboxly \u{2014} {}", view.title())
 }

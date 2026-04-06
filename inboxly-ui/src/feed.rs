@@ -75,7 +75,7 @@ impl DateGroup {
 ///
 /// This is a view-model -- lightweight data extracted from store queries,
 /// not the full `Thread`/`EmailMeta` types.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FeedItem {
     /// Thread ID for navigation and actions.
     pub thread_id: String,
@@ -106,7 +106,7 @@ pub struct FeedItem {
 }
 
 /// A single entry in the feed -- either an email thread or a collapsed bundle.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum FeedEntry {
     /// An individual email thread (unbundled or expanded from a bundle).
     Thread(FeedItem),
@@ -125,7 +125,7 @@ impl FeedEntry {
 }
 
 /// A section of the feed -- a date group header + its entries.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FeedSection {
     /// The date group this section represents.
     pub group: DateGroup,
