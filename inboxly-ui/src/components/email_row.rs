@@ -17,8 +17,11 @@ pub fn EmailRow(item: FeedItem) -> Element {
     // Compute avatar background colour from sender's first letter.
     let avatar_color = avatar_colors::for_letter(item.avatar_letter).to_css();
     let is_unread = item.is_unread;
-    let thread_id = item.thread_id.clone();
+    let thread_id_overflow = item.thread_id.clone();
     let thread_id_ctx = item.thread_id.clone();
+    let thread_id_done = item.thread_id.clone();
+    let thread_id_pin = item.thread_id.clone();
+    let thread_id_snooze = item.thread_id.clone();
     let sender_address = item.sender_address.clone();
     // Suppress unused variable warning -- sender_address will be used by
     // future block/rule actions.
@@ -68,12 +71,44 @@ pub fn EmailRow(item: FeedItem) -> Element {
                     span { class: "email-count-badge", "{item.email_count}" }
                 }
             }
+            // Hover actions: Done, Pin, Snooze
+            div {
+                class: "hover-actions",
+                button {
+                    class: "hover-action-btn",
+                    onclick: move |evt: Event<MouseData>| {
+                        evt.stop_propagation();
+                        app_state.write().update(Message::MarkDone(thread_id_done.clone()));
+                    },
+                    "\u{2713}"
+                }
+                button {
+                    class: "hover-action-btn",
+                    onclick: move |evt: Event<MouseData>| {
+                        evt.stop_propagation();
+                        app_state.write().update(Message::TogglePin(thread_id_pin.clone()));
+                    },
+                    "\u{1F4CC}"
+                }
+                button {
+                    class: "hover-action-btn",
+                    onclick: move |evt: Event<MouseData>| {
+                        evt.stop_propagation();
+                        let coords = evt.client_coordinates();
+                        app_state.write().update(Message::OpenSnoozePicker {
+                            thread_id: thread_id_snooze.clone(),
+                            position: Point::new(coords.x as f32, coords.y as f32),
+                        });
+                    },
+                    "\u{23F0}"
+                }
+            }
             // Overflow (three-dot) menu button
             button {
                 class: "overflow-btn",
                 onclick: move |evt: Event<MouseData>| {
                     evt.stop_propagation();
-                    app_state.write().update(Message::OpenOverflowMenu(thread_id.clone()));
+                    app_state.write().update(Message::OpenOverflowMenu(thread_id_overflow.clone()));
                 },
                 "\u{22EE}"
             }

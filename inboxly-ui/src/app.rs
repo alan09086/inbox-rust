@@ -2140,6 +2140,27 @@ mod tests {
     }
 
     #[test]
+    fn mark_done_pushes_undo_state() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::MarkDone("t1".into()));
+        // MarkDone should push an undo action (no store in test, DB ops are skipped).
+        assert!(app.undo_state.is_active());
+        assert_eq!(
+            app.undo_state.description().as_deref(),
+            Some("Conversation marked done")
+        );
+    }
+
+    #[test]
+    fn toggle_pin_pushes_undo_state() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::TogglePin("t1".into()));
+        // TogglePin with no store defaults was_pinned=false → "Pinned".
+        assert!(app.undo_state.is_active());
+        assert_eq!(app.undo_state.description().as_deref(), Some("Pinned"));
+    }
+
+    #[test]
     fn open_snooze_picker_sets_state() {
         let mut app = Inboxly::default();
         let pos = Point::new(42.0, 84.0);
