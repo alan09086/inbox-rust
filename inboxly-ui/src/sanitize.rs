@@ -45,6 +45,10 @@ pub fn sanitize_html(raw: &str) -> String {
     // values to the sentinel form so the WebKitGTK webview treats
     // clicks as harmless in-page anchors. All other attributes are
     // passed through unchanged.
+    // NOTE: the M34 plan referenced `Builder::url_filter_map`, which does
+    // not exist in ammonia 4.x. We use `attribute_filter` instead — it is
+    // strictly more powerful (sees every retained attribute, not just URL
+    // attributes) and dispatches the same logic. Eng review Issue 1.2.
     builder.attribute_filter(|element, attribute, value| {
         if element == "a" && attribute == "href" {
             // In-page anchors (href="#section") are already safe — leave
@@ -213,6 +217,37 @@ mod tests {
     }
 
     #[test]
+    fn round_trip_scan_logic_finds_sentinel_hrefs() {
+        // Positive control for the round-trip defence tests above.
+        // Those tests iterate over `clean.split("href=\"").skip(1)` to
+        // find hrefs in the sanitised output — which only works if ammonia
+        // emits DOUBLE-QUOTED href attributes. If a future ammonia version
+        // changes its serializer to single quotes or unquoted attributes,
+        // those tests would silently no-op (zero iterations = vacuous pass)
+        // and we'd lose the security tripwire on future ammonia upgrades.
+        //
+        // This test asserts the scan logic can actually locate a sentinel
+        // href when one exists. If ammonia ever switches its quoting style,
+        // this test fails loudly and the engineer fixes the scan logic in
+        // all three tests at once. Eng review Issue 2.2 — defence in depth
+        // for the defence-in-depth tests.
+        let dirty = "<a href=\"https://example.com\">x</a>";
+        let clean = sanitize_html(dirty);
+        let mut found = false;
+        for window in clean.split("href=\"").skip(1) {
+            if let Some(end) = window.find('"') {
+                if extract_ext_url(&window[..end]).is_some() {
+                    found = true;
+                }
+            }
+        }
+        assert!(
+            found,
+            "scan logic failed to locate sentinel href in: {clean}"
+        );
+    }
+
+    #[test]
     fn strips_image_src_for_privacy() {
         // Tracking-pixel case: commercial senders embed <img src="tracker.com/..."
         // in emails so they know when users open them. Stripping src makes the
@@ -222,9 +257,14 @@ mod tests {
         assert!(!clean.contains("tracker.example.com"), "src URL must be gone");
         assert!(!clean.contains("pixel.gif"), "no trace of the tracker path");
         assert!(clean.contains("<p>Hi</p>"), "rest of the body preserved");
-        // Alt text is preserved for screen readers — ammonia's default attribute
-        // list for <img> keeps alt.
-        assert!(clean.contains("alt=\"tracker\"") || clean.contains("<img"));
+        // The <img> tag itself should be preserved as a broken-image placeholder
+        // so layout isn't destroyed.
+        assert!(clean.contains("<img"), "img tag should be preserved");
+        // Alt text should be preserved for screen readers — ammonia's default
+        // attribute list for <img> keeps alt. If ammonia ever drops alt by
+        // default, this test fails loudly so we know to add it back to the
+        // builder explicitly.
+        assert!(clean.contains("alt=\"tracker\""), "alt text should be preserved for accessibility");
     }
 
     #[test]
