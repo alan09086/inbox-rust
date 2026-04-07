@@ -545,6 +545,14 @@ impl Inboxly {
     }
 
     /// Create the app with a store instance (called from binary crate).
+    ///
+    /// `Arc<Store>` is `!Send + !Sync` because `Store` holds a
+    /// `rusqlite::Connection`. This is intentional per the M34 design —
+    /// see `inboxly_store::thread_reader::ThreadReader` for the
+    /// threading caveat. Dioxus's single-threaded executor handles this
+    /// fine; the alternative (refactoring `Store` to be `Send + Sync`)
+    /// is out of scope for M34, so we explicitly allow the lint here.
+    #[allow(clippy::arc_with_non_send_sync)]
     pub fn with_store(store: Store) -> Self {
         let mut app = Self {
             store: Some(Arc::new(store)),
@@ -759,6 +767,12 @@ impl Inboxly {
             Message::OpenThread(thread_id) => {
                 self.open_thread_id = Some(thread_id);
                 self.close_menus();
+                // Phase 10 polish: opening a thread also dismisses the
+                // account switcher. Without this, the row's onclick
+                // (Phase 8) calls stop_propagation() and the existing
+                // .content-area click handler that dismisses the
+                // switcher never fires.
+                self.account_switcher_open = false;
             }
             Message::CloseThread => {
                 self.open_thread_id = None;
@@ -2555,6 +2569,23 @@ mod tests {
         // no field of type LoadedThread.) The test exists to document
         // the contract for future contributors who might be tempted to
         // add an `Option<LoadedThread>` to Inboxly "for convenience".
+        assert_eq!(app.open_thread_id.as_deref(), Some("t1"));
+    }
+
+    #[test]
+    fn open_thread_dismisses_account_switcher() {
+        // Phase 10 polish: opening a thread also dismisses the account
+        // switcher. The row's onclick (Phase 8) calls stop_propagation()
+        // to prevent bubbling, which would otherwise mean the existing
+        // .content-area click handler that dismisses the switcher never
+        // fires when a row is clicked. We compensate inside OpenThread.
+        let mut app = Inboxly::default();
+        app.account_switcher_open = true;
+        let _ = app.update(Message::OpenThread("t1".into()));
+        assert!(
+            !app.account_switcher_open,
+            "OpenThread must dismiss the account switcher"
+        );
         assert_eq!(app.open_thread_id.as_deref(), Some("t1"));
     }
 

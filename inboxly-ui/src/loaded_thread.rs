@@ -101,10 +101,10 @@ pub fn error_thread(thread_id: &str, message: impl Into<String>) -> LoadedThread
 /// "loading" state instead of an awkward gap or stale content.
 ///
 /// `subject == "(loading…)"` is the visible signal; the renderer
-/// can also detect a loading state by checking `messages.is_empty()`
-/// + `error_message.is_none()` + that specific subject. Future
-/// work could promote this to a typed `LoadState` enum at the
-/// signal layer if more states are needed.
+/// can also detect a loading state by checking three conditions
+/// together: `messages.is_empty()`, `error_message.is_none()`, and
+/// that specific subject. Future work could promote this to a typed
+/// `LoadState` enum at the signal layer if more states are needed.
 pub fn loading_thread(thread_id: &str) -> LoadedThread {
     LoadedThread {
         thread_id: thread_id.to_string(),
