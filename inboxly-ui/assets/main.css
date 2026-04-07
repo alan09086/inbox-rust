@@ -934,3 +934,198 @@ body {
 .empty-state-text {
     font-size: 16px;
 }
+
+/* ============================================================
+   15. Thread detail view (M34)
+   ============================================================ */
+
+.thread-detail-view {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow-y: auto;
+    background: var(--bg-color);
+}
+
+.thread-detail-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px var(--default-padding);
+    background: var(--surface-color);
+    border-bottom: var(--divider-thickness) solid var(--divider-color);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.thread-detail-back {
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    font-size: 22px;
+    cursor: pointer;
+    padding: 6px 10px;
+    border-radius: 50%;
+}
+
+.thread-detail-back:hover {
+    background: var(--menu-hover);
+}
+
+.thread-detail-subject {
+    font-size: 18px;
+    font-weight: 500;
+    color: var(--text-primary);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.thread-message {
+    background: var(--surface-color);
+    margin: 12px var(--default-padding);
+    border-radius: 8px;
+    box-shadow: 0 1px 2px var(--menu-shadow);
+    overflow: hidden;
+}
+
+.thread-message-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    border-bottom: var(--divider-thickness) solid var(--divider-color);
+}
+
+.thread-message-from {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+}
+
+.thread-message-sender {
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.thread-message-address {
+    font-size: 12px;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.thread-message-date {
+    font-size: 12px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+.thread-message-body {
+    padding: 18px;
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--text-primary);
+    overflow-x: auto;
+}
+
+.thread-message-body pre {
+    white-space: pre-wrap;
+    font-family: inherit;
+    margin: 0;
+}
+
+.thread-message-body p {
+    margin: 0 0 10px 0;
+}
+
+.thread-message-body p:last-child {
+    margin-bottom: 0;
+}
+
+.thread-message-body a {
+    color: var(--accent-blue);
+    text-decoration: underline;
+}
+
+.thread-message-attachments {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 0 18px 18px 18px;
+    border-top: var(--divider-thickness) solid var(--divider-color);
+    padding-top: 12px;
+}
+
+.thread-message-attachment {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: var(--bg-color);
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--text-primary);
+}
+
+.thread-message-attachment-icon {
+    font-size: 18px;
+    color: var(--text-secondary);
+}
+
+.thread-message-attachment-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.thread-message-attachment-size {
+    font-size: 11px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+.thread-detail-empty {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+    font-size: 14px;
+}
+
+/* Error banner — eng review Issue 2.1. Rendered above the message
+   list when the loader failed (instead of silently showing
+   demo/empty content). Uses the menu-destructive color tokens
+   from M33's CSS palette so dark/light themes work automatically. */
+.thread-detail-error-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 12px var(--default-padding);
+    padding: 12px 16px;
+    background: var(--menu-destructive-hover);
+    color: var(--menu-destructive-text);
+    border-left: 4px solid var(--menu-destructive-text);
+    border-radius: 6px;
+    font-size: 14px;
+}
+
+.thread-detail-error-icon {
+    font-size: 18px;
+    flex-shrink: 0;
+}
+
+.thread-detail-error-text {
+    flex: 1;
+    word-break: break-word;
+}

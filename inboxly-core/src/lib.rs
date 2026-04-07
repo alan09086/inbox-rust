@@ -26,7 +26,7 @@ pub use contact::{
     AVATAR_COLOR_DEFAULT, AVATAR_PALETTE, AvatarColor, Contact, ParsedAddress,
     avatar_color_for_letter, avatar_color_index, parse_address, parse_address_list,
 };
-pub use email::{EmailContent, EmailMeta};
+pub use email::{EmailContent, EmailMeta, SlimEmailContent};
 pub use error::{InboxlyError, Result};
 pub use flags::EmailFlags;
 pub use highlight::{Highlight, TripBundle};

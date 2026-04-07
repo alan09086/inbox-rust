@@ -26,6 +26,9 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "v5", "serde"] }
 tokio = { version = "1", features = ["full"] }
 dioxus = { version = "0.7", features = ["desktop"] }
+ammonia = "4"
+open = "5"
+url = "2"
 
 # Internal crates
 inboxly-core = { path = "inboxly-core" }

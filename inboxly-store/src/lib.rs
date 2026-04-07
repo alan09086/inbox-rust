@@ -24,6 +24,7 @@ mod sender_affinity;
 mod settings;
 mod sync_state;
 mod thread_state;
+pub mod thread_reader;
 pub mod threading;
 mod threads;
 mod throttle;
@@ -33,8 +34,8 @@ pub use store::Store;
 
 pub use maildir_store::{
     MaildirEntry, MaildirStore, ScanError, StandardFolder, StoredEmail, flags_from_filename,
-    flags_to_suffix, parse_email_content, parse_email_meta, rebuild_emails_from_maildir,
-    suffix_to_flags,
+    flags_to_suffix, parse_email_content, parse_email_meta, parse_email_slim,
+    rebuild_emails_from_maildir, suffix_to_flags,
 };
 
 pub mod search;

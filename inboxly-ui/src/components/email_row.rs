@@ -21,6 +21,7 @@ pub fn EmailRow(item: FeedItem) -> Element {
     let is_unread = item.is_unread;
     let thread_id: Arc<str> = Arc::from(item.thread_id.as_str());
     let tid_ctx = Arc::clone(&thread_id);
+    let tid_open = Arc::clone(&thread_id);
     let tid_done = Arc::clone(&thread_id);
     let tid_pin = Arc::clone(&thread_id);
     let tid_snooze = Arc::clone(&thread_id);
@@ -32,6 +33,10 @@ pub fn EmailRow(item: FeedItem) -> Element {
     rsx! {
         div {
             class: if is_unread { "email-row unread" } else { "email-row" },
+            onclick: move |evt: Event<MouseData>| {
+                evt.stop_propagation();
+                app_state.write().update(Message::OpenThread(tid_open.to_string()));
+            },
             oncontextmenu: move |evt: Event<MouseData>| {
                 evt.prevent_default();
                 let coords = evt.client_coordinates();

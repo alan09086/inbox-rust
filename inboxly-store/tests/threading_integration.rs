@@ -726,3 +726,38 @@ fn concurrent_account_threading() {
     assert_eq!(t1, t2); // Same account, same thread.
     assert_ne!(t1, t3); // Different accounts, different threads.
 }
+
+/// M34 phase 4 prep: regression test for `Store::get_emails_by_thread`
+/// returning rows in chronological (date ASC) order.
+///
+/// Insertion order is deliberately scrambled relative to chronological
+/// order — the earliest-dated email is inserted last. Without
+/// `ORDER BY date ASC` in the query, this test would observe
+/// insertion order (or worse, ROWID order) and fail.
+#[test]
+fn get_emails_by_thread_returns_chronological_order() {
+    let store = test_store();
+    store.insert_account(&sample_account()).unwrap();
+
+    // Three emails with the SAME (manually-set) thread_id but
+    // out-of-order dates. We bypass the threading algorithm and
+    // assign thread_id directly so the test focuses purely on the
+    // ordering of `get_emails_by_thread`.
+    let thread_id = "t-ord";
+    let mut e1 = make_email("e1", "e1@ex.com", None, &[], "Latest", 3000, 1);
+    e1.thread_id = thread_id.into();
+    let mut e2 = make_email("e2", "e2@ex.com", None, &[], "Earliest", 1000, 2);
+    e2.thread_id = thread_id.into();
+    let mut e3 = make_email("e3", "e3@ex.com", None, &[], "Middle", 2000, 3);
+    e3.thread_id = thread_id.into();
+
+    store.insert_email(&e1).unwrap();
+    store.insert_email(&e2).unwrap();
+    store.insert_email(&e3).unwrap();
+
+    let rows = store.get_emails_by_thread(thread_id).unwrap();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0].id, "e2", "earliest date should be first");
+    assert_eq!(rows[1].id, "e3", "middle date should be second");
+    assert_eq!(rows[2].id, "e1", "latest date should be last");
+}

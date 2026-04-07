@@ -87,6 +87,27 @@ pub struct EmailContent {
     pub attachments: Vec<Attachment>,
 }
 
+/// Slim view of email content — body text/HTML + attachment metadata only.
+/// Used by the thread detail view where full headers and attachment byte
+/// content aren't needed. Eng review Issue 2.6: avoids carrying 5-20 KB
+/// of headers and potentially MB of attachment bytes through the loader
+/// just to drop them at the rendering step.
+///
+/// When M37 adds attachment download, it will call a separate method
+/// that loads the actual bytes for a single attachment on demand —
+/// this type will NOT be extended to carry byte content.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SlimEmailContent {
+    /// Message-ID (links to EmailMeta).
+    pub id: EmailId,
+    /// Plaintext body (if available).
+    pub body_text: Option<String>,
+    /// HTML body (if available).
+    pub body_html: Option<String>,
+    /// Attachment metadata only — no byte content.
+    pub attachments: Vec<AttachmentMeta>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

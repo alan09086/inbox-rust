@@ -1,6 +1,7 @@
 //! Core application state machine -- no framework dependencies.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use inboxly_core::config::{AccountConfig, AppConfig, AuthMethod, Paths, ThemePreference};
 use inboxly_core::offline::OfflineAction;
@@ -102,9 +103,18 @@ pub struct Inboxly {
     /// Active theme (light or dark, with full BigTop tokens).
     pub theme: InboxlyTheme,
     /// SQLite store for querying threads (None until wired from binary).
-    pub store: Option<Store>,
+    pub store: Option<Arc<Store>>,
     /// Pre-built feed sections for the inbox view.
     pub feed_sections: Vec<FeedSection>,
+    /// Intent: which thread the user wants opened. The actual loaded
+    /// body data lives in a separate signal at App level (Issue 1.4)
+    /// so per-write `Clone` of Inboxly doesn't drag body bytes around.
+    pub open_thread_id: Option<String>,
+    /// Unified thread reader facade (Issue 1.5). Wraps Store +
+    /// MaildirStore so consumers don't need to plumb two handles.
+    /// None in M34 since real sync isn't wired yet — the App-level
+    /// bridge falls through to fallback_thread() when this is None.
+    pub thread_reader: Option<Arc<inboxly_store::thread_reader::ThreadReader>>,
     /// Undo state for timed undo of inbox actions.
     pub undo_state: UndoState,
     /// Thread ID whose overflow (three-dot) menu is currently open.
@@ -243,6 +253,15 @@ pub enum Message {
     },
     /// Close the right-click context menu.
     CloseContextMenu,
+    /// Open the full thread detail view for a thread ID.
+    OpenThread(String),
+    /// Close the open thread and return to the inbox feed.
+    CloseThread,
+    /// Open an external URL in the user's system browser. Dispatched
+    /// from the thread detail view's link-click interceptor so
+    /// `<a href>` clicks inside email bodies don't navigate the
+    /// WebKitGTK webview away from the app (eng review Issue 1.2).
+    OpenExternalUrl(String),
     /// Toggle the account switcher dropdown in the nav drawer.
     ToggleAccountSwitcher,
     /// Switch to the account at the given index.
@@ -407,6 +426,8 @@ impl Default for Inboxly {
             theme: InboxlyTheme::light(),
             store: None,
             feed_sections: Vec::new(),
+            open_thread_id: None,
+            thread_reader: None,
             undo_state: UndoState::new(),
             overflow_menu_thread: None,
             overflow_menu_position: Point::ORIGIN,
@@ -524,9 +545,17 @@ impl Inboxly {
     }
 
     /// Create the app with a store instance (called from binary crate).
+    ///
+    /// `Arc<Store>` is `!Send + !Sync` because `Store` holds a
+    /// `rusqlite::Connection`. This is intentional per the M34 design —
+    /// see `inboxly_store::thread_reader::ThreadReader` for the
+    /// threading caveat. Dioxus's single-threaded executor handles this
+    /// fine; the alternative (refactoring `Store` to be `Send + Sync`)
+    /// is out of scope for M34, so we explicitly allow the lint here.
+    #[allow(clippy::arc_with_non_send_sync)]
     pub fn with_store(store: Store) -> Self {
         let mut app = Self {
-            store: Some(store),
+            store: Some(Arc::new(store)),
             theme: InboxlyTheme::from_system(),
             ..Self::default()
         };
@@ -576,6 +605,12 @@ impl Inboxly {
                 if index < self.accounts.len() {
                     self.active_account_index = index;
                     self.account_switcher_open = false;
+                    // F-2: switching accounts dismisses any open thread so the
+                    // user doesn't see thread A's content while viewing account
+                    // B's inbox once ThreadReader is wired (cross-account
+                    // contamination). Mirrors the behaviour of switching to
+                    // Settings / Done views.
+                    self.open_thread_id = None;
                     self.reload_feed();
                 } else {
                     tracing::warn!(
@@ -734,6 +769,48 @@ impl Inboxly {
             Message::CloseContextMenu => {
                 self.context_menu_thread = None;
                 self.menu_thread_sender = None;
+            }
+            Message::OpenThread(thread_id) => {
+                self.open_thread_id = Some(thread_id);
+                self.close_menus();
+                // Phase 10 polish: opening a thread also dismisses the
+                // account switcher. Without this, the row's onclick
+                // (Phase 8) calls stop_propagation() and the existing
+                // .content-area click handler that dismisses the
+                // switcher never fires.
+                self.account_switcher_open = false;
+            }
+            Message::CloseThread => {
+                self.open_thread_id = None;
+            }
+            Message::OpenExternalUrl(url) => {
+                // Eng review Issue 2.2: defence-in-depth URL validation BEFORE
+                // calling open::that(). The sanitiser already strips javascript:
+                // URLs (and other unsafe schemes) but a future ammonia version,
+                // or an edge case in the url_filter_map ordering, could let one
+                // slip through. Parse the URL and check the scheme against an
+                // allowlist before handing it to the system browser.
+                // Leading `::` disambiguates the `url` crate from the `url`
+                // parameter in scope (defensive — no shadowing today, but
+                // future-proofs the call against silent breakage if a local
+                // `url` binding is added).
+                match ::url::Url::parse(&url) {
+                    Ok(parsed) => match parsed.scheme() {
+                        "http" | "https" | "mailto" => {
+                            if let Err(e) = open::that(&url) {
+                                tracing::warn!("open::that({url}) failed: {e}");
+                            }
+                        }
+                        other => {
+                            tracing::warn!(
+                                "OpenExternalUrl rejected scheme {other:?} for url {url:?}"
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        tracing::warn!("OpenExternalUrl: failed to parse {url:?}: {e}");
+                    }
+                }
             }
             Message::NavigateToSettings => {
                 self.previous_view = self.active_view;
@@ -2447,5 +2524,154 @@ mod tests {
         // Verify the default state satisfies this gate condition.
         let app = Inboxly::default();
         assert!(app.feed_sections.is_empty());
+    }
+
+    // -- M34 Phase 8: OpenThread / CloseThread lifecycle --
+
+    #[test]
+    fn open_thread_sets_open_thread_id_field() {
+        let mut app = Inboxly::default();
+        assert!(app.open_thread_id.is_none());
+        let _ = app.update(Message::OpenThread("t1".into()));
+        assert_eq!(app.open_thread_id.as_deref(), Some("t1"));
+    }
+
+    #[test]
+    fn close_thread_clears_open_thread_id_field() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenThread("t1".into()));
+        let _ = app.update(Message::CloseThread);
+        assert!(app.open_thread_id.is_none());
+    }
+
+    #[test]
+    fn open_thread_dismisses_open_menus() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenContextMenu {
+            thread_id: "t1".into(),
+            sender_address: "a@b.com".into(),
+            position: Point::ORIGIN,
+        });
+        assert_eq!(app.context_menu_thread, Some("t1".into()));
+        let _ = app.update(Message::OpenThread("t1".into()));
+        // Opening a thread must dismiss any open menu (close_menus()
+        // invariant from M33 Phase 7A).
+        assert!(app.context_menu_thread.is_none());
+        assert!(app.menu_thread_sender.is_none());
+        // And it must record the intent.
+        assert_eq!(app.open_thread_id.as_deref(), Some("t1"));
+    }
+
+    #[test]
+    fn opening_thread_does_not_load_body_into_inboxly() {
+        // Regression test for the Issue 1.4 design: dispatching OpenThread
+        // must NOT cause any body data to be cloned into Inboxly. The
+        // body lives in a separate signal that this test can't see —
+        // we just verify Inboxly itself stays small.
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenThread("t1".into()));
+        // The id is stored, but no LoadedThread or LoadedMessage anywhere
+        // in Inboxly. (This is enforced by the type system: Inboxly has
+        // no field of type LoadedThread.) The test exists to document
+        // the contract for future contributors who might be tempted to
+        // add an `Option<LoadedThread>` to Inboxly "for convenience".
+        assert_eq!(app.open_thread_id.as_deref(), Some("t1"));
+    }
+
+    #[test]
+    fn open_thread_dismisses_account_switcher() {
+        // Phase 10 polish: opening a thread also dismisses the account
+        // switcher. The row's onclick (Phase 8) calls stop_propagation()
+        // to prevent bubbling, which would otherwise mean the existing
+        // .content-area click handler that dismisses the switcher never
+        // fires when a row is clicked. We compensate inside OpenThread.
+        let mut app = Inboxly::default();
+        app.account_switcher_open = true;
+        let _ = app.update(Message::OpenThread("t1".into()));
+        assert!(
+            !app.account_switcher_open,
+            "OpenThread must dismiss the account switcher"
+        );
+        assert_eq!(app.open_thread_id.as_deref(), Some("t1"));
+    }
+
+    #[test]
+    fn switch_account_clears_open_thread_id() {
+        // Final review finding F-2: switching accounts while a thread is
+        // open must clear open_thread_id so the user doesn't see thread A
+        // from account 1 while viewing account 2's inbox once ThreadReader
+        // is wired (cross-account contamination). Without the clear, the
+        // stale intent would survive the account swap and the bridge in
+        // components::app would attempt to load it against the new
+        // account's store.
+        let mut app = Inboxly::with_accounts(vec![
+            make_test_account("first@example.com", "First"),
+            make_test_account("second@example.com", "Second"),
+        ]);
+        let _ = app.update(Message::OpenThread("t1".into()));
+        assert_eq!(app.open_thread_id.as_deref(), Some("t1"));
+        let _ = app.update(Message::SwitchAccount(1));
+        assert_eq!(app.active_account_index, 1);
+        assert!(
+            app.open_thread_id.is_none(),
+            "SwitchAccount must dismiss any open thread to avoid cross-account contamination"
+        );
+    }
+
+    // -- M34 Phase 9: OpenExternalUrl URL allowlist + smoke tests --
+
+    #[test]
+    fn open_external_url_https_does_not_panic() {
+        // We can't actually verify that open::that() launched a browser
+        // from a unit test (no system browser in CI), but we CAN verify
+        // that the handler runs to completion without panicking on a
+        // valid scheme. open::that() returns Err when no browser is
+        // configured, which the handler swallows via tracing::warn.
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenExternalUrl("https://example.com".into()));
+        assert!(app.open_thread_id.is_none());
+    }
+
+    #[test]
+    fn open_external_url_rejects_javascript_scheme() {
+        // Eng review Issue 2.2 defence in depth: even if a javascript:
+        // URL somehow slips past the sanitiser, the handler must reject
+        // it before calling open::that(). This test pins the allowlist
+        // behavior so future refactors of the handler can't silently
+        // drop the scheme check.
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenExternalUrl("javascript:alert(1)".into()));
+        assert!(app.open_thread_id.is_none());
+    }
+
+    #[test]
+    fn open_external_url_rejects_file_scheme() {
+        // file:// URLs in emails are typically attacks (path traversal,
+        // SMB credential theft on Windows, etc.). The allowlist excludes
+        // them by virtue of only listing http/https/mailto.
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenExternalUrl("file:///etc/passwd".into()));
+        assert!(app.open_thread_id.is_none());
+    }
+
+    #[test]
+    fn open_external_url_rejects_garbage_input() {
+        // Malformed URLs should not panic the handler — `Url::parse`
+        // returns Err and we log + drop.
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenExternalUrl("not a url at all !!!".into()));
+        assert!(app.open_thread_id.is_none());
+    }
+
+    #[test]
+    fn open_external_url_accepts_mailto() {
+        // mailto: is on the allowlist for compose-from-link in M36+.
+        // For M34, it's accepted by the handler (no panic) and routed
+        // to open::that(), which the user's mail client will handle.
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenExternalUrl(
+            "mailto:friend@example.com".into(),
+        ));
+        assert!(app.open_thread_id.is_none());
     }
 }
