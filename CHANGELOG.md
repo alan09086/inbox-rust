@@ -2,6 +2,48 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.34.0] - 2026-04-07
+
+### Added (M34 — Thread Detail View + HTML email rendering)
+
+Restores the second-most-used surface in an email client: clicking a row to read a thread. Ten phases across nineteen commits, all under a `/plan-eng-review` audit (17 issues found, 16 resolved during the review pass).
+
+- **`ThreadDetailView`** Dioxus component — sticky header bar (back button + subject), error banner, scrollable list of `ThreadMessage` children. Reads from a separate `Signal<Option<Arc<LoadedThread>>>` context provided at App level (eng review Issue 1.4) so per-write `Clone` of `Inboxly` doesn't drag thread body bytes around.
+- **`ThreadMessage`** child component — single-message renderer: avatar tile (reusing `theme::avatar_colors`), sender name + address, formatted date with `(unknown time)` for `Option<DateTime<Utc>>::None` (Issue 2.7), sanitised HTML body via `dangerous_inner_html` OR plain-text body in `<pre>`, optional attachment list. Takes `Arc<LoadedMessage>` so per-render clones in the parent's `for` loop are refcount bumps, not deep clones of body bytes (Issue 2.8).
+- **HTML sanitisation via `ammonia`** (`inboxly-ui::sanitize`) with the project's whitelist on top of ammonia's defaults:
+  - Strips `src` and `srcset` from `<img>` tags to block tracking-pixel phone-home on email open (Issue 1.1). Image tags themselves are preserved as broken-image placeholders so layout isn't destroyed; alt text is kept for screen readers.
+  - Rewrites every `<a href>` URL to a sentinel-prefixed form `#inboxly-ext:<original>` (Issue 1.2). Because the href now starts with `#`, WebKitGTK treats clicks as same-page anchors instead of navigations, preventing the entire app from being replaced by the linked page.
+  - In-page anchors (`href="#section"`) pass through unchanged.
+- **Document-level link-click interceptor** in the App component — JS bridge installed via `document::eval` catches clicks on sentinel-prefixed `<a>` elements and forwards the real URL to Rust via `dioxus.send`. The Rust handler dispatches `Message::OpenExternalUrl(url)` which validates the scheme via `url::Url::parse` against an allowlist (`http`/`https`/`mailto` only — Issue 2.2 defence in depth) and hands the URL to `open::that()` for the system browser. Sentinel constant interpolated via `format!` so there's a single source of truth (Issue 2.4).
+- **Document-level Escape key handler** (Issue 2.3) — JS bridge installed via `document::eval` catches keydown events outside text inputs (`INPUT`, `TEXTAREA`, `isContentEditable`) and dispatches `Message::CloseThread`. Naive `tabindex: 0` + `onkeydown` on `.app-shell` rejected because it would steal focus from text inputs and pollute the tab order. Both JS bridges have `use_drop` cleanup hooks that remove their listeners on App unmount via the `window.__inboxly_*` global property pattern (Issue 4.2).
+- **`ThreadReader` facade in `inboxly-store`** (Issue 1.5) — wraps `Arc<Store>` (SQLite metadata) and `Arc<MaildirStore>` (filesystem bodies) so consumers hold one handle instead of two. Single `load_thread(thread_id) -> Result<Vec<LoadedEmail>, StoreError>` method that hydrates each row's body via `read_email_slim` with `.ok()`-but-logged for non-fatal failures. Hold via `Arc<ThreadReader>` for cheap sharing across components. Future M36 (reply) and M37 (attachments) consumers will inherit this single handle.
+- **`SlimEmailContent` view type in `inboxly-core`** (Issue 2.6) — body text/HTML and attachment metadata only, NO headers HashMap, NO attachment byte content. Used by the thread detail view loader to avoid carrying 5–20 KB of headers and potentially MB of attachment bytes through the loader just to drop them at the rendering step. `MaildirStore::read_email_slim` and `parse_email_slim` are the slim accessors mirroring `read_email_content` and `parse_email_content`.
+- **Two-signal split for thread state** (Issue 1.4) — `Inboxly::open_thread_id: Option<String>` records the user's intent (lightweight, goes through the message-handler state machine). The actual loaded body data lives in a SEPARATE `Signal<Option<Arc<LoadedThread>>>` context provided at App level. ThreadDetailView reads from the body signal directly, NOT from `Inboxly`. A `use_effect` in App watches `open_thread_id` (via `use_memo`) and bridges intent to body data via a Dioxus `spawn`'d task.
+- **Cooperative async loader bridge** (Issue 4.1) — the App-level `use_effect` synchronously sets a `loading_thread()` sentinel, then spawns a Dioxus task that does the actual SQL query + per-row file reads. The click handler returns immediately and the UI shows `(loading…)` until the task completes. The spawn'd task body is still synchronous syscalls on the local single-threaded executor — true async I/O is deferred. A stale-result guard captures the requested id at spawn time and re-checks `open_thread_id` before writing the result, so rapid navigation doesn't let an in-flight load clobber the current view.
+- **Five new `LoadedThread` constructors** in `inboxly-ui::loaded_thread`:
+  - `empty_thread(thread_id)` — release-build placeholder with `(no content available)` subject and empty messages. Always compiled in.
+  - `error_thread(thread_id, message)` — failure path with banner state (Issue 2.1). The ThreadDetailView renders the `error_message` in a red banner above the message list so the user sees what went wrong instead of being silently shown demo/empty content.
+  - `loading_thread(thread_id)` — sentinel during async load (Issue 4.1). `(loading…)` subject.
+  - `demo_thread(thread_id)` — fixture with two fake messages, gated `#[cfg(debug_assertions)]` per Issue 1.3. Release binaries don't ship the fixture data. The first message includes an HTML body with an `<a href="https://example.com">` link so the link-click interceptor can be exercised by hand.
+  - `fallback_thread(thread_id)` — selector that picks `demo_thread` in debug builds and `empty_thread` in release. Single call site for the cfg switch so callers don't have to repeat the gate.
+- **`build_loaded_thread` converter** in `inboxly-ui::loaded_thread` — converts `Vec<LoadedEmail>` (raw storage data) into the UI's `LoadedThread` shape. Picks display names (`from_name` OR `from_address` as fallback), converts UNIX timestamps to `Option<DateTime<Utc>>` (returning `None` for out-of-range timestamps per Issue 2.7 instead of falling back to `Utc::now()`), and passes through attachment metadata.
+- **`Store::get_emails_by_thread` regression test** (Issue 2.5) — pins the `ORDER BY date ASC` invariant so future schema changes can't silently break chronological message ordering. Inserts three emails with out-of-order dates and asserts the read-back is chronological.
+- **6-test `ThreadReader` integration suite** in `inboxly-store/tests/thread_reader.rs` (Issue 3.1) — covers all five production branches against a real on-disk fixture (TempDir for the Maildir, in-memory SQLite for the metadata store): empty thread → Err, body downloaded with valid file → `Some(content)`, body not downloaded → `None`, body downloaded but file missing → `None` (not Err), multi-message chronological ordering, mixed downloaded state per message.
+- **State-machine tests** for the new Message variants:
+  - `OpenThread` sets `open_thread_id`, dismisses any open menu via `close_menus()`, and clears `account_switcher_open`
+  - `CloseThread` clears `open_thread_id`
+  - `OpenThread` does NOT load body data into `Inboxly` (Issue 1.4 contract)
+  - `OpenExternalUrl` accepts `https`/`http`/`mailto`, rejects `javascript:`, `file://`, garbage input, and any other scheme (Issue 2.2)
+  - `SwitchAccount` clears `open_thread_id` (cross-account contamination fix)
+- **CSS foundation** for the thread detail view — 25 selectors using existing custom properties so dark/light mode is automatic. Includes `position: sticky` header, `box-shadow` per message, attachment row styling, and a destructive-coloured error banner for the Issue 2.1 failure path.
+- **Workspace dependencies added**: `ammonia = "4"` (HTML sanitiser), `open = "5"` (system browser handoff for `OpenExternalUrl`), `url = "2"` (URL parsing for the scheme allowlist).
+- **`Inboxly::store` migrated** from `Option<Store>` to `Option<Arc<Store>>` so it can be shared with the `ThreadReader` facade. All ~20 existing call sites compile unchanged via deref coercion.
+- 47 new tests across the surface: 9 LoadedThread constructors + 14 sanitiser + 1 chronological + 1 parse_email_slim + 6 ThreadReader integration + 4 build_loaded_thread + 4 OpenThread state-machine + 5 OpenExternalUrl allowlist + 1 account switcher dismissal + 1 SwitchAccount + 1 sentinel-embedded attack pin = **882 total workspace tests passing** (up from 870 at v0.33.1).
+
+### Architecture
+
+M34 is the first Inboxly milestone to introduce HTML sanitisation, a `dangerous_inner_html` escape hatch (correctly fenced behind sanitisation), a data loader bridging two storage layers (`Store` SQLite + `MaildirStore` filesystem), and a webview JS bridge (`document::eval`). The eng review enforced a defence-in-depth security model for HTML rendering and a clean separation between intent state (Inboxly) and body state (App-level signal context).
+
 ## [0.33.1] - 2026-04-06
 
 ### Fixed (post-M33 polish)
