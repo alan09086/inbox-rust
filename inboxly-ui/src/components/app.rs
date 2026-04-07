@@ -12,9 +12,89 @@ use crate::components::speed_dial_fab::SpeedDialFab;
 use crate::components::toolbar::Toolbar;
 use crate::components::undo_snackbar::UndoSnackbar;
 use crate::loaded_thread::{
-    build_loaded_thread, error_thread, fallback_thread, loading_thread, LoadedThread,
+    LoadedThread, build_loaded_thread, error_thread, fallback_thread, loading_thread,
 };
+use crate::state::{ComposeSendState, ComposeState};
 use crate::theme::{ActiveView, ThemeConfig};
+
+/// UUID v5 namespace for deriving deterministic [`inboxly_core::AccountId`]
+/// values from an account's email address.
+///
+/// `AccountConfig` carries an `email` field but no UUID id (see
+/// `inboxly-core/src/config.rs`). The drafts table column, on the other
+/// hand, expects an `inboxly_core::AccountId` (a `Uuid`). Until the
+/// account model is refactored to carry a real id (out of M35b scope),
+/// the auto-save bridge derives one deterministically from the email so
+/// that successive saves of the same draft target the same row, and so
+/// the Phase 12 send pipeline can resolve the same id from the same
+/// account without coordination.
+///
+/// The namespace UUID below is a fixed v4 token chosen specifically for
+/// inboxly compose drafts — it has no special meaning beyond being a
+/// stable seed. Do NOT change it without a migration plan: every
+/// existing draft row references AccountIds derived from this namespace.
+const COMPOSE_ACCOUNT_NAMESPACE: uuid::Uuid = uuid::uuid!("a4b3c4d5-e6f7-4a8b-9c0d-1e2f3a4b5c6d");
+
+/// Derive a deterministic [`inboxly_core::AccountId`] from an email
+/// address. See [`COMPOSE_ACCOUNT_NAMESPACE`] for the rationale.
+fn account_id_from_email(email: &str) -> inboxly_core::AccountId {
+    inboxly_core::AccountId(uuid::Uuid::new_v5(
+        &COMPOSE_ACCOUNT_NAMESPACE,
+        email.as_bytes(),
+    ))
+}
+
+/// Build a [`inboxly_core::DraftEmail`] snapshot from the current
+/// [`ComposeState`].
+///
+/// The compose state holds `Arc`-wrapped contacts and attachments for
+/// cheap per-render clones; this helper materialises them into the owned
+/// shape the storage layer expects. Returns `None` if `compose.draft_id`
+/// is unset (which shouldn't happen after `OpenCompose` — Gemini G4
+/// ensures eager id assignment — but defensively skip rather than panic).
+///
+/// Used by:
+/// - The Phase 10 auto-save bridge (30 s timer)
+/// - (Future) the Phase 12 send bridge to build the SMTP sender input
+pub(crate) fn compose_state_to_draft_email(
+    compose: &ComposeState,
+    account_id: inboxly_core::AccountId,
+) -> Option<inboxly_core::DraftEmail> {
+    use chrono::Utc;
+    use inboxly_core::DraftEmail;
+
+    let draft_id = compose.draft_id.clone()?;
+    let message_id = format!("<{draft_id}@inboxly.local>");
+    let now = Utc::now();
+
+    Some(DraftEmail {
+        id: draft_id,
+        account_id,
+        message_id,
+        subject: compose.subject.clone(),
+        body_markdown: compose.body_markdown.clone(),
+        to: compose.to.iter().map(|arc| (**arc).clone()).collect(),
+        cc: compose.cc.iter().map(|arc| (**arc).clone()).collect(),
+        bcc: compose.bcc.iter().map(|arc| (**arc).clone()).collect(),
+        attachments: compose
+            .attachments
+            .iter()
+            .map(|arc| (**arc).clone())
+            .collect(),
+        mode: compose.mode.clone(),
+        in_reply_to: None, // M36
+        references: None,  // M36
+        maildir_path: None,
+        // Auto-save doesn't track creation separately from updates; both
+        // timestamps reflect the same instant. The storage layer's
+        // `update_draft` deliberately ignores `created_at` (see
+        // `inboxly-store/src/drafts.rs`), so the only consequence here is
+        // that the very first `insert_draft` call records "created at the
+        // first save" rather than "created at compose-open".
+        created_at: now,
+        updated_at: now,
+    })
+}
 
 /// Window title -- updates reactively based on active view.
 #[allow(dead_code)]
@@ -43,8 +123,7 @@ pub fn App() -> Element {
     // Body data context — separate from Inboxly so per-write clones
     // don't drag the thread body bytes around. ThreadDetailView reads
     // from this signal directly. (Eng review Issue 1.4.)
-    let mut open_thread =
-        use_context_provider(|| Signal::new(None::<Arc<LoadedThread>>));
+    let mut open_thread = use_context_provider(|| Signal::new(None::<Arc<LoadedThread>>));
 
     // Bridge: watch Inboxly::open_thread_id (the intent), and when it
     // changes, run the loader through the ThreadReader facade and
@@ -96,9 +175,7 @@ pub fn App() -> Element {
                                         // Issue 2.1: surface load failures
                                         // to the user via the error banner,
                                         // AND log for developer visibility.
-                                        tracing::warn!(
-                                            "build_loaded_thread({id}) failed: {e}"
-                                        );
+                                        tracing::warn!("build_loaded_thread({id}) failed: {e}");
                                         error_thread(
                                             &id,
                                             format!("Failed to build thread view: {e}"),
@@ -106,9 +183,7 @@ pub fn App() -> Element {
                                     }
                                 },
                                 Err(e) => {
-                                    tracing::warn!(
-                                        "ThreadReader::load_thread({id}) failed: {e}"
-                                    );
+                                    tracing::warn!("ThreadReader::load_thread({id}) failed: {e}");
                                     error_thread(&id, format!("Failed to load thread: {e}"))
                                 }
                             }
@@ -126,11 +201,7 @@ pub fn App() -> Element {
                     // always fast so the race is latent, but once M36/M37
                     // wires the real ThreadReader on cold file reads this
                     // becomes a user-visible bug.
-                    let still_current = app_state
-                        .peek()
-                        .open_thread_id
-                        .as_deref()
-                        == Some(&id);
+                    let still_current = app_state.peek().open_thread_id.as_deref() == Some(&id);
                     if !still_current {
                         tracing::debug!(
                             "ThreadReader: dropping stale load result for thread {id} (user navigated away)"
@@ -145,6 +216,183 @@ pub fn App() -> Element {
                 open_thread.set(None);
             }
         }
+    });
+
+    // ===== M35 Phase 10: Compose auto-save bridge =====
+    //
+    // Watches the compose dirty flag + save_generation. When the user has
+    // unsaved changes, spawn a 30-second timer task. On tick, verify the
+    // state machine is still in a savable state (NOT Sending/Sent —
+    // Gemini G5 handoff to the send pipeline) and the user hasn't already
+    // saved (dirty still true). Capture the save_generation BEFORE the
+    // disk write (Issue 1.8) so the post-save dispatch can decide whether
+    // the user typed mid-save and the dirty flag should stay set.
+    //
+    // The Store::insert_draft / Store::update_draft calls are gated
+    // behind cfg(not(test)) per the M34 side-effects-in-tests precedent
+    // (overnight test runs must not mutate the user's SQLite store).
+    //
+    // The reactive memo deliberately combines (dirty, save_generation,
+    // has_id) so a single rapid edit (which bumps save_generation but
+    // leaves dirty=true) re-fires the effect — that's the desired
+    // behaviour: each user edit resets the 30 s clock by spawning a
+    // fresh timer; the captured generation guard prevents the older
+    // timer from clearing dirty after the newer save has already run.
+    let compose_dirty_signal = use_memo(move || {
+        let s = app_state.read();
+        (
+            s.compose.dirty,
+            s.compose.save_generation,
+            s.compose.draft_id.is_some(),
+        )
+    });
+    use_effect(move || {
+        let (dirty, _generation, has_id) = *compose_dirty_signal.read();
+        if !dirty || !has_id {
+            return;
+        }
+        let mut app_state = app_state;
+        spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+
+            // Resolve everything we need from a single peek() — peek
+            // does NOT subscribe, so re-firing this effect is impossible
+            // from within the spawned task. We extract owned values
+            // before the .await-free section ends so the borrow guard
+            // is dropped before any further work.
+            let (send_state_is_send_pipeline_owned, still_dirty, captured_generation, draft, store) = {
+                let snapshot = app_state.peek();
+
+                // Gemini G5: abort if we entered Sending/Sent state
+                // during the sleep — the send pipeline owns canonical
+                // state during a send.
+                let send_state_is_send_pipeline_owned = matches!(
+                    snapshot.compose.send_state,
+                    ComposeSendState::Sending | ComposeSendState::Sent { .. }
+                );
+
+                // Re-check dirty: someone may have already saved.
+                let still_dirty = snapshot.compose.dirty;
+
+                // Issue 1.8: capture the generation BEFORE writing,
+                // not after. The dispatch back to the handler uses
+                // this value as the "if generation still matches,
+                // clear dirty" guard.
+                let captured_generation = snapshot.compose.save_generation;
+
+                // Resolve the FROM account email so we can derive the
+                // deterministic AccountId. Phase 12 will resolve the
+                // same id from the same account, so the auto-save row
+                // and the send pipeline target the same draft.
+                let account_email = snapshot
+                    .accounts
+                    .get(snapshot.compose.from_account_index)
+                    .map(|a| a.email.clone());
+
+                let draft = match account_email {
+                    Some(email) => {
+                        let account_id = account_id_from_email(&email);
+                        compose_state_to_draft_email(&snapshot.compose, account_id)
+                    }
+                    None => None,
+                };
+
+                let store = snapshot.store.clone();
+
+                (
+                    send_state_is_send_pipeline_owned,
+                    still_dirty,
+                    captured_generation,
+                    draft,
+                    store,
+                )
+            };
+
+            if send_state_is_send_pipeline_owned {
+                tracing::debug!(
+                    "compose auto-save aborted: send_state is Sending/Sent (Gemini G5)"
+                );
+                return;
+            }
+            if !still_dirty {
+                // Someone already saved (manual save in a future phase,
+                // or this is a stale timer from a now-cleared dirty
+                // flag). No-op.
+                return;
+            }
+            let Some(draft) = draft else {
+                tracing::warn!("compose auto-save: no FROM account or no draft_id, skipping save");
+                // Still dispatch the tick so the handler can clear
+                // dirty if generation matches — there's nothing to
+                // persist but we don't want the bridge to keep firing.
+                app_state.write().update(Message::ComposeAutoSaveTick {
+                    generation: captured_generation,
+                });
+                return;
+            };
+
+            // Gated behind cfg(not(test)) per the M34 side-effects-in-
+            // tests precedent. Overnight test runs must never write to
+            // the user's real SQLite store.
+            #[cfg(not(test))]
+            if let Some(store) = store.as_ref() {
+                // Try update first (the row should exist on every
+                // save after the first); fall back to insert on
+                // NotFound for the very first save of a brand-new
+                // draft. Other errors are logged and the tick is
+                // still dispatched so the bridge doesn't retry on
+                // every keystroke.
+                match store.update_draft(&draft) {
+                    Ok(()) => {
+                        tracing::debug!(
+                            draft_id = %draft.id,
+                            "compose auto-save: update_draft ok"
+                        );
+                    }
+                    Err(inboxly_store::StoreError::NotFound(_)) => {
+                        match store.insert_draft(&draft) {
+                            Ok(()) => {
+                                tracing::debug!(
+                                    draft_id = %draft.id,
+                                    "compose auto-save: insert_draft ok"
+                                );
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    draft_id = %draft.id,
+                                    error = %e,
+                                    "compose auto-save: insert_draft failed"
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            draft_id = %draft.id,
+                            error = %e,
+                            "compose auto-save: update_draft failed"
+                        );
+                    }
+                }
+            }
+            #[cfg(test)]
+            {
+                let _ = store; // silence unused warning under cfg(test)
+                tracing::debug!(
+                    draft_id = %draft.id,
+                    "compose auto-save: store write skipped in test mode"
+                );
+            }
+
+            // Dispatch the tick — the handler clears dirty IFF the
+            // captured generation still matches (Issue 1.8 stale-
+            // result guard). If the user typed during the save, the
+            // generation will have advanced and dirty stays true so
+            // the next tick re-saves.
+            app_state.write().update(Message::ComposeAutoSaveTick {
+                generation: captured_generation,
+            });
+        });
     });
 
     // Eng review Issue 2.3: install a document-level Escape handler.
@@ -302,5 +550,67 @@ pub fn App() -> Element {
             SpeedDialFab {}
             SnoozePicker {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use inboxly_core::Contact;
+
+    use super::{ComposeState, account_id_from_email, compose_state_to_draft_email};
+
+    /// `compose_state_to_draft_email` returns `None` when the compose
+    /// state has no `draft_id`. The bridge depends on this so it can
+    /// safely skip the disk write rather than panicking on a half-
+    /// initialised state.
+    #[test]
+    fn helper_returns_none_without_draft_id() {
+        let compose = ComposeState::new();
+        assert!(compose.draft_id.is_none());
+        let id = account_id_from_email("alice@example.com");
+        assert!(compose_state_to_draft_email(&compose, id).is_none());
+    }
+
+    /// Happy path: with a `draft_id` set, the helper materialises the
+    /// `Arc`-wrapped recipients into owned `Contact` values, copies the
+    /// subject/body, and stamps a Message-ID derived from the draft id.
+    #[test]
+    fn helper_materialises_arc_recipients_into_owned() {
+        let mut compose = ComposeState::new();
+        compose.draft_id = Some("d8a17e3b-1234-4abc-9def-000000000001".to_string());
+        compose.subject = "Hello".to_string();
+        compose.body_markdown = "Body".to_string();
+        compose
+            .to
+            .push(Arc::new(Contact::new("Bob", "bob@example.com")));
+
+        let id = account_id_from_email("alice@example.com");
+        let draft = compose_state_to_draft_email(&compose, id)
+            .expect("draft_id is set, helper must return Some");
+        assert_eq!(draft.id, "d8a17e3b-1234-4abc-9def-000000000001");
+        assert_eq!(draft.subject, "Hello");
+        assert_eq!(draft.body_markdown, "Body");
+        assert_eq!(
+            draft.message_id,
+            "<d8a17e3b-1234-4abc-9def-000000000001@inboxly.local>"
+        );
+        assert_eq!(draft.to.len(), 1);
+        assert_eq!(draft.to[0].address, "bob@example.com");
+        assert_eq!(draft.account_id, id);
+    }
+
+    /// `account_id_from_email` is deterministic — same email always
+    /// produces the same `AccountId`. The auto-save bridge relies on
+    /// this so successive saves of the same draft target the same row,
+    /// and Phase 12's send pipeline can resolve the same id.
+    #[test]
+    fn account_id_from_email_is_deterministic() {
+        let a = account_id_from_email("alice@example.com");
+        let b = account_id_from_email("alice@example.com");
+        let c = account_id_from_email("bob@example.com");
+        assert_eq!(a, b);
+        assert_ne!(a, c);
     }
 }
