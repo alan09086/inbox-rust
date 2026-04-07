@@ -142,9 +142,10 @@ Requires Rust edition 2024 (rustc 1.85+).
 | M32 | v0.32.0 | 225 | 🔄 Iced 0.14 → Dioxus 0.7 framework conversion |
 | M33 | v0.33.0 | 242 | 📥 Inbox feed + widgets restored on Dioxus |
 | M33.1 | v0.33.1 | 870 | 🔧 Post-M33 polish (window title, dark mode) |
-| **M34** | **v0.34.0** | **882** | **🧵 Thread detail view + HTML email rendering** |
+| M34 | v0.34.0 | 882 | 🧵 Thread detail view + HTML email rendering |
+| **M34.1** | **v0.34.1** | **884** | **🔧 Post-M34 polish (test side effect, validate_external_url, Settings re-entry)** |
 
-**Current: v0.34.0** — 882 tests, 0 clippy warnings, 8-crate workspace
+**Current: v0.34.1** — 884 tests, 0 clippy warnings, 8-crate workspace
 
 ## 📄 Licence
 

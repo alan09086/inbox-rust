@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.34.1] - 2026-04-07
+
+### Fixed (post-M34 polish)
+
+Three bug fixes caught during the post-merge demo session:
+
+- **`open::that` test side-effect (`#[cfg(not(test))]` gate)** — the M34 Phase 9 `OpenExternalUrl` unit tests dispatched real URLs (`https://example.com`, `mailto:friend@example.com`) through the production handler, which validated the scheme allowlist and then called `open::that()` — actually launching Chrome and kmail every time `cargo test` ran. Approximately 10 background test runs during M34 implementation spawned 10 Chrome windows and 10 kmail compose windows overnight before the bug was caught. Gated `open::that` behind `#[cfg(not(test))]` so the validation logic still runs in tests but the system launch is skipped.
+- **`validate_external_url` pure-function refactor** — followed up the `cfg` gate with the cleaner architectural fix: extract the URL parse + scheme allowlist as a pure function `validate_external_url(&str) -> Result<(), String>`. The handler is now a thin wrapper that calls validation then `open::that` on success. The 5 original handler tests are replaced with 6 pure-function tests (`validate_external_url_*`) that exercise the validation logic with zero state setup and zero side effects. The `cfg(not(test))` gate is preserved as defence in depth.
+- **`NavigateToSettings` re-entry guard** — pre-existing M29-era bug surfaced during M34 demo testing: clicking the gear icon while already in Settings overwrote `previous_view = Settings`, which trapped the user — `NavigateBack` would no-op back to Settings instead of returning to the inbox. Added `if self.active_view != ActiveView::Settings` guard around the `previous_view` and `drawer_was_open` updates inside `NavigateToSettings`. Settings load + active_view assignment still run unconditionally so the handler stays a valid "reload settings" trigger; only the navigation bookkeeping is gated. Regression test `navigate_to_settings_while_already_in_settings_preserves_previous_view` pins the fix.
+
+884 workspace tests passing (was 879 at v0.34.0 — net +5: removed 5 handler tests, added 6 pure-function tests, added 1 Settings re-entry test, added 1 account-switcher dismissal test was already in v0.34.0). Clippy clean. Build clean.
+
 ## [0.34.0] - 2026-04-07
 
 ### Added (M34 — Thread Detail View + HTML email rendering)
