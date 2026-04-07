@@ -102,9 +102,18 @@ pub struct Inboxly {
     /// Active theme (light or dark, with full BigTop tokens).
     pub theme: InboxlyTheme,
     /// SQLite store for querying threads (None until wired from binary).
-    pub store: Option<Store>,
+    pub store: Option<std::sync::Arc<inboxly_store::Store>>,
     /// Pre-built feed sections for the inbox view.
     pub feed_sections: Vec<FeedSection>,
+    /// Intent: which thread the user wants opened. The actual loaded
+    /// body data lives in a separate signal at App level (Issue 1.4)
+    /// so per-write `Clone` of Inboxly doesn't drag body bytes around.
+    pub open_thread_id: Option<String>,
+    /// Unified thread reader facade (Issue 1.5). Wraps Store +
+    /// MaildirStore so consumers don't need to plumb two handles.
+    /// None in M34 since real sync isn't wired yet — the App-level
+    /// bridge falls through to fallback_thread() when this is None.
+    pub thread_reader: Option<std::sync::Arc<inboxly_store::thread_reader::ThreadReader>>,
     /// Undo state for timed undo of inbox actions.
     pub undo_state: UndoState,
     /// Thread ID whose overflow (three-dot) menu is currently open.
@@ -243,6 +252,15 @@ pub enum Message {
     },
     /// Close the right-click context menu.
     CloseContextMenu,
+    /// Open the full thread detail view for a thread ID.
+    OpenThread(String),
+    /// Close the open thread and return to the inbox feed.
+    CloseThread,
+    /// Open an external URL in the user's system browser. Dispatched
+    /// from the thread detail view's link-click interceptor so
+    /// `<a href>` clicks inside email bodies don't navigate the
+    /// WebKitGTK webview away from the app (eng review Issue 1.2).
+    OpenExternalUrl(String),
     /// Toggle the account switcher dropdown in the nav drawer.
     ToggleAccountSwitcher,
     /// Switch to the account at the given index.
@@ -407,6 +425,8 @@ impl Default for Inboxly {
             theme: InboxlyTheme::light(),
             store: None,
             feed_sections: Vec::new(),
+            open_thread_id: None,
+            thread_reader: None,
             undo_state: UndoState::new(),
             overflow_menu_thread: None,
             overflow_menu_position: Point::ORIGIN,
@@ -526,7 +546,7 @@ impl Inboxly {
     /// Create the app with a store instance (called from binary crate).
     pub fn with_store(store: Store) -> Self {
         let mut app = Self {
-            store: Some(store),
+            store: Some(std::sync::Arc::new(store)),
             theme: InboxlyTheme::from_system(),
             ..Self::default()
         };
@@ -734,6 +754,38 @@ impl Inboxly {
             Message::CloseContextMenu => {
                 self.context_menu_thread = None;
                 self.menu_thread_sender = None;
+            }
+            Message::OpenThread(thread_id) => {
+                self.open_thread_id = Some(thread_id);
+                self.close_menus();
+            }
+            Message::CloseThread => {
+                self.open_thread_id = None;
+            }
+            Message::OpenExternalUrl(url) => {
+                // Eng review Issue 2.2: defence-in-depth URL validation BEFORE
+                // calling open::that(). The sanitiser already strips javascript:
+                // URLs (and other unsafe schemes) but a future ammonia version,
+                // or an edge case in the url_filter_map ordering, could let one
+                // slip through. Parse the URL and check the scheme against an
+                // allowlist before handing it to the system browser.
+                match ::url::Url::parse(&url) {
+                    Ok(parsed) => match parsed.scheme() {
+                        "http" | "https" | "mailto" => {
+                            if let Err(e) = open::that(&url) {
+                                tracing::warn!("open::that({url}) failed: {e}");
+                            }
+                        }
+                        other => {
+                            tracing::warn!(
+                                "OpenExternalUrl rejected scheme {other:?} for url {url:?}"
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        tracing::warn!("OpenExternalUrl: failed to parse {url:?}: {e}");
+                    }
+                }
             }
             Message::NavigateToSettings => {
                 self.previous_view = self.active_view;
