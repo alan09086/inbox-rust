@@ -81,6 +81,20 @@ pub struct ComposeState {
     // -- Send state (Gemini G9 two-phase commit) --
     /// Current send pipeline state.
     pub send_state: ComposeSendState,
+
+    // -- Picker bridge trigger (M35 Phase 11) --
+    /// Counter bumped by `Message::ComposeAttachFile`. The Phase 11
+    /// picker bridge in `components::app` watches this and triggers
+    /// `rfd::AsyncFileDialog::pick_file()` when it changes. Using a
+    /// counter (rather than a `bool`) so two consecutive picks of the
+    /// same file count as two distinct events — `bool` would coalesce
+    /// them and the second pick would never spawn the dialog.
+    ///
+    /// `wrapping_add(1)` is used in the handler so the bridge keeps
+    /// firing across the (effectively unreachable) `u64::MAX` boundary
+    /// without panicking. Initial value is `0`; the bridge skips the
+    /// initial render so the dialog does not pop on app start.
+    pub attach_picker_counter: u64,
 }
 
 /// Two-phase commit state for the SMTP send pipeline.
@@ -138,6 +152,7 @@ impl ComposeState {
             dirty: false,
             save_generation: 0,
             send_state: ComposeSendState::Idle,
+            attach_picker_counter: 0,
         }
     }
 

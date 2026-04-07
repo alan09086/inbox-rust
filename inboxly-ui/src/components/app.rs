@@ -96,6 +96,50 @@ pub(crate) fn compose_state_to_draft_email(
     })
 }
 
+/// Infer a MIME type from a filename's extension.
+///
+/// Used by the Phase 11 attachment picker bridge to populate
+/// `AttachmentDraft::mime_type` from the user-picked filename. Covers
+/// the common attachment types (PDFs, images, archives, Office docs,
+/// plain text variants, JSON/XML); everything else falls through to
+/// `application/octet-stream`.
+///
+/// The match is case-insensitive on the extension. Returns owned
+/// `String` because the call site stores it in [`inboxly_core::AttachmentDraft`].
+///
+/// This deliberately does NOT use the `mime_guess` crate — the workspace
+/// already keeps the dependency surface tight, and the ~20 entries below
+/// cover the realistic compose-attachment universe. If a use case
+/// emerges that needs broader coverage, swap to `mime_guess` then.
+fn mime_from_extension(filename: &str) -> String {
+    let ext = std::path::Path::new(filename)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_lowercase)
+        .unwrap_or_default();
+    match ext.as_str() {
+        "pdf" => "application/pdf",
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "txt" | "md" => "text/plain",
+        "html" | "htm" => "text/html",
+        "csv" => "text/csv",
+        "json" => "application/json",
+        "xml" => "application/xml",
+        "zip" => "application/zip",
+        "tar" => "application/x-tar",
+        "gz" => "application/gzip",
+        "doc" => "application/msword",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xls" => "application/vnd.ms-excel",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        _ => "application/octet-stream",
+    }
+    .to_string()
+}
+
 /// Window title -- updates reactively based on active view.
 #[allow(dead_code)]
 fn window_title(view: ActiveView) -> String {
@@ -392,6 +436,179 @@ pub fn App() -> Element {
             app_state.write().update(Message::ComposeAutoSaveTick {
                 generation: captured_generation,
             });
+        });
+    });
+
+    // ===== M35 Phase 11: Compose attachment picker bridge =====
+    //
+    // Watches `compose.attach_picker_counter`, which the
+    // `Message::ComposeAttachFile` handler bumps. When the counter
+    // changes (and is non-zero — initial mount renders with counter=0
+    // and we deliberately do nothing), the bridge spawns a task that:
+    //
+    //   1. Snapshots `draft_id` and the current total attachment size
+    //      from a single `peek()` (peek does NOT subscribe, so the
+    //      spawned task can never re-fire the effect from inside).
+    //   2. Opens `rfd::AsyncFileDialog::pick_file()` — gated behind
+    //      cfg(not(test)) so test runs never open a real dialog
+    //      (M34 side-effects-in-tests precedent).
+    //   3. Reads file *metadata* via `tokio::fs::metadata` — NOT the
+    //      bytes (Gemini G3 metadata-first). The 20 MB total cap is
+    //      enforced from the metadata size before any copy work.
+    //   4. Generates a UUID-suffixed disk filename via
+    //      `inboxly_store::draft_attachments::make_draft_filename`
+    //      (Gemini G2 collision-resistant naming) and copies the
+    //      source into the per-draft directory. The copy is also
+    //      gated behind cfg(not(test)).
+    //   5. Builds an `AttachmentDraft` whose `filename` is the ORIGINAL
+    //      name (for the chip and the eventual MIME `Content-
+    //      Disposition` header) and whose `source` points at the
+    //      UUID-suffixed disk path.
+    //   6. Dispatches `Message::ComposeAttachmentAdded` so the pure
+    //      state machine can register the new attachment.
+    //
+    // Errors from any step are logged via `tracing::warn!` and the
+    // bridge silently aborts — Phase 12 / Phase 13 surface a snackbar.
+    let attach_counter_signal = use_memo(move || {
+        let s = app_state.read();
+        s.compose.attach_picker_counter
+    });
+    use_effect(move || {
+        let counter = *attach_counter_signal.read();
+        if counter == 0 {
+            // Initial render — Phase 6's `ComposeState::new` starts
+            // the counter at 0 so the bridge does not pop a dialog
+            // on app start.
+            return;
+        }
+        let mut app_state = app_state;
+        spawn(async move {
+            // Snapshot the draft_id and current total attachment size
+            // from a single peek() — peek does NOT subscribe, so this
+            // spawned task can never re-fire the parent effect from
+            // within. Mirrors the auto-save bridge pattern.
+            let (draft_id, current_total_size) = {
+                let snapshot = app_state.peek();
+                let Some(draft_id) = snapshot.compose.draft_id.clone() else {
+                    tracing::warn!(
+                        "attach picker: no draft_id on ComposeState, aborting (OpenCompose should set this eagerly per Gemini G4)"
+                    );
+                    return;
+                };
+                let total: u64 = snapshot
+                    .compose
+                    .attachments
+                    .iter()
+                    .map(|a| a.size_bytes)
+                    .sum();
+                (draft_id, total)
+            };
+
+            // Step 2: open the file picker. Gated behind cfg(not(test))
+            // — test runs must NEVER pop a dialog (M34 precedent).
+            #[cfg(not(test))]
+            let picked_path: Option<std::path::PathBuf> = {
+                use rfd::AsyncFileDialog;
+                AsyncFileDialog::new()
+                    .add_filter("All files", &["*"])
+                    .pick_file()
+                    .await
+                    .map(|h| h.path().to_path_buf())
+            };
+            #[cfg(test)]
+            let picked_path: Option<std::path::PathBuf> = None;
+
+            let Some(src_path) = picked_path else {
+                // User cancelled the dialog (or test mode no-op).
+                return;
+            };
+
+            let original_name = src_path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "attachment".to_string());
+
+            // Step 3: metadata-first size check (Gemini G3) — never
+            // load the file bytes into memory.
+            let size = match tokio::fs::metadata(&src_path).await {
+                Ok(m) => m.len(),
+                Err(e) => {
+                    tracing::warn!(
+                        path = %src_path.display(),
+                        error = %e,
+                        "attach picker: failed to stat source file"
+                    );
+                    return;
+                }
+            };
+
+            /// Hard 20 MB cap on the *total* draft attachment size,
+            /// applied across the existing attachments plus the
+            /// candidate. Matches the cap used by the
+            /// `ComposeAttachmentTooLarge` snackbar.
+            const MAX_TOTAL_BYTES: u64 = 20 * 1024 * 1024;
+            // saturating_add: defensive against pathological inputs
+            // (a 18 EB file would otherwise wrap, and clippy
+            // arithmetic_side_effects would catch a bare `+`).
+            if current_total_size.saturating_add(size) > MAX_TOTAL_BYTES {
+                tracing::warn!(
+                    filename = %original_name,
+                    size_bytes = size,
+                    current_total_bytes = current_total_size,
+                    "attach picker: file would push compose draft over the 20 MB cap"
+                );
+                app_state.write().update(Message::ComposeAttachmentTooLarge);
+                return;
+            }
+
+            // Step 4: per-draft directory + UUID-suffixed filename.
+            let dir = match inboxly_store::draft_attachments::ensure_draft_dir(&draft_id) {
+                Ok(d) => d,
+                Err(e) => {
+                    tracing::warn!(
+                        draft_id = %draft_id,
+                        error = %e,
+                        "attach picker: ensure_draft_dir failed"
+                    );
+                    return;
+                }
+            };
+            let uuid = uuid::Uuid::new_v4();
+            let disk_name =
+                inboxly_store::draft_attachments::make_draft_filename(&original_name, uuid);
+            let dest = dir.join(&disk_name);
+
+            // Copy the source into the per-draft directory. Gated
+            // behind cfg(not(test)) so test runs never touch disk.
+            #[cfg(not(test))]
+            if let Err(e) = tokio::fs::copy(&src_path, &dest).await {
+                tracing::warn!(
+                    src = %src_path.display(),
+                    dest = %dest.display(),
+                    error = %e,
+                    "attach picker: copy to per-draft directory failed"
+                );
+                return;
+            }
+            #[cfg(test)]
+            {
+                // Suppress unused-variable warnings under cfg(test).
+                let _ = &src_path;
+                let _ = &dest;
+            }
+
+            let mime_type = mime_from_extension(&original_name);
+
+            let att = inboxly_core::AttachmentDraft {
+                filename: original_name,
+                mime_type,
+                size_bytes: size,
+                source: inboxly_core::AttachmentSource::Disk(dest),
+            };
+
+            app_state
+                .write()
+                .update(Message::ComposeAttachmentAdded(Arc::new(att)));
         });
     });
 

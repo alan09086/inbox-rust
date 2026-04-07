@@ -1624,11 +1624,17 @@ impl Inboxly {
                 }
             }
             Message::ComposeAttachFile => {
-                // Phase 11 wires the rfd file picker bridge. Phase 6
-                // accepts the message so the UI button has a stable
-                // target; the actual picker dispatch lives outside the
-                // pure state machine.
-                tracing::debug!("ComposeAttachFile -- file picker bridge is M35 phase 11");
+                // M35 Phase 11: bump the picker counter so the bridge in
+                // `components::app` reacts and opens the rfd file dialog.
+                // The state machine itself never touches the file system
+                // — that lives in the bridge, gated behind cfg(not(test))
+                // (M34 side-effects-in-tests precedent).
+                //
+                // wrapping_add: u64 will not realistically wrap, but the
+                // wrapping form keeps clippy::arithmetic_side_effects
+                // happy and prevents an unreachable panic at u64::MAX.
+                self.compose.attach_picker_counter =
+                    self.compose.attach_picker_counter.wrapping_add(1);
             }
             Message::ComposeAttachmentAdded(att) => {
                 if matches!(self.compose.send_state, ComposeSendState::Sending) {

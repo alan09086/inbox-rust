@@ -2481,6 +2481,7 @@ name = "inboxly-store"
 version = "0.34.1"
 dependencies = [
  "chrono",
+ "dirs",
  "inboxly-core",
  "maildir",
  "mailparse 0.15.0",
