@@ -2,6 +2,7 @@
 
 pub mod app;
 pub mod bundle_row;
+pub mod compose_view;
 pub mod content_area;
 pub mod context_menu;
 pub mod email_row;

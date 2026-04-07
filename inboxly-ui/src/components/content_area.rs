@@ -5,6 +5,7 @@ use std::sync::Arc;
 use dioxus::prelude::*;
 
 use crate::app::{Inboxly, Message};
+use crate::components::compose_view::ComposeView;
 use crate::components::empty_state::EmptyState;
 use crate::components::inbox_feed::InboxFeed;
 use crate::components::inbox_zero::InboxZero;
@@ -61,16 +62,7 @@ pub fn ContentArea() -> Element {
                         text: "No done conversations".to_string()
                     }
                 },
-                ActiveView::Compose => rsx! {
-                    // Phase 8 replaces this placeholder with the real
-                    // ComposeView component. Phase 6 only delivers the
-                    // state machine, so we render a stub here so the
-                    // exhaustive match keeps compiling.
-                    div {
-                        style: "display: flex; align-items: center; justify-content: center; flex: 1; color: var(--text-secondary);",
-                        "Compose \u{2014} coming soon"
-                    }
-                },
+                ActiveView::Compose => rsx! { ComposeView {} },
                 ActiveView::Settings => rsx! {
                     div {
                         style: "display: flex; align-items: center; justify-content: center; flex: 1; color: var(--text-secondary);",
