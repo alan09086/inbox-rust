@@ -1,6 +1,7 @@
 //! Core application state machine -- no framework dependencies.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use inboxly_core::config::{AccountConfig, AppConfig, AuthMethod, Paths, ThemePreference};
 use inboxly_core::offline::OfflineAction;
@@ -102,7 +103,7 @@ pub struct Inboxly {
     /// Active theme (light or dark, with full BigTop tokens).
     pub theme: InboxlyTheme,
     /// SQLite store for querying threads (None until wired from binary).
-    pub store: Option<std::sync::Arc<inboxly_store::Store>>,
+    pub store: Option<Arc<Store>>,
     /// Pre-built feed sections for the inbox view.
     pub feed_sections: Vec<FeedSection>,
     /// Intent: which thread the user wants opened. The actual loaded
@@ -113,7 +114,7 @@ pub struct Inboxly {
     /// MaildirStore so consumers don't need to plumb two handles.
     /// None in M34 since real sync isn't wired yet — the App-level
     /// bridge falls through to fallback_thread() when this is None.
-    pub thread_reader: Option<std::sync::Arc<inboxly_store::thread_reader::ThreadReader>>,
+    pub thread_reader: Option<Arc<inboxly_store::thread_reader::ThreadReader>>,
     /// Undo state for timed undo of inbox actions.
     pub undo_state: UndoState,
     /// Thread ID whose overflow (three-dot) menu is currently open.
@@ -546,7 +547,7 @@ impl Inboxly {
     /// Create the app with a store instance (called from binary crate).
     pub fn with_store(store: Store) -> Self {
         let mut app = Self {
-            store: Some(std::sync::Arc::new(store)),
+            store: Some(Arc::new(store)),
             theme: InboxlyTheme::from_system(),
             ..Self::default()
         };
@@ -769,6 +770,10 @@ impl Inboxly {
                 // or an edge case in the url_filter_map ordering, could let one
                 // slip through. Parse the URL and check the scheme against an
                 // allowlist before handing it to the system browser.
+                // Leading `::` disambiguates the `url` crate from the `url`
+                // parameter in scope (defensive — no shadowing today, but
+                // future-proofs the call against silent breakage if a local
+                // `url` binding is added).
                 match ::url::Url::parse(&url) {
                     Ok(parsed) => match parsed.scheme() {
                         "http" | "https" | "mailto" => {
