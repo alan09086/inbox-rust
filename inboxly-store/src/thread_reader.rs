@@ -35,12 +35,22 @@ pub struct LoadedEmail {
 
 /// Facade that hides the two-store coupling for thread loading.
 /// Hold via `Arc<ThreadReader>` for cheap sharing across components.
+///
+/// **Threading note:** `ThreadReader` is `!Send + !Sync` because
+/// `Store` holds a `rusqlite::Connection`. It works fine with
+/// Dioxus's single-threaded `spawn` executor but cannot be moved
+/// into `tokio::spawn` or `std::thread::spawn`. M36/M37 consumers
+/// should hold it via `use_context::<Signal<Option<Arc<ThreadReader>>>>()`
+/// or pass it through component props, not via background tasks.
 pub struct ThreadReader {
     store: Arc<Store>,
     maildir: Arc<MaildirStore>,
 }
 
 impl ThreadReader {
+    /// Build a new `ThreadReader` from existing store handles. Both
+    /// `Store` and `MaildirStore` are held by `Arc` for cheap sharing
+    /// across components.
     pub fn new(store: Arc<Store>, maildir: Arc<MaildirStore>) -> Self {
         Self { store, maildir }
     }
@@ -66,6 +76,13 @@ impl ThreadReader {
                     // attachment bytes for the thread detail view.
                     self.maildir
                         .read_email_slim(Path::new(&row.maildir_path))
+                        .inspect_err(|e| {
+                            tracing::warn!(
+                                path = %row.maildir_path,
+                                error = %e,
+                                "ThreadReader: failed to read email body for thread detail"
+                            );
+                        })
                         .ok()
                 } else {
                     None
@@ -77,14 +94,8 @@ impl ThreadReader {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    // Pure unit tests for ThreadReader require a full SQLite + Maildir
-    // fixture. Defer to Step 4.5 (integration test) which sets
-    // up a temp dir and exercises the full path. Module-level tests
-    // here only assert that the type compiles.
-    #[test]
-    fn types_compile() {
-        let _ = std::marker::PhantomData::<super::ThreadReader>;
+impl std::fmt::Debug for ThreadReader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ThreadReader").finish_non_exhaustive()
     }
 }
