@@ -14,5 +14,6 @@ pub mod overflow_menu;
 pub mod section_header;
 pub mod snooze_picker;
 pub mod speed_dial_fab;
+pub mod thread_message;
 pub mod toolbar;
 pub mod undo_snackbar;
