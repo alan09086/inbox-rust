@@ -5,10 +5,12 @@
 //! feature state is added. Mirrors the existing `UndoState` pattern from
 //! `crate::undo`.
 
+pub mod compose_state;
 pub mod menu_state;
 pub mod settings_state;
 pub mod snooze_state;
 
+pub use compose_state::{ComposeSendState, ComposeState};
 pub use menu_state::MenuState;
 pub use settings_state::SettingsState;
 pub use snooze_state::SnoozeState;

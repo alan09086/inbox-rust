@@ -23,3 +23,4 @@ open.workspace = true
 url.workspace = true
 pulldown-cmark.workspace = true
 rfd.workspace = true
+uuid.workspace = true
