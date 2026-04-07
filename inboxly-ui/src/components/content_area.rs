@@ -1,11 +1,15 @@
 //! Content area component -- shows the active view's content.
 
+use std::sync::Arc;
+
 use dioxus::prelude::*;
 
 use crate::app::{Inboxly, Message};
 use crate::components::empty_state::EmptyState;
 use crate::components::inbox_feed::InboxFeed;
 use crate::components::inbox_zero::InboxZero;
+use crate::components::thread_detail_view::ThreadDetailView;
+use crate::loaded_thread::LoadedThread;
 use crate::theme::ActiveView;
 
 /// Content area that renders the active view.
@@ -16,6 +20,7 @@ use crate::theme::ActiveView;
 #[component]
 pub fn ContentArea() -> Element {
     let mut app_state = use_context::<Signal<Inboxly>>();
+    let open_thread = use_context::<Signal<Option<Arc<LoadedThread>>>>();
     let state = app_state.read();
 
     let view = state.active_view;
@@ -23,6 +28,8 @@ pub fn ContentArea() -> Element {
     let inbox_empty = state.feed_sections.is_empty();
 
     drop(state);
+
+    let thread_open = open_thread.read().is_some();
 
     rsx! {
         div {
@@ -34,7 +41,9 @@ pub fn ContentArea() -> Element {
             },
             match view {
                 ActiveView::Inbox => {
-                    if inbox_empty {
+                    if thread_open {
+                        rsx! { ThreadDetailView {} }
+                    } else if inbox_empty {
                         rsx! { InboxZero {} }
                     } else {
                         rsx! { InboxFeed {} }
