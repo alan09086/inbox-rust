@@ -15,6 +15,7 @@ use tracing::{info, warn};
 use inboxly_core::{AccountConfig, AuthMethod, DraftEmail};
 
 use crate::auth::shared_oauth2::SharedOAuth2;
+use crate::smtp::draft_sender::DraftSender;
 use crate::smtp::error::SmtpError;
 use crate::smtp::message_builder::build_rfc5322_for_smtp;
 use crate::smtp::redact::redact_for_log;
@@ -199,4 +200,11 @@ fn classify_lettre_error(err: &lettre::transport::smtp::Error) -> SmtpError {
     // Connection / Network / Tls / TransportShutdown / Client / Timeout — all
     // map to transient NetworkError. The retry loop handles them.
     SmtpError::NetworkError { reason: message }
+}
+
+#[async_trait::async_trait]
+impl DraftSender for SmtpSender {
+    async fn send_draft(&self, draft: &DraftEmail) -> Result<(), SmtpError> {
+        self.send(draft).await
+    }
 }

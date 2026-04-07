@@ -27,13 +27,13 @@
 //! actual folder name is used. That refactor is deferred to M36 once
 //! Phase 13 manual verification confirms whether Gmail breaks.
 
+use std::fmt::Debug;
 use std::str::FromStr;
 
 use async_imap::Session;
 use lettre::Address;
 use lettre::message::Mailbox;
-use tokio::net::TcpStream;
-use tokio_rustls::client::TlsStream;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::{info, warn};
 
 use inboxly_core::{AccountConfig, DraftEmail};
@@ -61,11 +61,14 @@ const SENT_MAILBOX: &str = "Sent";
 ///
 /// The caller is expected to log-and-continue on error rather than
 /// abort the send pipeline.
-pub async fn imap_append_draft(
-    session: &mut Session<TlsStream<TcpStream>>,
+pub async fn imap_append_draft<S>(
+    session: &mut Session<S>,
     config: &AccountConfig,
     draft: &DraftEmail,
-) -> Result<()> {
+) -> Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + Debug,
+{
     let from = build_from_mailbox(config)?;
     let message = build_rfc5322_for_sent_folder(draft, &from)
         .map_err(|e| ImapError::Io(std::io::Error::other(format!("build draft message: {e}"))))?;
@@ -103,11 +106,14 @@ pub async fn imap_append_draft(
 ///
 /// Phase 12's send bridge enqueues a replay action on failure rather
 /// than failing the overall send (Gemini G6).
-pub async fn imap_append_sent(
-    session: &mut Session<TlsStream<TcpStream>>,
+pub async fn imap_append_sent<S>(
+    session: &mut Session<S>,
     config: &AccountConfig,
     draft: &DraftEmail,
-) -> Result<()> {
+) -> Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + Debug,
+{
     let from = build_from_mailbox(config)?;
     let message = build_rfc5322_for_sent_folder(draft, &from)
         .map_err(|e| ImapError::Io(std::io::Error::other(format!("build sent message: {e}"))))?;

@@ -2438,6 +2438,7 @@ name = "inboxly-imap"
 version = "0.34.1"
 dependencies = [
  "async-imap",
+ "async-trait",
  "base64",
  "chrono",
  "futures",

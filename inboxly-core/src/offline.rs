@@ -6,6 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::email::DraftEmail;
+
 /// An action taken by the user while offline (or during sync).
 ///
 /// Queued in SQLite's `offline_queue` table as JSON and replayed
@@ -63,9 +65,29 @@ pub enum OfflineAction {
         imap_uid: u32,
     },
     /// Send a queued draft (composed offline). Handled by SMTP (M23).
+    ///
+    /// Legacy form: only the maildir `.eml` path is preserved, so the
+    /// replay handler must reparse the file back into a `DraftEmail`.
+    /// Kept for backwards compatibility with queue entries written
+    /// before M35b — new entries should use [`Self::SendDraftFull`].
     SendDraft {
         account_id: String,
         draft_maildir_path: String,
+    },
+
+    /// **M35b path**: Send a draft whose full [`DraftEmail`] is embedded
+    /// in the action payload. Replaces the legacy [`Self::SendDraft`]
+    /// for new drafts queued by Phase 12's send bridge. The legacy
+    /// variant is preserved so existing queue entries from before M35b
+    /// still replay correctly.
+    ///
+    /// `draft` is boxed so this variant doesn't bloat the size of the
+    /// other (small) `OfflineAction` variants — `DraftEmail` is ~350
+    /// bytes due to its `Vec<Contact>` / `Vec<AttachmentDraft>` /
+    /// timestamp fields.
+    SendDraftFull {
+        /// Fully-hydrated draft, including markdown body and recipients.
+        draft: Box<DraftEmail>,
     },
 }
 
@@ -82,6 +104,7 @@ impl OfflineAction {
             Self::MoveToFolder { .. } => "move_to_folder",
             Self::MarkAnswered { .. } => "mark_answered",
             Self::SendDraft { .. } => "send_draft",
+            Self::SendDraftFull { .. } => "send_draft_full",
         }
     }
 }
@@ -89,6 +112,7 @@ impl OfflineAction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::id::AccountId;
 
     #[test]
     fn test_variant_names() {
@@ -161,6 +185,9 @@ mod tests {
                 account_id: "a".into(),
                 draft_maildir_path: "/tmp/d.eml".into(),
             },
+            OfflineAction::SendDraftFull {
+                draft: Box::new(DraftEmail::new_empty(AccountId::new())),
+            },
         ];
 
         let expected_names = [
@@ -173,6 +200,7 @@ mod tests {
             "move_to_folder",
             "mark_answered",
             "send_draft",
+            "send_draft_full",
         ];
 
         for (action, expected) in variants.iter().zip(expected_names.iter()) {
