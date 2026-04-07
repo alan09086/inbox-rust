@@ -30,6 +30,7 @@ uuid = { version = "1", features = ["v4"] }
 mailparse = "0.15"
 tokio-util = { version = "0.7", features = ["rt"] }
 serde_json = "1"
+lettre.workspace = true
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }

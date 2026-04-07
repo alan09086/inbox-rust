@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::attachment::{Attachment, AttachmentMeta};
+use crate::attachment::{Attachment, AttachmentDraft, AttachmentMeta};
 use crate::contact::Contact;
 use crate::flags::EmailFlags;
 use crate::id::{AccountId, EmailId, ThreadId};
@@ -106,6 +106,118 @@ pub struct SlimEmailContent {
     pub body_html: Option<String>,
     /// Attachment metadata only — no byte content.
     pub attachments: Vec<AttachmentMeta>,
+}
+
+/// Mode of an in-progress compose operation.
+///
+/// Set when the user opens compose. The variants tell the message builder
+/// which RFC 5322 reply headers to populate (`In-Reply-To`, `References`).
+///
+/// `Reply`, `ReplyAll`, and `Forward` are placeholder variants for M36 — they
+/// exist in the enum so the storage layer doesn't need a migration when M36
+/// implements them, but dispatching them in M35 is a runtime error.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ComposeMode {
+    /// Brand-new compose, no reply context.
+    #[default]
+    New,
+    /// Reply to one message in a thread (M36 — placeholder).
+    Reply {
+        /// Thread the reply belongs to.
+        thread_id: ThreadId,
+        /// Email being replied to.
+        original_email_id: EmailId,
+    },
+    /// Reply-all to one message in a thread (M36 — placeholder).
+    ReplyAll {
+        /// Thread the reply belongs to.
+        thread_id: ThreadId,
+        /// Email being replied to.
+        original_email_id: EmailId,
+    },
+    /// Forward one message (M36 — placeholder).
+    Forward {
+        /// Thread the forwarded email belongs to.
+        thread_id: ThreadId,
+        /// Email being forwarded.
+        original_email_id: EmailId,
+    },
+}
+
+/// An in-progress draft email being composed by the user.
+///
+/// Lives in the `drafts` SQLite table (Phase 2 migration), the local Maildir
+/// `.Drafts/` folder, AND the IMAP server's `Drafts` folder. The three layers
+/// are reconciled by `Message-ID` — the field below is the canonical identifier
+/// across all three storage tiers.
+///
+/// Distinct from `EmailMeta`/`EmailContent`: those describe a fully-sent
+/// message that arrived via IMAP. `DraftEmail` describes something still
+/// being composed and not yet on the wire.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DraftEmail {
+    /// Unique draft id (UUID v4 string).
+    pub id: String,
+    /// Account this draft will be sent FROM.
+    pub account_id: AccountId,
+    /// RFC 5322 Message-ID. Generated at draft creation and never changes.
+    /// Used as the dedup key across SQLite, Maildir, and IMAP Drafts folder.
+    pub message_id: String,
+    /// Subject line.
+    pub subject: String,
+    /// Markdown body source. Rendered to HTML + plaintext at send time.
+    pub body_markdown: String,
+    /// Recipients.
+    pub to: Vec<Contact>,
+    /// CC recipients.
+    pub cc: Vec<Contact>,
+    /// BCC recipients (envelope-only when sent).
+    pub bcc: Vec<Contact>,
+    /// Compose-time attachments. Files live in
+    /// `~/.local/share/inboxly/drafts/<id>/`.
+    pub attachments: Vec<AttachmentDraft>,
+    /// New compose vs reply/replyall/forward (M36 placeholders).
+    pub mode: ComposeMode,
+    /// `In-Reply-To` header value (only set when `mode` is Reply/ReplyAll).
+    pub in_reply_to: Option<String>,
+    /// `References` header value (chain of ancestors).
+    pub references: Option<String>,
+    /// Path to the local Maildir `.Drafts/` file (set on explicit save).
+    pub maildir_path: Option<PathBuf>,
+    /// Created at.
+    pub created_at: DateTime<Utc>,
+    /// Last updated at.
+    pub updated_at: DateTime<Utc>,
+}
+
+impl DraftEmail {
+    /// Create a new empty draft for the given account.
+    ///
+    /// Generates a fresh UUID for `id` and a Message-ID of the form
+    /// `<{uuid}@inboxly.local>`. The created/updated timestamps are set to now.
+    #[must_use]
+    pub fn new_empty(account_id: AccountId) -> Self {
+        let id = uuid::Uuid::new_v4().to_string();
+        let message_id = format!("<{id}@inboxly.local>");
+        let now = Utc::now();
+        Self {
+            id,
+            account_id,
+            message_id,
+            subject: String::new(),
+            body_markdown: String::new(),
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            attachments: Vec::new(),
+            mode: ComposeMode::New,
+            in_reply_to: None,
+            references: None,
+            maildir_path: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
 }
 
 #[cfg(test)]
