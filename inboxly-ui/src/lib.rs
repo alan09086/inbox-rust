@@ -9,5 +9,6 @@ pub mod feed;
 pub mod keyboard;
 pub mod loaded_thread;
 pub mod nav;
+pub mod sanitize;
 pub mod theme;
 pub mod undo;
