@@ -797,9 +797,24 @@ impl Inboxly {
                 match ::url::Url::parse(&url) {
                     Ok(parsed) => match parsed.scheme() {
                         "http" | "https" | "mailto" => {
+                            // CRITICAL: skip the actual `open::that` call in
+                            // test mode. Without this gate, `cargo test`
+                            // launches the user's real browser and mail
+                            // client every time the OpenExternalUrl unit
+                            // tests run — see the post-M34 incident where
+                            // ~10 background test runs spawned 10 browser
+                            // windows and 10 kmail compose windows
+                            // overnight. The validation logic above is
+                            // still exercised in tests; only the system
+                            // side effect is gated out.
+                            #[cfg(not(test))]
                             if let Err(e) = open::that(&url) {
                                 tracing::warn!("open::that({url}) failed: {e}");
                             }
+                            #[cfg(test)]
+                            tracing::debug!(
+                                "OpenExternalUrl: would open {url} (skipped in test mode)"
+                            );
                         }
                         other => {
                             tracing::warn!(
