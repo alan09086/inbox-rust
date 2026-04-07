@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use dioxus::prelude::*;
 
-use crate::app::Inboxly;
+use crate::app::{Inboxly, Message};
 use crate::components::content_area::ContentArea;
 use crate::components::nav_drawer::NavDrawer;
 use crate::components::snooze_picker::SnoozePicker;
@@ -123,6 +123,131 @@ pub fn App() -> Element {
                 open_thread.set(None);
             }
         }
+    });
+
+    // Eng review Issue 2.3: install a document-level Escape handler.
+    // The JS side checks `event.target` to avoid intercepting Escape
+    // inside text inputs (search box, compose fields, settings), where
+    // the user almost certainly meant "clear my input". Only when the
+    // active element is NOT an input does the listener forward the
+    // Escape to Rust, which closes the open thread.
+    //
+    // Eng review Issue 4.2: the listener is bound to a globally-accessible
+    // window property so the use_drop cleanup hook below can remove it
+    // by reference. Without that, App component re-mounts (hot reload,
+    // future tests) would stack listeners.
+    use_effect(move || {
+        let mut app_state = app_state;
+        spawn(async move {
+            let mut ch = document::eval(
+                r#"
+                window.__inboxly_escape_handler = (e) => {
+                    if (e.key !== 'Escape') return;
+                    // Don't intercept Escape inside text inputs.
+                    const t = e.target;
+                    const tag = t && t.tagName;
+                    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+                    if (t && t.isContentEditable) return;
+                    e.preventDefault();
+                    dioxus.send('escape');
+                };
+                document.addEventListener('keydown', window.__inboxly_escape_handler, true);
+                "#,
+            );
+            // The JS side sends a literal "escape" string on every
+            // qualifying keypress. We don't care about the value —
+            // any message on the channel is an Escape intent.
+            while let Ok(_token) = ch.recv::<String>().await {
+                let state = app_state.peek();
+                if state.open_thread_id.is_some() {
+                    drop(state);
+                    app_state.write().update(Message::CloseThread);
+                }
+            }
+        });
+    });
+
+    // Eng review Issue 4.2: cleanup on App component unmount.
+    // Removes the global Escape listener so re-mounts don't stack.
+    // Fire-and-forget — we don't need to await the JS execution.
+    use_drop(|| {
+        let _ = document::eval(
+            r#"
+            if (window.__inboxly_escape_handler) {
+                document.removeEventListener('keydown', window.__inboxly_escape_handler, true);
+                delete window.__inboxly_escape_handler;
+            }
+            "#,
+        );
+    });
+
+    // Install a one-shot global click interceptor for email-body links.
+    // Sanitised email HTML has all `<a href>` rewritten to a sentinel
+    // prefix (see `crate::sanitize::EXT_URL_SENTINEL`) so clicks don't
+    // navigate the webview away from the app. This listener catches
+    // those clicks, strips the sentinel prefix, and dispatches
+    // OpenExternalUrl which calls open::that() to hand the URL to the
+    // system browser.
+    //
+    // Eng review Issue 2.4: the sentinel string is interpolated from
+    // the Rust constant via format! so there's a single source of
+    // truth. Do NOT hardcode the prefix in the JS source.
+    //
+    // The listener is attached once at mount (no cleanup) and runs
+    // for the life of the app. It's a no-op for any href that doesn't
+    // start with the sentinel, so it doesn't interfere with Dioxus's
+    // own button onclicks.
+    use_effect(move || {
+        let mut app_state = app_state;
+        spawn(async move {
+            // Single source of truth for the sentinel prefix.
+            let sentinel = crate::sanitize::EXT_URL_SENTINEL;
+            // Build the JS source at runtime so the prefix is
+            // interpolated from the Rust constant. Note the doubled
+            // braces `{{` / `}}` are format! literal escapes — the
+            // resulting JS has single braces as expected.
+            //
+            // Eng review Issue 4.2: the handler is bound to a globally-
+            // accessible window property so the use_drop cleanup hook
+            // below can remove it on App unmount.
+            let js_source = format!(
+                r#"
+                window.__inboxly_link_click_handler = (e) => {{
+                    const a = e.target.closest && e.target.closest('a');
+                    if (!a) return;
+                    const href = a.getAttribute('href');
+                    const SENTINEL = '{sentinel}';
+                    if (href && href.startsWith(SENTINEL)) {{
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const url = href.substring(SENTINEL.length);
+                        dioxus.send(url);
+                    }}
+                }};
+                document.addEventListener('click', window.__inboxly_link_click_handler, true);
+                "#
+            );
+            let mut ch = document::eval(&js_source);
+            // Drain the channel: every URL the JS side forwards becomes
+            // one OpenExternalUrl dispatch. The `recv` loop never exits
+            // until the component unmounts (app close).
+            while let Ok(url) = ch.recv::<String>().await {
+                app_state.write().update(Message::OpenExternalUrl(url));
+            }
+        });
+    });
+
+    // Eng review Issue 4.2: cleanup on App component unmount.
+    // Removes the global click listener so re-mounts don't stack.
+    use_drop(|| {
+        let _ = document::eval(
+            r#"
+            if (window.__inboxly_link_click_handler) {
+                document.removeEventListener('click', window.__inboxly_link_click_handler, true);
+                delete window.__inboxly_link_click_handler;
+            }
+            "#,
+        );
     });
 
     let is_dark = app_state.read().theme.colors.is_dark;
