@@ -15,6 +15,7 @@
 //! - Push sync: IDLE command with timeout, reconnect loop
 //! - Sync lifecycle: per-account sync loops, multi-account management
 
+pub mod append;
 pub mod auth;
 pub mod body_fetch;
 pub mod body_processor;
@@ -35,6 +36,7 @@ pub mod sync_manager;
 pub mod tls;
 
 // Convenience re-exports
+pub use append::{imap_append_draft, imap_append_sent};
 pub use auth::{GmailOAuth2Config, OAuth2Token, PasswordCredentials, XOAuth2Credentials};
 pub use auth::{SharedOAuth2, SharedOAuth2State};
 pub use channel::{SyncEvent, UiCommand, create_sync_channels};

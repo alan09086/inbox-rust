@@ -995,6 +995,96 @@ pub fn rebuild_emails_from_maildir(
     Ok((count, errors))
 }
 
+// M35b Phase 4: Message-ID dedup lookup for the compose draft sync path.
+
+impl MaildirStore {
+    /// Return `true` if any message in `folder` has a `Message-ID:` header
+    /// matching `message_id`.
+    ///
+    /// Used by the M35b draft sync dedup path (Phase 4b) to avoid downloading
+    /// an IMAP Drafts folder entry that was already written locally via the
+    /// compose-time Maildir save. Walks the folder's `cur/` and `new/`
+    /// entries and parses each one's headers via `mailparse` until a match
+    /// is found or the folder is exhausted.
+    ///
+    /// `message_id` may be passed with or without surrounding angle brackets
+    /// (e.g. both `"<uuid@inboxly.local>"` and `"uuid@inboxly.local"` work) —
+    /// the helper normalises both sides by trimming `<` and `>` before
+    /// comparison.
+    ///
+    /// # Behaviour on missing folders
+    ///
+    /// Returns `Ok(false)` (NOT `Err`) if the folder's underlying directory
+    /// does not yet exist on disk. This is the expected state for a fresh
+    /// account that has never had a draft synced. The `maildir` crate's
+    /// `list_cur` / `list_new` iterators yield zero entries (rather than
+    /// erroring) when the directory is missing, so the loop simply
+    /// completes with no match.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError::Maildir`] if a Maildir entry can be enumerated
+    /// but its underlying file metadata operation fails (e.g. permission
+    /// denied during the directory walk). Per-file read or parse failures
+    /// for individual `.eml` files are SKIPPED — a single corrupt file must
+    /// not prevent the dedup check from completing.
+    ///
+    /// # Performance
+    ///
+    /// This is an O(n) linear scan with one `read` + `parse_mail` per entry.
+    /// Drafts folders are typically tiny (<100 entries) so this is acceptable
+    /// for M35b. A future optimisation can maintain an in-memory Message-ID
+    /// index alongside the Maildir.
+    pub fn has_message_id(
+        &self,
+        folder: StandardFolder,
+        message_id: &str,
+    ) -> Result<bool, StoreError> {
+        let normalized_target = message_id.trim_matches(|c| c == '<' || c == '>');
+        if normalized_target.is_empty() {
+            // An empty needle would match every parsed message that lacks a
+            // Message-ID header (because we'd compare "" == ""). Bail early.
+            return Ok(false);
+        }
+
+        let md = self.maildir_for(&folder);
+
+        // Chain new/ and cur/ — drafts may live in either depending on
+        // whether they've been "delivered" (moved from new -> cur) yet.
+        for entry in md.list_new().chain(md.list_cur()) {
+            let entry = entry.map_err(|e| {
+                StoreError::Maildir(format!(
+                    "has_message_id: failed to enumerate {:?}: {e}",
+                    folder
+                ))
+            })?;
+
+            let path = entry.path();
+            let data = match std::fs::read(path) {
+                Ok(d) => d,
+                Err(_) => continue, // skip unreadable files
+            };
+
+            let parsed = match parse_mail(&data) {
+                Ok(p) => p,
+                Err(_) => continue, // skip unparseable files
+            };
+
+            let existing = parsed
+                .headers
+                .get_first_value("Message-ID")
+                .unwrap_or_default();
+            let existing_normalized = existing.trim().trim_matches(|c| c == '<' || c == '>');
+
+            if existing_normalized == normalized_target {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+}
+
 // Flag encoding/decoding tests (Task 3)
 #[cfg(test)]
 mod tests {

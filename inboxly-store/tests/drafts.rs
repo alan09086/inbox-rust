@@ -3,15 +3,17 @@
 //! All tests use an in-memory SQLite DB — no temp files. Each test runs the
 //! v4 -> v5 migration automatically via `Store::open_in_memory()`.
 
+use std::fs;
 use std::path::PathBuf;
 
 use chrono::Utc;
+use tempfile::TempDir;
 use uuid::Uuid;
 
 use inboxly_core::{
     AccountId, AttachmentDraft, AttachmentSource, ComposeMode, Contact, DraftEmail,
 };
-use inboxly_store::Store;
+use inboxly_store::{MaildirStore, StandardFolder, Store};
 
 /// Build a sample draft. `id` and `message_id` are caller-supplied so each
 /// test can place multiple drafts in the same DB without UNIQUE conflicts.
@@ -220,5 +222,111 @@ fn draft_with_attachments_round_trips() {
     assert_eq!(
         round.maildir_path.as_deref(),
         Some(std::path::Path::new("/home/alan/Mail/.Drafts/cur/d1:2,DS"))
+    );
+}
+
+// ===== M35b Phase 4: MaildirStore::has_message_id =====
+
+/// Build a minimal RFC 5322 message body containing the given Message-ID.
+fn make_eml(message_id: &str) -> Vec<u8> {
+    format!(
+        "From: sender@example.com\r\n\
+         To: recipient@example.com\r\n\
+         Subject: Test\r\n\
+         Message-ID: {message_id}\r\n\
+         Date: Mon, 07 Apr 2026 12:00:00 +0000\r\n\
+         \r\n\
+         Body text.\r\n"
+    )
+    .into_bytes()
+}
+
+#[test]
+fn has_message_id_finds_existing_and_skips_unrelated() {
+    let tmp = TempDir::new().expect("tmpdir");
+    let store = MaildirStore::new(tmp.path().to_path_buf());
+    store.init().expect("init maildir");
+
+    // Drop two drafts into .Drafts/cur/ via the public store_cur API.
+    let target_eml = make_eml("<target@inboxly.local>");
+    let other_eml = make_eml("<other@example.com>");
+    store
+        .store_cur(
+            &StandardFolder::Drafts,
+            &target_eml,
+            &inboxly_core::EmailFlags {
+                draft: true,
+                ..Default::default()
+            },
+        )
+        .expect("store target draft");
+    store
+        .store_cur(
+            &StandardFolder::Drafts,
+            &other_eml,
+            &inboxly_core::EmailFlags {
+                draft: true,
+                ..Default::default()
+            },
+        )
+        .expect("store other draft");
+
+    // Exact bracketed match.
+    assert!(
+        store
+            .has_message_id(StandardFolder::Drafts, "<target@inboxly.local>")
+            .expect("has_message_id ok"),
+        "expected exact bracketed Message-ID to match"
+    );
+
+    // Without brackets — the helper must normalise both sides.
+    assert!(
+        store
+            .has_message_id(StandardFolder::Drafts, "target@inboxly.local")
+            .expect("has_message_id ok"),
+        "expected unbracketed Message-ID to normalise and match"
+    );
+
+    // A different Message-ID must not match.
+    assert!(
+        !store
+            .has_message_id(StandardFolder::Drafts, "<nonexistent@example.com>")
+            .expect("has_message_id ok"),
+        "non-existent Message-ID must not match"
+    );
+
+    // The Sent folder is initialised but empty — must return Ok(false), not Err.
+    assert!(
+        !store
+            .has_message_id(StandardFolder::Sent, "<target@inboxly.local>")
+            .expect("has_message_id on empty folder must succeed"),
+        "empty folder lookup must return Ok(false)"
+    );
+
+    // A folder whose directory has been removed entirely must still
+    // return Ok(false) (mirrors the fresh-account case where init() has
+    // not yet run for that subfolder).
+    let trash_dir = tmp.path().join(".Trash");
+    fs::remove_dir_all(&trash_dir).expect("remove .Trash dir");
+    assert!(
+        !store
+            .has_message_id(StandardFolder::Trash, "<target@inboxly.local>")
+            .expect("has_message_id on missing folder must succeed"),
+        "missing folder lookup must return Ok(false)"
+    );
+
+    // Empty needle must return Ok(false) — never matches (would be an
+    // accidental wildcard against headerless messages).
+    assert!(
+        !store
+            .has_message_id(StandardFolder::Drafts, "")
+            .expect("has_message_id ok"),
+        "empty Message-ID must not match anything"
+    );
+    assert!(
+        !store
+            .has_message_id(StandardFolder::Drafts, "<>")
+            .expect("has_message_id ok"),
+        "bracket-only Message-ID must not match anything"
     );
 }
