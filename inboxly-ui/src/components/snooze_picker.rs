@@ -1,6 +1,6 @@
 //! Snooze preset picker popup.
 //!
-//! Rendered when `snooze_picker_thread` is Some. Shows a four-option
+//! Rendered when `snooze.picker_thread` is Some. Shows a four-option
 //! grid: Later Today, Tomorrow, This Weekend, Next Week. Each option
 //! computes a target DateTime<Utc> from `config.snooze` and dispatches
 //! `SnoozeThread { thread_id, until }`.
@@ -24,10 +24,10 @@ use inboxly_core::SnoozePresets;
 pub fn SnoozePicker() -> Element {
     let mut app_state = use_context::<Signal<Inboxly>>();
     let state = app_state.read();
-    let Some(thread_id_str) = state.snooze_picker_thread.clone() else {
+    let Some(thread_id_str) = state.snooze.picker_thread.clone() else {
         return rsx! {};
     };
-    let position = state.snooze_picker_position;
+    let position = state.snooze.picker_position;
     let presets = state.config.snooze.clone();
     drop(state);
 
@@ -148,10 +148,7 @@ pub fn snooze_later_today(now: DateTime<Local>, presets: &SnoozePresets) -> Date
         .date_naive()
         .and_hms_opt(presets.evening_hour as u32, 0, 0)
         .expect("valid hms");
-    let local_target = Local
-        .from_local_datetime(&target)
-        .single()
-        .unwrap_or(now);
+    let local_target = Local.from_local_datetime(&target).single().unwrap_or(now);
 
     if local_target <= now {
         // Evening has passed — snooze to tomorrow morning instead.
@@ -269,10 +266,7 @@ mod tests {
     }
 
     fn local_at(y: i32, m: u32, d: u32, h: u32, mi: u32) -> DateTime<Local> {
-        Local
-            .with_ymd_and_hms(y, m, d, h, mi, 0)
-            .single()
-            .unwrap()
+        Local.with_ymd_and_hms(y, m, d, h, mi, 0).single().unwrap()
     }
 
     #[test]
