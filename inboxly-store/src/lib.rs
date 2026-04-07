@@ -24,6 +24,7 @@ mod sender_affinity;
 mod settings;
 mod sync_state;
 mod thread_state;
+pub mod thread_reader;
 pub mod threading;
 mod threads;
 mod throttle;
