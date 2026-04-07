@@ -10,6 +10,7 @@ use inboxly_store::{BundleRow, Store};
 use crate::feed::{self, FeedSection};
 use crate::keyboard::{ShortcutAction, ShortcutMap};
 use crate::nav::{NavBundleCategory, NavTarget, default_bundle_categories};
+use crate::state::{MenuState, SettingsState, SnoozeState};
 use crate::theme::{ActiveView, InboxlyTheme, SettingsReader};
 use crate::undo::{UndoAction, UndoState};
 
@@ -117,83 +118,20 @@ pub struct Inboxly {
     pub thread_reader: Option<Arc<inboxly_store::thread_reader::ThreadReader>>,
     /// Undo state for timed undo of inbox actions.
     pub undo_state: UndoState,
-    /// Thread ID whose overflow (three-dot) menu is currently open.
-    pub overflow_menu_thread: Option<String>,
-    /// Cursor position where the overflow menu was triggered (popup anchor).
-    pub overflow_menu_position: Point,
-    /// Thread ID whose right-click context menu is currently open.
-    pub context_menu_thread: Option<String>,
-    /// Cursor position where the context menu was triggered.
-    pub context_menu_position: Point,
-    /// Sender address of the thread whose menu is open (for BlockSender, CreateRuleFromSender).
-    /// Shared between overflow and context menus — they are mutually exclusive.
-    pub menu_thread_sender: Option<String>,
+    /// Overflow + right-click context menu state.
+    pub menus: MenuState,
 
-    // -- Settings state --
-    /// Active settings tab (only relevant when active_view == Settings).
-    pub settings_tab: SettingsTab,
-    /// Whether the drawer was open before entering settings.
-    pub drawer_was_open: bool,
     /// Loaded AppConfig (for accounts + snooze presets editing).
     pub config: AppConfig,
 
-    // -- General tab state --
-    /// Current theme preference (System/Light/Dark).
-    pub theme_preference: ThemePreference,
-    /// Default view preference ("inbox", "snoozed", "done").
-    pub default_view: String,
-    /// Undo timeout in seconds.
-    pub undo_timeout_secs: u32,
-
-    // -- Accounts tab state --
-    /// Index of the account currently being edited (None = no edit form open).
-    pub editing_account_index: Option<usize>,
-    /// Scratch account for the add/edit form.
-    pub account_form: AccountConfig,
-    /// Whether we're adding a new account (vs editing existing).
-    pub adding_account: bool,
-    /// Index of account pending removal confirmation (None = no confirmation shown).
-    pub removing_account_index: Option<usize>,
-
-    // -- Data & Storage tab state --
-    /// Cached database size string (e.g., "42.3 MB").
-    pub db_size_display: String,
-    /// Cached search index size string.
-    pub index_size_display: String,
-    /// Cached maildir size string.
-    pub maildir_size_display: String,
-    /// Last full sync timestamp display string.
-    pub last_sync_display: String,
-    /// Status message shown after an action (e.g., "Cache cleared", "Rebuilding...").
-    pub data_action_status: Option<String>,
-
-    // -- Keyboard shortcuts state --
-    /// Runtime keyboard shortcut bindings.
-    pub shortcuts: ShortcutMap,
-    /// Action currently being re-bound (user is pressing a new key).
-    pub capturing_shortcut: Option<ShortcutAction>,
-
-    // -- Notification settings state --
-    /// Whether desktop notifications are enabled.
-    pub notifications_enabled: bool,
-    /// Whether notification sound is enabled.
-    pub notification_sound: bool,
-    /// Which bundles trigger notifications (["all"] = all bundles).
-    pub notification_bundles: Vec<String>,
-
-    // -- Bundle settings state --
-    /// All bundles loaded from the store (for the Bundles settings tab).
-    pub settings_bundles: Vec<BundleRow>,
-    /// Bundle whose throttle popup is currently open.
-    pub throttle_popup_bundle_id: Option<String>,
+    /// Settings drawer / panel state (tabs, forms, notifications, etc.).
+    pub settings: SettingsState,
 
     // -- Feed interaction state --
     /// Set of bundle IDs that are currently expanded in the inbox feed.
     pub expanded_bundles: HashSet<String>,
-    /// Thread ID whose snooze date-picker popup is currently open.
-    pub snooze_picker_thread: Option<String>,
-    /// Cursor position where the snooze picker was triggered (popup anchor).
-    pub snooze_picker_position: Point,
+    /// Snooze date-picker popup state.
+    pub snooze: SnoozeState,
 }
 
 /// IMAP folder destinations for the "Move to..." action.
@@ -441,8 +379,7 @@ pub enum Message {
 /// no shadowing today but future-proofs against silent breakage if a
 /// local `url` binding is added.
 pub fn validate_external_url(url: &str) -> Result<(), String> {
-    let parsed = ::url::Url::parse(url)
-        .map_err(|e| format!("failed to parse {url:?}: {e}"))?;
+    let parsed = ::url::Url::parse(url).map_err(|e| format!("failed to parse {url:?}: {e}"))?;
     match parsed.scheme() {
         "http" | "https" | "mailto" => Ok(()),
         other => Err(format!("rejected scheme {other:?} for url {url:?}")),
@@ -466,47 +403,17 @@ impl Default for Inboxly {
             open_thread_id: None,
             thread_reader: None,
             undo_state: UndoState::new(),
-            overflow_menu_thread: None,
-            overflow_menu_position: Point::ORIGIN,
-            context_menu_thread: None,
-            context_menu_position: Point::ORIGIN,
-            menu_thread_sender: None,
-            // Settings state
-            settings_tab: SettingsTab::General,
-            drawer_was_open: true,
+            menus: MenuState::new(),
             config: AppConfig::default(),
-            theme_preference: ThemePreference::System,
-            default_view: "inbox".to_owned(),
-            undo_timeout_secs: 7,
-            editing_account_index: None,
-            account_form: new_empty_account_form(),
-            adding_account: false,
-            removing_account_index: None,
-            db_size_display: String::new(),
-            index_size_display: String::new(),
-            maildir_size_display: String::new(),
-            last_sync_display: "Never".to_owned(),
-            data_action_status: None,
-            // Keyboard shortcuts
-            shortcuts: ShortcutMap::defaults(),
-            capturing_shortcut: None,
-            // Notifications
-            notifications_enabled: true,
-            notification_sound: true,
-            notification_bundles: vec!["all".to_string()],
-            // Bundle settings
-            settings_bundles: Vec::new(),
-            throttle_popup_bundle_id: None,
-            // Feed interaction
+            settings: SettingsState::new(),
             expanded_bundles: HashSet::new(),
-            snooze_picker_thread: None,
-            snooze_picker_position: Point::ORIGIN,
+            snooze: SnoozeState::new(),
         }
     }
 }
 
 /// Create an empty account form with sensible defaults.
-fn new_empty_account_form() -> AccountConfig {
+pub(crate) fn new_empty_account_form() -> AccountConfig {
     AccountConfig {
         email: String::new(),
         display_name: String::new(),
@@ -777,39 +684,39 @@ impl Inboxly {
                     }
                 }
                 self.reload_feed();
-                self.snooze_picker_thread = None;
+                self.snooze.picker_thread = None;
             }
             Message::OpenOverflowMenu {
                 thread_id,
                 sender_address,
                 position,
             } => {
-                self.context_menu_thread = None;
-                self.overflow_menu_thread = Some(thread_id);
-                self.overflow_menu_position = position;
-                self.menu_thread_sender = Some(sender_address);
+                self.menus.context_thread = None;
+                self.menus.overflow_thread = Some(thread_id);
+                self.menus.overflow_position = position;
+                self.menus.thread_sender = Some(sender_address);
             }
             Message::CloseOverflowMenu => {
-                self.overflow_menu_thread = None;
-                self.menu_thread_sender = None;
+                self.menus.overflow_thread = None;
+                self.menus.thread_sender = None;
             }
             Message::OpenContextMenu {
                 thread_id,
                 sender_address,
                 position,
             } => {
-                self.overflow_menu_thread = None;
-                self.context_menu_thread = Some(thread_id);
-                self.context_menu_position = position;
-                self.menu_thread_sender = Some(sender_address);
+                self.menus.overflow_thread = None;
+                self.menus.context_thread = Some(thread_id);
+                self.menus.context_position = position;
+                self.menus.thread_sender = Some(sender_address);
             }
             Message::CloseContextMenu => {
-                self.context_menu_thread = None;
-                self.menu_thread_sender = None;
+                self.menus.context_thread = None;
+                self.menus.thread_sender = None;
             }
             Message::OpenThread(thread_id) => {
                 self.open_thread_id = Some(thread_id);
-                self.close_menus();
+                self.menus.close();
                 // Phase 10 polish: opening a thread also dismisses the
                 // account switcher. Without this, the row's onclick
                 // (Phase 8) calls stop_propagation() and the existing
@@ -839,9 +746,7 @@ impl Inboxly {
                             tracing::warn!("open::that({url}) failed: {e}");
                         }
                         #[cfg(test)]
-                        tracing::debug!(
-                            "OpenExternalUrl: would open {url} (skipped in test mode)"
-                        );
+                        tracing::debug!("OpenExternalUrl: would open {url} (skipped in test mode)");
                     }
                     Err(reason) => {
                         tracing::warn!("OpenExternalUrl: {reason}");
@@ -861,18 +766,18 @@ impl Inboxly {
                 // trigger; only the navigation bookkeeping is gated.
                 if self.active_view != ActiveView::Settings {
                     self.previous_view = self.active_view;
-                    self.drawer_was_open = self.drawer_open;
+                    self.settings.drawer_was_open = self.drawer_open;
                 }
                 self.active_view = ActiveView::Settings;
                 self.active_nav = NavTarget::View(ActiveView::Settings);
                 self.drawer_open = false;
-                self.settings_tab = SettingsTab::General;
+                self.settings.tab = SettingsTab::General;
 
                 // Load current settings from store
                 if let Some(ref store) = self.store {
                     let adapter = StoreSettingsAdapter { store };
                     // Theme preference
-                    self.theme_preference = adapter
+                    self.settings.theme_preference = adapter
                         .get_setting("theme")
                         .ok()
                         .flatten()
@@ -883,20 +788,20 @@ impl Inboxly {
                         })
                         .unwrap_or(ThemePreference::System);
                     // Default view
-                    self.default_view = adapter
+                    self.settings.default_view = adapter
                         .get_setting("default_view")
                         .ok()
                         .flatten()
                         .unwrap_or_else(|| "inbox".to_owned());
                     // Undo timeout
-                    self.undo_timeout_secs = adapter
+                    self.settings.undo_timeout_secs = adapter
                         .get_setting("undo_timeout_secs")
                         .ok()
                         .flatten()
                         .and_then(|v| v.parse::<u32>().ok())
                         .unwrap_or(7);
                     // Shortcuts
-                    self.shortcuts = store
+                    self.settings.shortcuts = store
                         .get_setting("shortcuts")
                         .ok()
                         .flatten()
@@ -904,19 +809,19 @@ impl Inboxly {
                         .unwrap_or_else(ShortcutMap::defaults);
 
                     // Notification settings
-                    self.notifications_enabled = store
+                    self.settings.notifications_enabled = store
                         .get_setting("notifications_enabled")
                         .ok()
                         .flatten()
                         .map(|v| v != "false")
                         .unwrap_or(true);
-                    self.notification_sound = store
+                    self.settings.notification_sound = store
                         .get_setting("notification_sound")
                         .ok()
                         .flatten()
                         .map(|v| v != "false")
                         .unwrap_or(true);
-                    self.notification_bundles = store
+                    self.settings.notification_bundles = store
                         .get_setting("notification_bundles")
                         .ok()
                         .flatten()
@@ -925,7 +830,7 @@ impl Inboxly {
 
                     // Bundle settings
                     match store.list_bundle_rows() {
-                        Ok(bundles) => self.settings_bundles = bundles,
+                        Ok(bundles) => self.settings.bundles = bundles,
                         Err(e) => tracing::warn!("failed to load bundles for settings: {e}"),
                     }
                 }
@@ -937,34 +842,36 @@ impl Inboxly {
             Message::NavigateBack => {
                 self.active_view = self.previous_view;
                 self.active_nav = NavTarget::View(self.previous_view);
-                self.drawer_open = self.drawer_was_open;
+                self.drawer_open = self.settings.drawer_was_open;
             }
             Message::SettingsTabChanged(tab) => {
-                self.settings_tab = tab;
+                self.settings.tab = tab;
                 // Reset edit state when switching tabs
-                self.editing_account_index = None;
-                self.adding_account = false;
-                self.removing_account_index = None;
-                self.data_action_status = None;
+                self.settings.editing_account_index = None;
+                self.settings.adding_account = false;
+                self.settings.removing_account_index = None;
+                self.settings.data_action_status = None;
 
                 // Load sizes when entering Data & Storage tab
                 if tab == SettingsTab::DataStorage {
                     if let Ok(config) = AppConfig::load()
                         && let Some(paths) = Paths::resolve_with_config(&config)
                     {
-                        self.db_size_display = format_size(
+                        self.settings.db_size_display = format_size(
                             paths
                                 .database_file()
                                 .metadata()
                                 .map(|m| m.len())
                                 .unwrap_or(0),
                         );
-                        self.index_size_display = format_size(dir_size(&paths.search_index_dir()));
-                        self.maildir_size_display = format_size(dir_size(&paths.maildir_root()));
+                        self.settings.index_size_display =
+                            format_size(dir_size(&paths.search_index_dir()));
+                        self.settings.maildir_size_display =
+                            format_size(dir_size(&paths.maildir_root()));
                     }
                     // Last sync from store
                     if let Some(ref store) = self.store {
-                        self.last_sync_display = store
+                        self.settings.last_sync_display = store
                             .get_setting("last_full_sync")
                             .ok()
                             .flatten()
@@ -975,7 +882,7 @@ impl Inboxly {
 
             // -- General tab handlers --
             Message::SetThemePreference(pref) => {
-                self.theme_preference = pref;
+                self.settings.theme_preference = pref;
                 // Persist to settings store
                 if let Some(ref store) = self.store {
                     let value = match pref {
@@ -992,7 +899,7 @@ impl Inboxly {
             }
 
             Message::SetDefaultView(view) => {
-                self.default_view = view.clone();
+                self.settings.default_view = view.clone();
                 if let Some(ref store) = self.store
                     && let Err(e) = store.set_setting("default_view", &view)
                 {
@@ -1001,7 +908,7 @@ impl Inboxly {
             }
 
             Message::SetUndoTimeout(secs) => {
-                self.undo_timeout_secs = secs;
+                self.settings.undo_timeout_secs = secs;
                 if let Some(ref store) = self.store
                     && let Err(e) = store.set_setting("undo_timeout_secs", &secs.to_string())
                 {
@@ -1055,29 +962,29 @@ impl Inboxly {
 
             // -- Accounts tab handlers --
             Message::AddAccountStart => {
-                self.adding_account = true;
-                self.editing_account_index = None;
-                self.removing_account_index = None;
-                self.account_form = new_empty_account_form();
+                self.settings.adding_account = true;
+                self.settings.editing_account_index = None;
+                self.settings.removing_account_index = None;
+                self.settings.account_form = new_empty_account_form();
             }
 
             Message::EditAccountStart(index) => {
                 if let Some(account) = self.config.accounts.get(index) {
-                    self.account_form = account.clone();
-                    self.editing_account_index = Some(index);
-                    self.adding_account = false;
-                    self.removing_account_index = None;
+                    self.settings.account_form = account.clone();
+                    self.settings.editing_account_index = Some(index);
+                    self.settings.adding_account = false;
+                    self.settings.removing_account_index = None;
                 }
             }
 
             Message::AccountFormCancel => {
-                self.editing_account_index = None;
-                self.adding_account = false;
+                self.settings.editing_account_index = None;
+                self.settings.adding_account = false;
             }
 
             Message::AccountFormSave => {
                 // Validate form
-                let form = &self.account_form;
+                let form = &self.settings.account_form;
                 if form.email.is_empty()
                     || !form.email.contains('@')
                     || form.imap_host.is_empty()
@@ -1087,50 +994,54 @@ impl Inboxly {
                     return;
                 }
 
-                if self.adding_account {
-                    self.config.accounts.push(self.account_form.clone());
-                } else if let Some(index) = self.editing_account_index
+                if self.settings.adding_account {
+                    self.config
+                        .accounts
+                        .push(self.settings.account_form.clone());
+                } else if let Some(index) = self.settings.editing_account_index
                     && let Some(account) = self.config.accounts.get_mut(index)
                 {
-                    *account = self.account_form.clone();
+                    *account = self.settings.account_form.clone();
                 }
 
                 if let Err(e) = self.config.save() {
                     tracing::warn!("failed to save config after account update: {e}");
                 }
-                self.editing_account_index = None;
-                self.adding_account = false;
+                self.settings.editing_account_index = None;
+                self.settings.adding_account = false;
             }
 
-            Message::AccountFormEmailChanged(v) => self.account_form.email = v,
-            Message::AccountFormDisplayNameChanged(v) => self.account_form.display_name = v,
-            Message::AccountFormProviderChanged(v) => self.account_form.provider = v,
+            Message::AccountFormEmailChanged(v) => self.settings.account_form.email = v,
+            Message::AccountFormDisplayNameChanged(v) => {
+                self.settings.account_form.display_name = v;
+            }
+            Message::AccountFormProviderChanged(v) => self.settings.account_form.provider = v,
             Message::AccountFormAuthMethodChanged(v) => {
-                self.account_form.auth_method = match v.as_str() {
+                self.settings.account_form.auth_method = match v.as_str() {
                     "oauth2" => AuthMethod::OAuth2,
                     "app_password" => AuthMethod::AppPassword,
                     _ => AuthMethod::Password,
                 };
             }
-            Message::AccountFormImapHostChanged(v) => self.account_form.imap_host = v,
+            Message::AccountFormImapHostChanged(v) => self.settings.account_form.imap_host = v,
             Message::AccountFormImapPortChanged(v) => {
                 if let Ok(port) = v.parse::<u16>() {
-                    self.account_form.imap_port = port;
+                    self.settings.account_form.imap_port = port;
                 }
             }
-            Message::AccountFormSmtpHostChanged(v) => self.account_form.smtp_host = v,
+            Message::AccountFormSmtpHostChanged(v) => self.settings.account_form.smtp_host = v,
             Message::AccountFormSmtpPortChanged(v) => {
                 if let Ok(port) = v.parse::<u16>() {
-                    self.account_form.smtp_port = port;
+                    self.settings.account_form.smtp_port = port;
                 }
             }
 
             Message::RemoveAccountConfirm(index) => {
-                self.removing_account_index = Some(index);
+                self.settings.removing_account_index = Some(index);
             }
 
             Message::RemoveAccountCancel => {
-                self.removing_account_index = None;
+                self.settings.removing_account_index = None;
             }
 
             Message::RemoveAccountExecute(index) => {
@@ -1149,7 +1060,7 @@ impl Inboxly {
                         tracing::warn!("failed to save config after account removal: {e}");
                     }
                 }
-                self.removing_account_index = None;
+                self.settings.removing_account_index = None;
             }
 
             // -- Data & Storage tab handlers --
@@ -1161,24 +1072,25 @@ impl Inboxly {
                     if paths.cache_dir.exists() {
                         if let Err(e) = std::fs::remove_dir_all(&paths.cache_dir) {
                             tracing::warn!("failed to clear cache: {e}");
-                            self.data_action_status = Some(format!("Failed to clear cache: {e}"));
+                            self.settings.data_action_status =
+                                Some(format!("Failed to clear cache: {e}"));
                         } else {
                             let _ = std::fs::create_dir_all(&paths.cache_dir);
-                            self.data_action_status = Some("Cache cleared".to_owned());
+                            self.settings.data_action_status = Some("Cache cleared".to_owned());
                         }
                     } else {
-                        self.data_action_status = Some("No cache to clear".to_owned());
+                        self.settings.data_action_status = Some("No cache to clear".to_owned());
                     }
                 }
             }
 
             Message::RebuildSearchIndex => {
-                self.data_action_status = Some("Rebuilding search index...".to_owned());
+                self.settings.data_action_status = Some("Rebuilding search index...".to_owned());
                 tracing::info!("search index rebuild requested (stub)");
             }
 
             Message::ExportData => {
-                self.data_action_status = Some("Coming soon".to_owned());
+                self.settings.data_action_status = Some("Coming soon".to_owned());
                 tracing::info!("data export requested (stub)");
             }
 
@@ -1188,47 +1100,47 @@ impl Inboxly {
                 maildir_size,
                 last_sync,
             } => {
-                self.db_size_display = db_size;
-                self.index_size_display = index_size;
-                self.maildir_size_display = maildir_size;
-                self.last_sync_display = last_sync;
+                self.settings.db_size_display = db_size;
+                self.settings.index_size_display = index_size;
+                self.settings.maildir_size_display = maildir_size;
+                self.settings.last_sync_display = last_sync;
             }
 
             // -- Keyboard shortcuts handlers --
             Message::ShortcutsLoaded(map) => {
-                self.shortcuts = map;
+                self.settings.shortcuts = map;
             }
             Message::SetShortcut { action, binding } => {
-                self.shortcuts.set(action, binding);
-                self.capturing_shortcut = None;
+                self.settings.shortcuts.set(action, binding);
+                self.settings.capturing_shortcut = None;
                 if let Some(ref store) = self.store {
-                    let json = self.shortcuts.to_overrides_json();
+                    let json = self.settings.shortcuts.to_overrides_json();
                     if let Err(e) = store.set_setting("shortcuts", &json) {
                         tracing::warn!("failed to persist shortcuts: {e}");
                     }
                 }
             }
             Message::ResetShortcut(action) => {
-                self.shortcuts.reset(action);
+                self.settings.shortcuts.reset(action);
                 if let Some(ref store) = self.store {
-                    let json = self.shortcuts.to_overrides_json();
+                    let json = self.settings.shortcuts.to_overrides_json();
                     if let Err(e) = store.set_setting("shortcuts", &json) {
                         tracing::warn!("failed to persist shortcuts: {e}");
                     }
                 }
             }
             Message::StartCapture(action) => {
-                self.capturing_shortcut = Some(action);
+                self.settings.capturing_shortcut = Some(action);
             }
             Message::CancelCapture => {
-                self.capturing_shortcut = None;
+                self.settings.capturing_shortcut = None;
             }
 
             // -- Notification settings handlers --
             Message::ToggleNotifications => {
-                self.notifications_enabled = !self.notifications_enabled;
+                self.settings.notifications_enabled = !self.settings.notifications_enabled;
                 if let Some(ref store) = self.store {
-                    let val = if self.notifications_enabled {
+                    let val = if self.settings.notifications_enabled {
                         "true"
                     } else {
                         "false"
@@ -1239,9 +1151,9 @@ impl Inboxly {
                 }
             }
             Message::ToggleNotificationSound => {
-                self.notification_sound = !self.notification_sound;
+                self.settings.notification_sound = !self.settings.notification_sound;
                 if let Some(ref store) = self.store {
-                    let val = if self.notification_sound {
+                    let val = if self.settings.notification_sound {
                         "true"
                     } else {
                         "false"
@@ -1252,9 +1164,9 @@ impl Inboxly {
                 }
             }
             Message::SetNotificationBundles(bundles) => {
-                self.notification_bundles = bundles;
+                self.settings.notification_bundles = bundles;
                 if let Some(ref store) = self.store {
-                    let json = serde_json::to_string(&self.notification_bundles)
+                    let json = serde_json::to_string(&self.settings.notification_bundles)
                         .unwrap_or_else(|_| r#"["all"]"#.to_owned());
                     if let Err(e) = store.set_setting("notification_bundles", &json) {
                         tracing::warn!("failed to persist notification_bundles: {e}");
@@ -1264,10 +1176,10 @@ impl Inboxly {
 
             // -- Bundle settings handlers --
             Message::BundlesLoaded(bundles) => {
-                self.settings_bundles = bundles;
+                self.settings.bundles = bundles;
             }
             Message::ToggleBundleVisibility(bundle_id) => {
-                if let Some(bundle) = self.settings_bundles.iter_mut().find(|b| b.id == bundle_id) {
+                if let Some(bundle) = self.settings.bundles.iter_mut().find(|b| b.id == bundle_id) {
                     bundle.visibility = if bundle.visibility == "visible" {
                         "hidden".to_owned()
                     } else {
@@ -1284,7 +1196,7 @@ impl Inboxly {
                 bundle_id,
                 throttle_json,
             } => {
-                if let Some(bundle) = self.settings_bundles.iter_mut().find(|b| b.id == bundle_id) {
+                if let Some(bundle) = self.settings.bundles.iter_mut().find(|b| b.id == bundle_id) {
                     bundle.throttle = throttle_json;
                     if let Some(ref store) = self.store
                         && let Err(e) = store.update_bundle_row(bundle)
@@ -1296,7 +1208,7 @@ impl Inboxly {
             Message::ReorderBundles(ids) => {
                 // Reassign sort_order and persist each bundle.
                 for (order, id) in ids.iter().enumerate() {
-                    if let Some(bundle) = self.settings_bundles.iter_mut().find(|b| &b.id == id) {
+                    if let Some(bundle) = self.settings.bundles.iter_mut().find(|b| &b.id == id) {
                         bundle.sort_order = order as i64;
                         if let Some(ref store) = self.store
                             && let Err(e) = store.update_bundle_row(bundle)
@@ -1306,10 +1218,10 @@ impl Inboxly {
                     }
                 }
                 // Re-sort the local list.
-                self.settings_bundles.sort_by_key(|b| b.sort_order);
+                self.settings.bundles.sort_by_key(|b| b.sort_order);
             }
             Message::ToggleThrottlePopup(bundle_id) => {
-                self.throttle_popup_bundle_id = bundle_id;
+                self.settings.throttle_popup_bundle_id = bundle_id;
             }
 
             Message::MoveTo {
@@ -1320,114 +1232,108 @@ impl Inboxly {
                 // Enqueue IMAP move actions for all emails in thread.
                 match destination {
                     MoveDestination::Trash => {
-                        self.enqueue_thread_actions(
-                            &thread_id,
-                            |account_id, folder, imap_uid| OfflineAction::MoveToTrash {
+                        self.enqueue_thread_actions(&thread_id, |account_id, folder, imap_uid| {
+                            OfflineAction::MoveToTrash {
                                 account_id: account_id.to_string(),
                                 folder: folder.to_string(),
                                 imap_uid,
-                            },
-                        );
+                            }
+                        });
                     }
                     MoveDestination::Inbox => {
                         let to = "INBOX".to_string();
-                        self.enqueue_thread_actions(
-                            &thread_id,
-                            |account_id, folder, imap_uid| OfflineAction::MoveToFolder {
+                        self.enqueue_thread_actions(&thread_id, |account_id, folder, imap_uid| {
+                            OfflineAction::MoveToFolder {
                                 account_id: account_id.to_string(),
                                 from_folder: folder.to_string(),
                                 to_folder: to.clone(),
                                 imap_uid,
-                            },
-                        );
+                            }
+                        });
                     }
                     MoveDestination::Spam => {
                         let to = "Spam".to_string();
-                        self.enqueue_thread_actions(
-                            &thread_id,
-                            |account_id, folder, imap_uid| OfflineAction::MoveToFolder {
+                        self.enqueue_thread_actions(&thread_id, |account_id, folder, imap_uid| {
+                            OfflineAction::MoveToFolder {
                                 account_id: account_id.to_string(),
                                 from_folder: folder.to_string(),
                                 to_folder: to.clone(),
                                 imap_uid,
-                            },
-                        );
+                            }
+                        });
                     }
                 }
-                self.close_menus();
+                self.menus.close();
             }
             Message::MarkReadState { thread_id, read } => {
                 tracing::info!("mark thread {thread_id} read={read}");
                 // Enqueue IMAP read/unread actions for all emails in thread.
                 if read {
-                    self.enqueue_thread_actions(
-                        &thread_id,
-                        |account_id, folder, imap_uid| OfflineAction::MarkRead {
+                    self.enqueue_thread_actions(&thread_id, |account_id, folder, imap_uid| {
+                        OfflineAction::MarkRead {
                             account_id: account_id.to_string(),
                             folder: folder.to_string(),
                             imap_uid,
-                        },
-                    );
+                        }
+                    });
                 } else {
-                    self.enqueue_thread_actions(
-                        &thread_id,
-                        |account_id, folder, imap_uid| OfflineAction::MarkUnread {
+                    self.enqueue_thread_actions(&thread_id, |account_id, folder, imap_uid| {
+                        OfflineAction::MarkUnread {
                             account_id: account_id.to_string(),
                             folder: folder.to_string(),
                             imap_uid,
-                        },
-                    );
+                        }
+                    });
                 }
-                self.close_menus();
+                self.menus.close();
             }
             Message::MuteThread(thread_id) => {
                 tracing::info!("mute thread {thread_id}");
-                self.close_menus();
+                self.menus.close();
             }
             Message::Reply(thread_id) => {
                 tracing::info!("reply to thread {thread_id}");
-                self.close_menus();
+                self.menus.close();
             }
             Message::ReplyAll(thread_id) => {
                 tracing::info!("reply all to thread {thread_id}");
-                self.close_menus();
+                self.menus.close();
             }
             Message::Forward(thread_id) => {
                 tracing::info!("forward thread {thread_id}");
-                self.close_menus();
+                self.menus.close();
             }
             Message::AddToBundle {
                 thread_id,
                 category,
             } => {
                 tracing::info!("add thread {thread_id} to bundle {category}");
-                self.close_menus();
+                self.menus.close();
             }
             Message::CreateRuleFromSender(sender) => {
                 tracing::info!("create rule from sender: {sender} (coming soon)");
-                self.close_menus();
+                self.menus.close();
             }
             Message::BlockSender {
                 thread_id,
                 sender_address,
             } => {
                 tracing::info!("block sender {sender_address} (thread {thread_id})");
-                self.close_menus();
+                self.menus.close();
             }
             Message::ReportSpam(thread_id) => {
                 tracing::info!("report spam: thread {thread_id}");
                 // Enqueue IMAP move-to-spam actions for all emails in thread.
                 let spam_folder = "Spam".to_string();
-                self.enqueue_thread_actions(
-                    &thread_id,
-                    |account_id, folder, imap_uid| OfflineAction::MoveToFolder {
+                self.enqueue_thread_actions(&thread_id, |account_id, folder, imap_uid| {
+                    OfflineAction::MoveToFolder {
                         account_id: account_id.to_string(),
                         from_folder: folder.to_string(),
                         to_folder: spam_folder.clone(),
                         imap_uid,
-                    },
-                );
-                self.close_menus();
+                    }
+                });
+                self.menus.close();
             }
             Message::ToggleBundleExpand(id) => {
                 if self.expanded_bundles.contains(&id) {
@@ -1440,12 +1346,12 @@ impl Inboxly {
                 thread_id,
                 position,
             } => {
-                self.close_menus();
-                self.snooze_picker_thread = Some(thread_id);
-                self.snooze_picker_position = position;
+                self.menus.close();
+                self.snooze.picker_thread = Some(thread_id);
+                self.snooze.picker_position = position;
             }
             Message::CloseSnoozePicker => {
-                self.snooze_picker_thread = None;
+                self.snooze.picker_thread = None;
             }
         }
     }
@@ -1478,17 +1384,6 @@ impl Inboxly {
             .collect();
         self.expanded_bundles
             .retain(|id| active_bundle_ids.contains(id));
-    }
-
-    /// Clear both menus (overflow + context) and their shared sender field.
-    ///
-    /// Every message handler that resolves a thread action should call this
-    /// so the three-field menu-state invariant stays self-enforcing — new
-    /// handlers can't accidentally clear only two of the three fields.
-    fn close_menus(&mut self) {
-        self.overflow_menu_thread = None;
-        self.context_menu_thread = None;
-        self.menu_thread_sender = None;
     }
 
     /// Enqueue offline actions for all emails in a thread.
@@ -1760,7 +1655,7 @@ mod tests {
             sender_address: "a@b.com".into(),
             position: Point::ORIGIN,
         });
-        assert_eq!(app.overflow_menu_thread, Some("t1".into()));
+        assert_eq!(app.menus.overflow_thread, Some("t1".into()));
     }
 
     #[test]
@@ -1772,9 +1667,9 @@ mod tests {
             sender_address: "sender@example.com".into(),
             position: pos,
         });
-        assert_eq!(app.overflow_menu_thread, Some("t1".into()));
-        assert_eq!(app.overflow_menu_position, pos);
-        assert_eq!(app.menu_thread_sender, Some("sender@example.com".into()));
+        assert_eq!(app.menus.overflow_thread, Some("t1".into()));
+        assert_eq!(app.menus.overflow_position, pos);
+        assert_eq!(app.menus.thread_sender, Some("sender@example.com".into()));
     }
 
     #[test]
@@ -1786,9 +1681,9 @@ mod tests {
             sender_address: "ctx@example.com".into(),
             position: pos,
         });
-        assert_eq!(app.context_menu_thread, Some("t2".into()));
-        assert_eq!(app.context_menu_position, pos);
-        assert_eq!(app.menu_thread_sender, Some("ctx@example.com".into()));
+        assert_eq!(app.menus.context_thread, Some("t2".into()));
+        assert_eq!(app.menus.context_position, pos);
+        assert_eq!(app.menus.thread_sender, Some("ctx@example.com".into()));
     }
 
     #[test]
@@ -1800,7 +1695,7 @@ mod tests {
             position: Point::ORIGIN,
         });
         let _ = app.update(Message::CloseOverflowMenu);
-        assert!(app.overflow_menu_thread.is_none());
+        assert!(app.menus.overflow_thread.is_none());
     }
 
     #[test]
@@ -1812,7 +1707,7 @@ mod tests {
             position: Point::ORIGIN,
         });
         let _ = app.update(Message::CloseOverflowMenu);
-        assert!(app.menu_thread_sender.is_none());
+        assert!(app.menus.thread_sender.is_none());
     }
 
     #[test]
@@ -1824,8 +1719,8 @@ mod tests {
             position: Point::ORIGIN,
         });
         let _ = app.update(Message::CloseContextMenu);
-        assert!(app.context_menu_thread.is_none());
-        assert!(app.menu_thread_sender.is_none());
+        assert!(app.menus.context_thread.is_none());
+        assert!(app.menus.thread_sender.is_none());
     }
 
     #[test]
@@ -1841,8 +1736,8 @@ mod tests {
             sender_address: "ctx@b.com".into(),
             position: Point::new(100.0, 200.0),
         });
-        assert!(app.overflow_menu_thread.is_none());
-        assert_eq!(app.context_menu_thread, Some("t2".into()));
+        assert!(app.menus.overflow_thread.is_none());
+        assert_eq!(app.menus.context_thread, Some("t2".into()));
     }
 
     #[test]
@@ -1858,9 +1753,9 @@ mod tests {
             sender_address: "ctx@b.com".into(),
             position: Point::new(5.0, 10.0),
         });
-        assert!(app.overflow_menu_thread.is_none());
+        assert!(app.menus.overflow_thread.is_none());
         // sender reflects the context menu opener, not the overflow one
-        assert_eq!(app.menu_thread_sender, Some("ctx@b.com".into()));
+        assert_eq!(app.menus.thread_sender, Some("ctx@b.com".into()));
     }
 
     #[test]
@@ -1876,9 +1771,9 @@ mod tests {
             sender_address: "b@b.com".into(),
             position: Point::ORIGIN,
         });
-        assert!(app.context_menu_thread.is_none());
-        assert_eq!(app.overflow_menu_thread, Some("t2".into()));
-        assert_eq!(app.menu_thread_sender, Some("b@b.com".into()));
+        assert!(app.menus.context_thread.is_none());
+        assert_eq!(app.menus.overflow_thread, Some("t2".into()));
+        assert_eq!(app.menus.thread_sender, Some("b@b.com".into()));
     }
 
     #[test]
@@ -1893,8 +1788,8 @@ mod tests {
             thread_id: "t1".into(),
             destination: MoveDestination::Inbox,
         });
-        assert!(app.overflow_menu_thread.is_none());
-        assert!(app.menu_thread_sender.is_none());
+        assert!(app.menus.overflow_thread.is_none());
+        assert!(app.menus.thread_sender.is_none());
     }
 
     #[test]
@@ -1935,8 +1830,8 @@ mod tests {
             position: Point::ORIGIN,
         });
         let _ = app.update(Message::Reply("t1".into()));
-        assert!(app.context_menu_thread.is_none());
-        assert!(app.menu_thread_sender.is_none());
+        assert!(app.menus.context_thread.is_none());
+        assert!(app.menus.thread_sender.is_none());
     }
 
     #[test]
@@ -1951,8 +1846,8 @@ mod tests {
             thread_id: "t1".into(),
             read: true,
         });
-        assert!(app.overflow_menu_thread.is_none());
-        assert!(app.menu_thread_sender.is_none());
+        assert!(app.menus.overflow_thread.is_none());
+        assert!(app.menus.thread_sender.is_none());
     }
 
     #[test]
@@ -1967,8 +1862,8 @@ mod tests {
             thread_id: "t1".into(),
             category: "Social".into(),
         });
-        assert!(app.context_menu_thread.is_none());
-        assert!(app.menu_thread_sender.is_none());
+        assert!(app.menus.context_thread.is_none());
+        assert!(app.menus.thread_sender.is_none());
     }
 
     #[test]
@@ -1980,13 +1875,13 @@ mod tests {
             position: Point::ORIGIN,
         });
         // Verify state captured the sender correctly BEFORE BlockSender fires.
-        assert_eq!(app.menu_thread_sender, Some("menu@sender.com".into()));
+        assert_eq!(app.menus.thread_sender, Some("menu@sender.com".into()));
         let _ = app.update(Message::BlockSender {
             thread_id: "t1".into(),
             sender_address: "menu@sender.com".into(),
         });
-        assert!(app.context_menu_thread.is_none());
-        assert!(app.menu_thread_sender.is_none());
+        assert!(app.menus.context_thread.is_none());
+        assert!(app.menus.thread_sender.is_none());
     }
 
     // -- M28 account switcher data layer tests --
@@ -2129,7 +2024,7 @@ mod tests {
     fn settings_tab_defaults_to_general() {
         let mut app = Inboxly::default();
         let _ = app.update(Message::NavigateToSettings);
-        assert_eq!(app.settings_tab, SettingsTab::General);
+        assert_eq!(app.settings.tab, SettingsTab::General);
     }
 
     #[test]
@@ -2137,7 +2032,7 @@ mod tests {
         let mut app = Inboxly::default();
         let _ = app.update(Message::NavigateToSettings);
         let _ = app.update(Message::SettingsTabChanged(SettingsTab::Accounts));
-        assert_eq!(app.settings_tab, SettingsTab::Accounts);
+        assert_eq!(app.settings.tab, SettingsTab::Accounts);
     }
 
     #[test]
@@ -2145,75 +2040,75 @@ mod tests {
         let mut app = Inboxly::default();
         let _ = app.update(Message::NavigateToSettings);
         // Set some edit state
-        app.adding_account = true;
-        app.editing_account_index = Some(0);
-        app.removing_account_index = Some(1);
-        app.data_action_status = Some("test".to_owned());
+        app.settings.adding_account = true;
+        app.settings.editing_account_index = Some(0);
+        app.settings.removing_account_index = Some(1);
+        app.settings.data_action_status = Some("test".to_owned());
         // Switch tab
         let _ = app.update(Message::SettingsTabChanged(SettingsTab::General));
-        assert!(!app.adding_account);
-        assert!(app.editing_account_index.is_none());
-        assert!(app.removing_account_index.is_none());
-        assert!(app.data_action_status.is_none());
+        assert!(!app.settings.adding_account);
+        assert!(app.settings.editing_account_index.is_none());
+        assert!(app.settings.removing_account_index.is_none());
+        assert!(app.settings.data_action_status.is_none());
     }
 
     #[test]
     fn add_account_start_opens_form() {
         let mut app = Inboxly::default();
         let _ = app.update(Message::AddAccountStart);
-        assert!(app.adding_account);
-        assert!(app.editing_account_index.is_none());
-        assert!(app.removing_account_index.is_none());
+        assert!(app.settings.adding_account);
+        assert!(app.settings.editing_account_index.is_none());
+        assert!(app.settings.removing_account_index.is_none());
     }
 
     #[test]
     fn account_form_cancel_resets_state() {
         let mut app = Inboxly::default();
         let _ = app.update(Message::AddAccountStart);
-        assert!(app.adding_account);
+        assert!(app.settings.adding_account);
         let _ = app.update(Message::AccountFormCancel);
-        assert!(!app.adding_account);
-        assert!(app.editing_account_index.is_none());
+        assert!(!app.settings.adding_account);
+        assert!(app.settings.editing_account_index.is_none());
     }
 
     #[test]
     fn account_form_field_updates() {
         let mut app = Inboxly::default();
         let _ = app.update(Message::AccountFormEmailChanged("test@example.com".into()));
-        assert_eq!(app.account_form.email, "test@example.com");
+        assert_eq!(app.settings.account_form.email, "test@example.com");
 
         let _ = app.update(Message::AccountFormDisplayNameChanged("Test User".into()));
-        assert_eq!(app.account_form.display_name, "Test User");
+        assert_eq!(app.settings.account_form.display_name, "Test User");
 
         let _ = app.update(Message::AccountFormProviderChanged("gmail".into()));
-        assert_eq!(app.account_form.provider, "gmail");
+        assert_eq!(app.settings.account_form.provider, "gmail");
 
         let _ = app.update(Message::AccountFormAuthMethodChanged("oauth2".into()));
         assert_eq!(
-            app.account_form.auth_method,
+            app.settings.account_form.auth_method,
             inboxly_core::config::AuthMethod::OAuth2
         );
 
         let _ = app.update(Message::AccountFormImapHostChanged("imap.gmail.com".into()));
-        assert_eq!(app.account_form.imap_host, "imap.gmail.com");
+        assert_eq!(app.settings.account_form.imap_host, "imap.gmail.com");
 
         let _ = app.update(Message::AccountFormImapPortChanged("143".into()));
-        assert_eq!(app.account_form.imap_port, 143);
+        assert_eq!(app.settings.account_form.imap_port, 143);
 
         let _ = app.update(Message::AccountFormSmtpHostChanged("smtp.gmail.com".into()));
-        assert_eq!(app.account_form.smtp_host, "smtp.gmail.com");
+        assert_eq!(app.settings.account_form.smtp_host, "smtp.gmail.com");
 
         let _ = app.update(Message::AccountFormSmtpPortChanged("465".into()));
-        assert_eq!(app.account_form.smtp_port, 465);
+        assert_eq!(app.settings.account_form.smtp_port, 465);
     }
 
     #[test]
     fn remove_account_confirm_and_cancel() {
         let mut app = Inboxly::default();
         let _ = app.update(Message::RemoveAccountConfirm(1));
-        assert_eq!(app.removing_account_index, Some(1));
+        assert_eq!(app.settings.removing_account_index, Some(1));
         let _ = app.update(Message::RemoveAccountCancel);
-        assert!(app.removing_account_index.is_none());
+        assert!(app.settings.removing_account_index.is_none());
     }
 
     #[test]
@@ -2221,7 +2116,7 @@ mod tests {
         let mut app = Inboxly::default();
         for secs in [3, 5, 7, 10, 15] {
             let _ = app.update(Message::SetUndoTimeout(secs));
-            assert_eq!(app.undo_timeout_secs, secs);
+            assert_eq!(app.settings.undo_timeout_secs, secs);
         }
     }
 
@@ -2241,44 +2136,55 @@ mod tests {
     #[test]
     fn toggle_notifications() {
         let mut app = Inboxly::default();
-        assert!(app.notifications_enabled);
+        assert!(app.settings.notifications_enabled);
         let _ = app.update(Message::ToggleNotifications);
-        assert!(!app.notifications_enabled);
+        assert!(!app.settings.notifications_enabled);
         let _ = app.update(Message::ToggleNotifications);
-        assert!(app.notifications_enabled);
+        assert!(app.settings.notifications_enabled);
     }
 
     #[test]
     fn toggle_notification_sound() {
         let mut app = Inboxly::default();
-        assert!(app.notification_sound);
+        assert!(app.settings.notification_sound);
         let _ = app.update(Message::ToggleNotificationSound);
-        assert!(!app.notification_sound);
+        assert!(!app.settings.notification_sound);
         let _ = app.update(Message::ToggleNotificationSound);
-        assert!(app.notification_sound);
+        assert!(app.settings.notification_sound);
     }
 
     #[test]
     fn set_notification_bundles() {
         let mut app = Inboxly::default();
-        assert_eq!(app.notification_bundles, vec!["all".to_string()]);
+        assert_eq!(app.settings.notification_bundles, vec!["all".to_string()]);
 
         let _ = app.update(Message::SetNotificationBundles(vec![
             "Social".to_string(),
             "Finance".to_string(),
         ]));
-        assert_eq!(app.notification_bundles.len(), 2);
-        assert!(app.notification_bundles.contains(&"Social".to_string()));
-        assert!(app.notification_bundles.contains(&"Finance".to_string()));
+        assert_eq!(app.settings.notification_bundles.len(), 2);
+        assert!(
+            app.settings
+                .notification_bundles
+                .contains(&"Social".to_string())
+        );
+        assert!(
+            app.settings
+                .notification_bundles
+                .contains(&"Finance".to_string())
+        );
 
         let _ = app.update(Message::SetNotificationBundles(vec!["primary".to_string()]));
-        assert_eq!(app.notification_bundles, vec!["primary".to_string()]);
+        assert_eq!(
+            app.settings.notification_bundles,
+            vec!["primary".to_string()]
+        );
     }
 
     #[test]
     fn toggle_bundle_visibility() {
         let mut app = Inboxly::default();
-        app.settings_bundles.push(BundleRow {
+        app.settings.bundles.push(BundleRow {
             id: "b1".to_string(),
             category: "Social".to_string(),
             name: "Social".to_string(),
@@ -2290,10 +2196,10 @@ mod tests {
         });
 
         let _ = app.update(Message::ToggleBundleVisibility("b1".to_string()));
-        assert_eq!(app.settings_bundles[0].visibility, "hidden");
+        assert_eq!(app.settings.bundles[0].visibility, "hidden");
 
         let _ = app.update(Message::ToggleBundleVisibility("b1".to_string()));
-        assert_eq!(app.settings_bundles[0].visibility, "visible");
+        assert_eq!(app.settings.bundles[0].visibility, "visible");
     }
 
     #[test]
@@ -2306,18 +2212,18 @@ mod tests {
     #[test]
     fn start_capture() {
         let mut app = Inboxly::default();
-        assert!(app.capturing_shortcut.is_none());
+        assert!(app.settings.capturing_shortcut.is_none());
         let _ = app.update(Message::StartCapture(ShortcutAction::Done));
-        assert_eq!(app.capturing_shortcut, Some(ShortcutAction::Done));
+        assert_eq!(app.settings.capturing_shortcut, Some(ShortcutAction::Done));
     }
 
     #[test]
     fn cancel_capture() {
         let mut app = Inboxly::default();
         let _ = app.update(Message::StartCapture(ShortcutAction::Done));
-        assert!(app.capturing_shortcut.is_some());
+        assert!(app.settings.capturing_shortcut.is_some());
         let _ = app.update(Message::CancelCapture);
-        assert!(app.capturing_shortcut.is_none());
+        assert!(app.settings.capturing_shortcut.is_none());
     }
 
     #[test]
@@ -2328,9 +2234,9 @@ mod tests {
             action: ShortcutAction::Done,
             binding: "d".to_string(),
         });
-        assert_eq!(app.shortcuts.get(ShortcutAction::Done), "d");
-        assert!(app.capturing_shortcut.is_none());
-        assert!(app.shortcuts.is_customised(ShortcutAction::Done));
+        assert_eq!(app.settings.shortcuts.get(ShortcutAction::Done), "d");
+        assert!(app.settings.capturing_shortcut.is_none());
+        assert!(app.settings.shortcuts.is_customised(ShortcutAction::Done));
     }
 
     #[test]
@@ -2340,17 +2246,17 @@ mod tests {
             action: ShortcutAction::Done,
             binding: "d".to_string(),
         });
-        assert_eq!(app.shortcuts.get(ShortcutAction::Done), "d");
+        assert_eq!(app.settings.shortcuts.get(ShortcutAction::Done), "d");
 
         let _ = app.update(Message::ResetShortcut(ShortcutAction::Done));
-        assert_eq!(app.shortcuts.get(ShortcutAction::Done), "e"); // default
-        assert!(!app.shortcuts.is_customised(ShortcutAction::Done));
+        assert_eq!(app.settings.shortcuts.get(ShortcutAction::Done), "e"); // default
+        assert!(!app.settings.shortcuts.is_customised(ShortcutAction::Done));
     }
 
     #[test]
     fn bundles_loaded_replaces_list() {
         let mut app = Inboxly::default();
-        assert!(app.settings_bundles.is_empty());
+        assert!(app.settings.bundles.is_empty());
 
         let bundles = vec![
             BundleRow {
@@ -2375,13 +2281,13 @@ mod tests {
             },
         ];
         let _ = app.update(Message::BundlesLoaded(bundles));
-        assert_eq!(app.settings_bundles.len(), 2);
+        assert_eq!(app.settings.bundles.len(), 2);
     }
 
     #[test]
     fn reorder_bundles() {
         let mut app = Inboxly::default();
-        app.settings_bundles = vec![
+        app.settings.bundles = vec![
             BundleRow {
                 id: "b1".to_string(),
                 category: "Social".to_string(),
@@ -2409,16 +2315,16 @@ mod tests {
             "b2".to_string(),
             "b1".to_string(),
         ]));
-        assert_eq!(app.settings_bundles[0].id, "b2");
-        assert_eq!(app.settings_bundles[0].sort_order, 0);
-        assert_eq!(app.settings_bundles[1].id, "b1");
-        assert_eq!(app.settings_bundles[1].sort_order, 1);
+        assert_eq!(app.settings.bundles[0].id, "b2");
+        assert_eq!(app.settings.bundles[0].sort_order, 0);
+        assert_eq!(app.settings.bundles[1].id, "b1");
+        assert_eq!(app.settings.bundles[1].sort_order, 1);
     }
 
     #[test]
     fn set_bundle_throttle() {
         let mut app = Inboxly::default();
-        app.settings_bundles.push(BundleRow {
+        app.settings.bundles.push(BundleRow {
             id: "b1".to_string(),
             category: "Social".to_string(),
             name: "Social".to_string(),
@@ -2434,19 +2340,22 @@ mod tests {
             bundle_id: "b1".to_string(),
             throttle_json: daily_json.clone(),
         });
-        assert_eq!(app.settings_bundles[0].throttle, daily_json);
+        assert_eq!(app.settings.bundles[0].throttle, daily_json);
     }
 
     #[test]
     fn toggle_throttle_popup() {
         let mut app = Inboxly::default();
-        assert!(app.throttle_popup_bundle_id.is_none());
+        assert!(app.settings.throttle_popup_bundle_id.is_none());
 
         let _ = app.update(Message::ToggleThrottlePopup(Some("b1".to_string())));
-        assert_eq!(app.throttle_popup_bundle_id, Some("b1".to_string()));
+        assert_eq!(
+            app.settings.throttle_popup_bundle_id,
+            Some("b1".to_string())
+        );
 
         let _ = app.update(Message::ToggleThrottlePopup(None));
-        assert!(app.throttle_popup_bundle_id.is_none());
+        assert!(app.settings.throttle_popup_bundle_id.is_none());
     }
 
     #[test]
@@ -2456,7 +2365,7 @@ mod tests {
         custom_map.set(ShortcutAction::Done, "x".to_owned());
 
         let _ = app.update(Message::ShortcutsLoaded(custom_map));
-        assert_eq!(app.shortcuts.get(ShortcutAction::Done), "x");
+        assert_eq!(app.settings.shortcuts.get(ShortcutAction::Done), "x");
     }
 
     // -- M33 bundle expand and snooze picker tests --
@@ -2504,8 +2413,8 @@ mod tests {
             thread_id: "t1".into(),
             position: pos,
         });
-        assert_eq!(app.snooze_picker_thread, Some("t1".into()));
-        assert_eq!(app.snooze_picker_position, pos);
+        assert_eq!(app.snooze.picker_thread, Some("t1".into()));
+        assert_eq!(app.snooze.picker_position, pos);
     }
 
     #[test]
@@ -2516,7 +2425,7 @@ mod tests {
             position: Point::new(10.0, 20.0),
         });
         let _ = app.update(Message::CloseSnoozePicker);
-        assert!(app.snooze_picker_thread.is_none());
+        assert!(app.snooze.picker_thread.is_none());
     }
 
     #[test]
@@ -2538,9 +2447,9 @@ mod tests {
             thread_id: "t1".into(),
             position: Point::new(5.0, 5.0),
         });
-        assert!(app.overflow_menu_thread.is_none());
-        assert!(app.context_menu_thread.is_none());
-        assert_eq!(app.snooze_picker_thread, Some("t1".into()));
+        assert!(app.menus.overflow_thread.is_none());
+        assert!(app.menus.context_thread.is_none());
+        assert_eq!(app.snooze.picker_thread, Some("t1".into()));
     }
 
     #[test]
@@ -2550,12 +2459,15 @@ mod tests {
             thread_id: "t1".into(),
             position: Point::ORIGIN,
         });
-        assert_eq!(app.snooze_picker_thread, Some("t1".into()));
+        assert_eq!(app.snooze.picker_thread, Some("t1".into()));
         let _ = app.update(Message::SnoozeThread {
             thread_id: "t1".into(),
             until: chrono::Utc::now() + chrono::Duration::hours(1),
         });
-        assert!(app.snooze_picker_thread.is_none(), "SnoozeThread should close the picker");
+        assert!(
+            app.snooze.picker_thread.is_none(),
+            "SnoozeThread should close the picker"
+        );
     }
 
     #[test]
@@ -2628,12 +2540,12 @@ mod tests {
             sender_address: "a@b.com".into(),
             position: Point::ORIGIN,
         });
-        assert_eq!(app.context_menu_thread, Some("t1".into()));
+        assert_eq!(app.menus.context_thread, Some("t1".into()));
         let _ = app.update(Message::OpenThread("t1".into()));
         // Opening a thread must dismiss any open menu (close_menus()
         // invariant from M33 Phase 7A).
-        assert!(app.context_menu_thread.is_none());
-        assert!(app.menu_thread_sender.is_none());
+        assert!(app.menus.context_thread.is_none());
+        assert!(app.menus.thread_sender.is_none());
         // And it must record the intent.
         assert_eq!(app.open_thread_id.as_deref(), Some("t1"));
     }
@@ -2737,7 +2649,10 @@ mod tests {
         let result = super::validate_external_url("javascript:alert(1)");
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.contains("javascript"), "rejection should name the scheme: {err}");
+        assert!(
+            err.contains("javascript"),
+            "rejection should name the scheme: {err}"
+        );
     }
 
     #[test]
@@ -2748,7 +2663,10 @@ mod tests {
         let result = super::validate_external_url("file:///etc/passwd");
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.contains("file"), "rejection should name the scheme: {err}");
+        assert!(
+            err.contains("file"),
+            "rejection should name the scheme: {err}"
+        );
     }
 
     #[test]
