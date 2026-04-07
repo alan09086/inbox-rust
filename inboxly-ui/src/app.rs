@@ -849,8 +849,20 @@ impl Inboxly {
                 }
             }
             Message::NavigateToSettings => {
-                self.previous_view = self.active_view;
-                self.drawer_was_open = self.drawer_open;
+                // Re-entry guard: if we're already in Settings, do NOT
+                // overwrite previous_view (which would set it to Settings
+                // and break NavigateBack — the back arrow would no-op
+                // back to Settings instead of returning to the user's
+                // prior view). M29-era bug surfaced during M34 manual
+                // testing — clicking the gear icon while already in
+                // Settings corrupted the previous_view and trapped the
+                // user. The settings load still runs unconditionally
+                // below so this remains a valid "reload settings"
+                // trigger; only the navigation bookkeeping is gated.
+                if self.active_view != ActiveView::Settings {
+                    self.previous_view = self.active_view;
+                    self.drawer_was_open = self.drawer_open;
+                }
                 self.active_view = ActiveView::Settings;
                 self.active_nav = NavTarget::View(ActiveView::Settings);
                 self.drawer_open = false;
@@ -1690,6 +1702,34 @@ mod tests {
         assert_eq!(app.active_view, ActiveView::Settings);
         assert_eq!(app.previous_view, ActiveView::Snoozed);
         assert!(!app.drawer_open);
+    }
+
+    #[test]
+    fn navigate_to_settings_while_already_in_settings_preserves_previous_view() {
+        // Regression test for the M29-era bug surfaced during M34 manual
+        // testing: clicking the gear icon while already in Settings used
+        // to overwrite previous_view = Settings, which trapped the user
+        // because NavigateBack would no-op back to Settings.
+        let mut app = Inboxly::default();
+        app.active_view = ActiveView::Snoozed;
+        // First NavigateToSettings — previous_view should be Snoozed.
+        let _ = app.update(Message::NavigateToSettings);
+        assert_eq!(app.previous_view, ActiveView::Snoozed);
+        // Second NavigateToSettings (re-entry) — previous_view must
+        // STILL be Snoozed, not Settings.
+        let _ = app.update(Message::NavigateToSettings);
+        assert_eq!(
+            app.previous_view,
+            ActiveView::Snoozed,
+            "re-entry to Settings must not overwrite previous_view"
+        );
+        // And NavigateBack must actually return to Snoozed.
+        let _ = app.update(Message::NavigateBack);
+        assert_eq!(
+            app.active_view,
+            ActiveView::Snoozed,
+            "NavigateBack should return to the original previous view"
+        );
     }
 
     #[test]
