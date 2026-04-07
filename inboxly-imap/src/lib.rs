@@ -15,6 +15,7 @@
 //! - Push sync: IDLE command with timeout, reconnect loop
 //! - Sync lifecycle: per-account sync loops, multi-account management
 
+pub mod append;
 pub mod auth;
 pub mod body_fetch;
 pub mod body_processor;
@@ -28,13 +29,16 @@ pub mod offline_replay;
 pub mod on_demand;
 pub mod phase2;
 pub mod pool;
+pub mod smtp;
 pub mod sync;
 pub mod sync_loop;
 pub mod sync_manager;
 pub mod tls;
 
 // Convenience re-exports
+pub use append::{imap_append_draft, imap_append_sent};
 pub use auth::{GmailOAuth2Config, OAuth2Token, PasswordCredentials, XOAuth2Credentials};
+pub use auth::{SharedOAuth2, SharedOAuth2State};
 pub use channel::{SyncEvent, UiCommand, create_sync_channels};
 pub use connection::{ImapCapabilities, ImapConnection};
 pub use error::{ImapError, Result};
@@ -42,5 +46,6 @@ pub use folders::{FolderRole, ImapFolder, WellKnownFolders};
 pub use idle::{IdleEvent, IdleLoopConfig, IdleWakeup};
 pub use incremental::{IncrementalSyncResult, NewUidCheckResult};
 pub use pool::{ConnectionPool, PoolConfig};
+pub use smtp::{SmtpError, SmtpSender};
 pub use sync_manager::SyncManager;
 pub use tls::build_tls_config;

@@ -4,7 +4,7 @@ use crate::error::{Result, StoreError};
 use crate::store::Store;
 
 /// Current schema version. Bump this when adding a new migration.
-const CURRENT_VERSION: u32 = 4;
+const CURRENT_VERSION: u32 = 5;
 
 /// Run all pending migrations.
 pub fn run(store: &mut Store) -> Result<()> {
@@ -31,6 +31,10 @@ pub fn run(store: &mut Store) -> Result<()> {
 
     if version < 4 {
         migrate_v3_to_v4(store)?;
+    }
+
+    if version < 5 {
+        migrate_v4_to_v5(store)?;
     }
 
     set_version(store, CURRENT_VERSION)?;
@@ -305,6 +309,49 @@ fn migrate_v3_to_v4(store: &mut Store) -> Result<()> {
 
          UPDATE bundles SET throttle = '{\"mode\":\"Weekly\",\"delivery_day\":\"monday\",\"delivery_time\":\"08:00:00\"}'
          WHERE throttle = 'Weekly' AND throttle NOT LIKE '{%}';",
+    )?;
+
+    Ok(())
+}
+
+/// M35b: Add drafts table for the compose pipeline.
+///
+/// Stores in-progress emails the user is composing. Each draft has a
+/// canonical `message_id` used to deduplicate across SQLite, local Maildir,
+/// and the IMAP server's Drafts folder. Recipient lists and the attachments
+/// list are stored as JSON blobs because they're small: emitting a separate
+/// recipients/attachments table would be overkill for drafts (which
+/// typically have 1-5 recipients and 0-3 attachments).
+///
+/// `references_header` holds the RFC 5322 `References` header value
+/// (chain of ancestor Message-IDs for reply-chain threading). The column
+/// is named `references_header` rather than the more natural `references`
+/// because `REFERENCES` is an SQL reserved word (FOREIGN KEY clause);
+/// using it unquoted causes parse errors and quoting it every time is a
+/// footgun waiting to happen.
+fn migrate_v4_to_v5(store: &mut Store) -> Result<()> {
+    info!("Running migration v4 -> v5: add drafts table");
+
+    store.conn().execute_batch(
+        "CREATE TABLE IF NOT EXISTS drafts (
+            id                TEXT PRIMARY KEY NOT NULL,
+            account_id        TEXT NOT NULL,
+            message_id        TEXT NOT NULL UNIQUE,
+            subject           TEXT NOT NULL DEFAULT '',
+            body_markdown     TEXT NOT NULL DEFAULT '',
+            to_json           TEXT NOT NULL DEFAULT '[]',
+            cc_json           TEXT NOT NULL DEFAULT '[]',
+            bcc_json          TEXT NOT NULL DEFAULT '[]',
+            attachments_json  TEXT NOT NULL DEFAULT '[]',
+            mode_json         TEXT NOT NULL DEFAULT '\"New\"',
+            in_reply_to       TEXT,
+            references_header TEXT,
+            maildir_path      TEXT,
+            created_at        INTEGER NOT NULL,
+            updated_at        INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_drafts_account_id ON drafts(account_id);
+        CREATE INDEX IF NOT EXISTS idx_drafts_updated_at ON drafts(updated_at DESC);",
     )?;
 
     Ok(())

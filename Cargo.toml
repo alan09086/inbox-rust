@@ -12,7 +12,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.34.1"
+version = "0.35.0"
 edition = "2024"
 license = "GPL-3.0-only"
 repository = "https://codeberg.org/alan090/inbox-rust"
@@ -29,6 +29,9 @@ dioxus = { version = "0.7", features = ["desktop"] }
 ammonia = "4"
 open = "5"
 url = "2"
+lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "smtp-transport", "builder", "tracing"] }
+pulldown-cmark = { version = "0.12", default-features = false, features = ["html"] }
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
 
 # Internal crates
 inboxly-core = { path = "inboxly-core" }

@@ -5,12 +5,13 @@ use std::sync::Arc;
 
 use inboxly_core::config::{AccountConfig, AppConfig, AuthMethod, Paths, ThemePreference};
 use inboxly_core::offline::OfflineAction;
+use inboxly_core::{AttachmentDraft, ComposeMode, Contact, parse_address_list};
 use inboxly_store::{BundleRow, Store};
 
 use crate::feed::{self, FeedSection};
 use crate::keyboard::{ShortcutAction, ShortcutMap};
 use crate::nav::{NavBundleCategory, NavTarget, default_bundle_categories};
-use crate::state::{MenuState, SettingsState, SnoozeState};
+use crate::state::{ComposeSendState, ComposeState, MenuState, SettingsState, SnoozeState};
 use crate::theme::{ActiveView, InboxlyTheme, SettingsReader};
 use crate::undo::{UndoAction, UndoState};
 
@@ -132,6 +133,9 @@ pub struct Inboxly {
     pub expanded_bundles: HashSet<String>,
     /// Snooze date-picker popup state.
     pub snooze: SnoozeState,
+
+    /// In-progress compose draft state (M35).
+    pub compose: ComposeState,
 }
 
 /// IMAP folder destinations for the "Move to..." action.
@@ -140,6 +144,17 @@ pub enum MoveDestination {
     Inbox,
     Trash,
     Spam,
+}
+
+/// Identifies which recipient list (To/Cc/Bcc) a Compose recipient action targets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecipientField {
+    /// To header.
+    To,
+    /// Cc header.
+    Cc,
+    /// Bcc header (not visible to other recipients).
+    Bcc,
 }
 
 /// All messages the application can receive.
@@ -348,6 +363,89 @@ pub enum Message {
     },
     /// Close the snooze date-picker popup.
     CloseSnoozePicker,
+
+    // -- Compose (M35) --
+    /// Open the compose view with a fresh blank draft. Eagerly assigns
+    /// a UUID `draft_id` (Gemini G4) so the per-draft attachment
+    /// directory can be created before the first auto-save tick.
+    OpenCompose,
+    /// M36 placeholder — open compose in reply mode. Logs a warning in
+    /// M35b and otherwise does nothing.
+    OpenComposeReply {
+        /// Thread ID being replied to.
+        thread_id: String,
+        /// Reply mode (Reply, ReplyAll, Forward).
+        mode: ComposeMode,
+    },
+    /// Close the compose view without sending. Restores `previous_view`
+    /// as `active_view` and leaves the compose state intact.
+    CloseCompose,
+    /// Set the subject line.
+    ComposeSubjectChanged(String),
+    /// Set the To input field text (chips are added on Enter or comma).
+    ComposeToInputChanged(String),
+    /// Set the Cc input field text.
+    ComposeCcInputChanged(String),
+    /// Set the Bcc input field text.
+    ComposeBccInputChanged(String),
+    /// Add a contact to the recipient list. `field` selects To/Cc/Bcc.
+    ComposeAddRecipient {
+        /// Which recipient list to append to.
+        field: RecipientField,
+        /// Resolved contact to add.
+        contact: Contact,
+    },
+    /// Remove a recipient by index.
+    ComposeRemoveRecipient {
+        /// Which recipient list to mutate.
+        field: RecipientField,
+        /// Index into the recipient `Vec`.
+        index: usize,
+    },
+    /// Set the body Markdown source.
+    ComposeBodyChanged(String),
+    /// Toggle Cc/Bcc row visibility (collapsed by default).
+    ComposeToggleCcBcc,
+    /// Toggle between body textarea and Markdown preview.
+    ComposeTogglePreview,
+    /// Switch the FROM account (Issue 1.3 — account picker dropdown).
+    ComposeFromChanged {
+        /// Index into `Inboxly::accounts` selecting the FROM account.
+        account_index: usize,
+    },
+    /// User clicked the attach button. Triggers the rfd file picker
+    /// (Phase 11 bridge).
+    ComposeAttachFile,
+    /// Phase 11 bridge dispatches this with the picked attachment.
+    ComposeAttachmentAdded(Arc<AttachmentDraft>),
+    /// Phase 11 bridge dispatches this when the picked file would push
+    /// total attachment size over the 20 MB limit.
+    ComposeAttachmentTooLarge,
+    /// Remove an attachment by index.
+    ComposeRemoveAttachment(usize),
+    /// User clicked Save. Phase 10 bridge handles SQLite/Maildir/IMAP writes.
+    ComposeSaveDraft,
+    /// Phase 10 bridge dispatches this on a 30 s timer when the draft is
+    /// dirty. `generation` is the captured `save_generation` snapshot used
+    /// for the stale-result guard (Issue 1.8).
+    ComposeAutoSaveTick {
+        /// `save_generation` value at the moment the save was triggered.
+        generation: u64,
+    },
+    /// User clicked Send. Phase 12 bridge runs the SMTP pipeline.
+    ComposeSendDraft,
+    /// Phase 12 bridge dispatches this on send completion.
+    ComposeSendComplete {
+        /// True if the SMTP send succeeded.
+        success: bool,
+        /// Failure reason if `success == false`.
+        error: Option<String>,
+    },
+    /// User dismissed the "Sent — dismiss?" overlay (Gemini G9).
+    /// Clears compose state and returns to the previous view.
+    ComposeDismissSentNotice,
+    /// User clicked Discard. Resets compose state and closes the view.
+    ComposeDiscardDraft,
 }
 
 /// Validate an external URL against M34's scheme allowlist for the
@@ -386,6 +484,49 @@ pub fn validate_external_url(url: &str) -> Result<(), String> {
     }
 }
 
+/// Validate that the given input string parses as exactly one email address.
+///
+/// Pure function (no `Inboxly` dependency) so it is unit-testable in
+/// isolation and so the compose view's input handler can call it without
+/// going through the full state machine. Reuses
+/// [`inboxly_core::parse_address_list`], which already handles the
+/// RFC 5322 forms (`"Name" <addr>`, `addr`, etc.).
+///
+/// Returns `Ok(Contact)` for valid input, `Err(message)` for invalid input.
+///
+/// # Errors
+///
+/// - the input is empty or whitespace-only
+/// - the input cannot be parsed as a single address
+/// - the input parses to more than one address
+/// - the parsed address is missing an `@`
+pub fn validate_smtp_recipient(input: &str) -> Result<Contact, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err("recipient is empty".to_string());
+    }
+    let parsed = parse_address_list(trimmed);
+    if parsed.is_empty() {
+        return Err(format!("could not parse {trimmed:?} as an email address"));
+    }
+    if parsed.len() > 1 {
+        return Err(format!(
+            "expected one address, got {} in {trimmed:?}",
+            parsed.len()
+        ));
+    }
+    // parse_address_list already enforces a non-empty address with `@`,
+    // but we double-check defensively so future parser changes can't
+    // sneak an empty address through.
+    let Some(pa) = parsed.into_iter().next() else {
+        return Err(format!("could not parse {trimmed:?} as an email address"));
+    };
+    if pa.address.is_empty() || !pa.address.contains('@') {
+        return Err(format!("{trimmed:?} is not a valid email address"));
+    }
+    Ok(Contact::new(pa.name.unwrap_or_default(), pa.address))
+}
+
 impl Default for Inboxly {
     fn default() -> Self {
         Self {
@@ -408,6 +549,7 @@ impl Default for Inboxly {
             settings: SettingsState::new(),
             expanded_bundles: HashSet::new(),
             snooze: SnoozeState::new(),
+            compose: ComposeState::new(),
         }
     }
 }
@@ -1352,6 +1494,248 @@ impl Inboxly {
             }
             Message::CloseSnoozePicker => {
                 self.snooze.picker_thread = None;
+            }
+
+            // -- Compose (M35) ----------------------------------------
+            Message::OpenCompose => {
+                // Issue 1.7: open_thread_id and other view state are NOT
+                // touched. The thread stays open in the background;
+                // navigating back to Inbox restores it.
+                self.previous_view = self.active_view;
+                self.active_view = ActiveView::Compose;
+                self.active_nav = NavTarget::View(ActiveView::Compose);
+                if self.compose.dirty {
+                    // M35b accepts "single compose at a time" — opening
+                    // a new compose discards any existing dirty state
+                    // with a warning. M36+ can add a confirmation prompt
+                    // or true multi-compose support.
+                    tracing::warn!(
+                        "OpenCompose called with dirty existing compose state -- discarding"
+                    );
+                }
+                self.compose = ComposeState::default();
+                self.compose.draft_id = Some(uuid::Uuid::new_v4().to_string());
+                self.compose.from_account_index = self.active_account_index;
+            }
+            Message::OpenComposeReply { thread_id, mode } => {
+                tracing::warn!(
+                    "OpenComposeReply is M36 territory -- not implemented in M35b (thread_id={thread_id}, mode={mode:?})"
+                );
+            }
+            Message::CloseCompose => {
+                // Note: compose state is NOT cleared. If the user reopens
+                // compose via OpenCompose, they get a blank one (per
+                // OpenCompose's reset). Resuming the same draft will be
+                // wired through the drafts list in M36+.
+                self.active_view = self.previous_view;
+                self.active_nav = NavTarget::View(self.previous_view);
+            }
+            Message::ComposeSubjectChanged(value) => {
+                // Gemini G5: never clobber state during a send.
+                if matches!(self.compose.send_state, ComposeSendState::Sending) {
+                    tracing::warn!("ComposeSubjectChanged ignored during Sending state");
+                } else {
+                    self.compose.subject = value;
+                    self.compose.mark_dirty();
+                }
+            }
+            Message::ComposeToInputChanged(value) => {
+                if matches!(self.compose.send_state, ComposeSendState::Sending) {
+                    tracing::warn!("ComposeToInputChanged ignored during Sending state");
+                } else {
+                    self.compose.to_input = value;
+                    self.compose.mark_dirty();
+                }
+            }
+            Message::ComposeCcInputChanged(value) => {
+                if matches!(self.compose.send_state, ComposeSendState::Sending) {
+                    tracing::warn!("ComposeCcInputChanged ignored during Sending state");
+                } else {
+                    self.compose.cc_input = value;
+                    self.compose.mark_dirty();
+                }
+            }
+            Message::ComposeBccInputChanged(value) => {
+                if matches!(self.compose.send_state, ComposeSendState::Sending) {
+                    tracing::warn!("ComposeBccInputChanged ignored during Sending state");
+                } else {
+                    self.compose.bcc_input = value;
+                    self.compose.mark_dirty();
+                }
+            }
+            Message::ComposeAddRecipient { field, contact } => {
+                if matches!(self.compose.send_state, ComposeSendState::Sending) {
+                    tracing::warn!("ComposeAddRecipient ignored during Sending state");
+                } else {
+                    let target = match field {
+                        RecipientField::To => &mut self.compose.to,
+                        RecipientField::Cc => &mut self.compose.cc,
+                        RecipientField::Bcc => &mut self.compose.bcc,
+                    };
+                    target.push(Arc::new(contact));
+                    self.compose.mark_dirty();
+                }
+            }
+            Message::ComposeRemoveRecipient { field, index } => {
+                if matches!(self.compose.send_state, ComposeSendState::Sending) {
+                    tracing::warn!("ComposeRemoveRecipient ignored during Sending state");
+                } else {
+                    let target = match field {
+                        RecipientField::To => &mut self.compose.to,
+                        RecipientField::Cc => &mut self.compose.cc,
+                        RecipientField::Bcc => &mut self.compose.bcc,
+                    };
+                    if index < target.len() {
+                        target.remove(index);
+                        self.compose.mark_dirty();
+                    } else {
+                        tracing::warn!(
+                            "ComposeRemoveRecipient index {index} out of bounds (len {})",
+                            target.len()
+                        );
+                    }
+                }
+            }
+            Message::ComposeBodyChanged(value) => {
+                if matches!(self.compose.send_state, ComposeSendState::Sending) {
+                    tracing::warn!("ComposeBodyChanged ignored during Sending state");
+                } else {
+                    self.compose.body_markdown = value;
+                    self.compose.mark_dirty();
+                }
+            }
+            Message::ComposeToggleCcBcc => {
+                self.compose.show_cc_bcc = !self.compose.show_cc_bcc;
+            }
+            Message::ComposeTogglePreview => {
+                self.compose.show_preview = !self.compose.show_preview;
+            }
+            Message::ComposeFromChanged { account_index } => {
+                if matches!(self.compose.send_state, ComposeSendState::Sending) {
+                    tracing::warn!("ComposeFromChanged ignored during Sending state");
+                } else if account_index < self.accounts.len() {
+                    self.compose.from_account_index = account_index;
+                    self.compose.mark_dirty();
+                } else {
+                    tracing::warn!(
+                        "ComposeFromChanged index {account_index} out of bounds (have {} accounts)",
+                        self.accounts.len()
+                    );
+                }
+            }
+            Message::ComposeAttachFile => {
+                // M35 Phase 11: bump the picker counter so the bridge in
+                // `components::app` reacts and opens the rfd file dialog.
+                // The state machine itself never touches the file system
+                // — that lives in the bridge, gated behind cfg(not(test))
+                // (M34 side-effects-in-tests precedent).
+                //
+                // wrapping_add: u64 will not realistically wrap, but the
+                // wrapping form keeps clippy::arithmetic_side_effects
+                // happy and prevents an unreachable panic at u64::MAX.
+                self.compose.attach_picker_counter =
+                    self.compose.attach_picker_counter.wrapping_add(1);
+            }
+            Message::ComposeAttachmentAdded(att) => {
+                if matches!(self.compose.send_state, ComposeSendState::Sending) {
+                    tracing::warn!("ComposeAttachmentAdded ignored during Sending state");
+                } else {
+                    self.compose.attachments.push(att);
+                    self.compose.mark_dirty();
+                }
+            }
+            Message::ComposeAttachmentTooLarge => {
+                // Phase 8 surfaces a snackbar; Phase 6 only logs.
+                tracing::warn!(
+                    "ComposeAttachmentTooLarge -- file would push compose over the 20 MB limit"
+                );
+            }
+            Message::ComposeRemoveAttachment(index) => {
+                if matches!(self.compose.send_state, ComposeSendState::Sending) {
+                    tracing::warn!("ComposeRemoveAttachment ignored during Sending state");
+                } else if index < self.compose.attachments.len() {
+                    self.compose.attachments.remove(index);
+                    self.compose.mark_dirty();
+                } else {
+                    tracing::warn!(
+                        "ComposeRemoveAttachment index {index} out of bounds (len {})",
+                        self.compose.attachments.len()
+                    );
+                }
+            }
+            Message::ComposeSaveDraft => {
+                // Phase 10 bridge handles SQLite/Maildir/IMAP writes.
+                tracing::debug!("ComposeSaveDraft -- save bridge is M35 phase 10");
+            }
+            Message::ComposeAutoSaveTick { generation } => {
+                // Issue 1.8 generation snapshot guard: the Phase 10
+                // auto-save bridge dispatches this AFTER calling
+                // Store::update_draft. Only clear `dirty` if the user
+                // hasn't typed since the save was triggered, otherwise
+                // the next tick must save again.
+                if self.compose.save_generation == generation {
+                    self.compose.dirty = false;
+                }
+            }
+            Message::ComposeSendDraft => {
+                if !self.compose.can_send() {
+                    tracing::warn!("ComposeSendDraft ignored -- can_send() returned false");
+                } else {
+                    self.compose.send_state = ComposeSendState::Sending;
+                }
+            }
+            Message::ComposeSendComplete { success, error } => {
+                if success {
+                    // Gemini G9 two-phase commit: don't clear compose
+                    // state until the user dismisses the overlay.
+                    self.compose.send_state = ComposeSendState::Sent {
+                        dismiss_pending: true,
+                    };
+                } else {
+                    self.compose.send_state = ComposeSendState::Failed {
+                        error: error.unwrap_or_else(|| "send failed".to_string()),
+                    };
+                }
+            }
+            Message::ComposeDismissSentNotice => {
+                if matches!(self.compose.send_state, ComposeSendState::Sent { .. }) {
+                    // Phase 12 wiring: clean up the per-draft attachment
+                    // directory. The send bridge already calls this on
+                    // success, so this is a defensive safety net for
+                    // the case where the bridge skipped cleanup (test
+                    // mode, missing store) — `cleanup_draft_dir` is a
+                    // no-op when the directory is already gone.
+                    #[cfg(not(test))]
+                    if let Some(draft_id) = &self.compose.draft_id {
+                        let _ = inboxly_store::cleanup_draft_dir(draft_id);
+                    }
+                    self.compose = ComposeState::default();
+                    self.active_view = self.previous_view;
+                    self.active_nav = NavTarget::View(self.previous_view);
+                } else {
+                    tracing::warn!("ComposeDismissSentNotice ignored -- send_state is not Sent");
+                }
+            }
+            Message::ComposeDiscardDraft => {
+                // Phase 12 wiring: clean up the per-draft attachment
+                // directory before clearing the compose state. The
+                // dispatcher in `components::app` does NOT touch disk
+                // for discard so the call lives here, gated behind
+                // cfg(not(test)) per the M34 side-effects-in-tests
+                // precedent.
+                #[cfg(not(test))]
+                if let Some(draft_id) = &self.compose.draft_id
+                    && let Err(e) = inboxly_store::cleanup_draft_dir(draft_id)
+                {
+                    tracing::warn!(
+                        draft_id = %draft_id,
+                        error = %e,
+                        "failed to cleanup draft attachment dir on discard"
+                    );
+                }
+                self.compose = ComposeState::default();
+                self.active_view = self.previous_view;
+                self.active_nav = NavTarget::View(self.previous_view);
             }
         }
     }
@@ -2678,6 +3062,395 @@ mod tests {
         assert!(
             err.contains("failed to parse"),
             "garbage input should fail at parse, not scheme: {err}"
+        );
+    }
+
+    // ========================================================================
+    // M35 Phase 6 -- ComposeState state-machine tests
+    // ========================================================================
+    //
+    // These cover the pure state-machine layer for the compose view: the
+    // OpenCompose / CloseCompose / Compose*Changed handlers, the Gemini
+    // G4 eager-UUID invariant, the Gemini G5 Sending-state guard, the
+    // Gemini G9 two-phase commit dismiss flow, and the Issue 1.7
+    // open-thread-preservation guarantee.
+
+    fn test_account(email: &str) -> AccountConfig {
+        AccountConfig {
+            email: email.to_string(),
+            display_name: String::new(),
+            provider: "generic".to_owned(),
+            auth_method: AuthMethod::Password,
+            imap_host: "imap.example.com".to_string(),
+            imap_port: 993,
+            smtp_host: "smtp.example.com".to_string(),
+            smtp_port: 587,
+        }
+    }
+
+    #[test]
+    fn open_compose_initializes_state_and_active_view() {
+        let mut app = Inboxly::default();
+        app.accounts = vec![test_account("alan@example.com")];
+        app.active_account_index = 0;
+
+        let _ = app.update(Message::OpenCompose);
+
+        assert_eq!(app.active_view, ActiveView::Compose);
+        assert!(
+            app.compose.draft_id.is_some(),
+            "OpenCompose must eagerly assign a draft_id (Gemini G4)"
+        );
+        assert_eq!(app.compose.from_account_index, 0);
+        assert_eq!(app.compose.send_state, ComposeSendState::Idle);
+        assert!(!app.compose.dirty);
+        assert!(app.compose.to.is_empty());
+        assert!(app.compose.subject.is_empty());
+    }
+
+    #[test]
+    fn open_compose_preserves_open_thread_id() {
+        // Issue 1.7 regression: opening compose must NOT touch
+        // open_thread_id. The thread stays open in the background;
+        // navigating back to Inbox restores the user's reading position.
+        let mut app = Inboxly::default();
+        app.open_thread_id = Some("t1".to_string());
+
+        let _ = app.update(Message::OpenCompose);
+
+        assert_eq!(app.open_thread_id.as_deref(), Some("t1"));
+        assert_eq!(app.active_view, ActiveView::Compose);
+    }
+
+    #[test]
+    fn compose_subject_changed_marks_dirty_and_bumps_generation() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenCompose);
+        let snapshot = app.compose.save_generation;
+        assert!(!app.compose.dirty);
+
+        let _ = app.update(Message::ComposeSubjectChanged("hello".to_string()));
+
+        assert_eq!(app.compose.subject, "hello");
+        assert!(app.compose.dirty);
+        assert!(
+            app.compose.save_generation > snapshot,
+            "save_generation must bump on every field change (Issue 1.8)"
+        );
+    }
+
+    #[test]
+    fn compose_add_recipient_appends_to_correct_field() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenCompose);
+
+        let _ = app.update(Message::ComposeAddRecipient {
+            field: RecipientField::To,
+            contact: Contact::new("Alan", "alan@example.com"),
+        });
+        let _ = app.update(Message::ComposeAddRecipient {
+            field: RecipientField::Cc,
+            contact: Contact::new("Bob", "bob@example.com"),
+        });
+
+        assert_eq!(app.compose.to.len(), 1);
+        assert_eq!(app.compose.cc.len(), 1);
+        assert!(app.compose.bcc.is_empty());
+        assert_eq!(app.compose.to[0].address, "alan@example.com");
+        assert_eq!(app.compose.cc[0].address, "bob@example.com");
+        assert!(app.compose.dirty);
+    }
+
+    #[test]
+    fn compose_remove_recipient_by_index() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenCompose);
+        for (name, addr) in [
+            ("Alpha", "a@example.com"),
+            ("Beta", "b@example.com"),
+            ("Gamma", "c@example.com"),
+        ] {
+            let _ = app.update(Message::ComposeAddRecipient {
+                field: RecipientField::To,
+                contact: Contact::new(name, addr),
+            });
+        }
+        assert_eq!(app.compose.to.len(), 3);
+
+        let _ = app.update(Message::ComposeRemoveRecipient {
+            field: RecipientField::To,
+            index: 1,
+        });
+
+        assert_eq!(app.compose.to.len(), 2);
+        assert_eq!(app.compose.to[0].address, "a@example.com");
+        assert_eq!(app.compose.to[1].address, "c@example.com");
+
+        // Out-of-bounds removal must be a no-op (defensive bounds check).
+        let _ = app.update(Message::ComposeRemoveRecipient {
+            field: RecipientField::To,
+            index: 99,
+        });
+        assert_eq!(app.compose.to.len(), 2);
+    }
+
+    #[test]
+    fn compose_toggle_cc_bcc_and_preview() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenCompose);
+        assert!(!app.compose.show_cc_bcc);
+        assert!(!app.compose.show_preview);
+
+        let _ = app.update(Message::ComposeToggleCcBcc);
+        let _ = app.update(Message::ComposeTogglePreview);
+        assert!(app.compose.show_cc_bcc);
+        assert!(app.compose.show_preview);
+
+        let _ = app.update(Message::ComposeToggleCcBcc);
+        let _ = app.update(Message::ComposeTogglePreview);
+        assert!(!app.compose.show_cc_bcc);
+        assert!(!app.compose.show_preview);
+    }
+
+    #[test]
+    fn compose_from_changed_switches_account_index() {
+        let mut app = Inboxly::default();
+        app.accounts = vec![
+            test_account("alan@example.com"),
+            test_account("alan@work.example.com"),
+        ];
+        let _ = app.update(Message::OpenCompose);
+        assert_eq!(app.compose.from_account_index, 0);
+
+        let _ = app.update(Message::ComposeFromChanged { account_index: 1 });
+        assert_eq!(app.compose.from_account_index, 1);
+        assert!(app.compose.dirty);
+
+        // Out-of-bounds index must be ignored (defensive bounds check).
+        let _ = app.update(Message::ComposeFromChanged { account_index: 99 });
+        assert_eq!(app.compose.from_account_index, 1);
+    }
+
+    #[test]
+    fn close_compose_preserves_open_thread_id() {
+        // The CloseCompose handler must restore previous_view but never
+        // mutate open_thread_id (mirrors Issue 1.7 for the close path).
+        let mut app = Inboxly::default();
+        app.open_thread_id = Some("t1".to_string());
+        let _ = app.update(Message::OpenCompose);
+        assert_eq!(app.active_view, ActiveView::Compose);
+
+        let _ = app.update(Message::CloseCompose);
+
+        assert_eq!(app.active_view, ActiveView::Inbox);
+        assert_eq!(app.open_thread_id.as_deref(), Some("t1"));
+    }
+
+    #[test]
+    fn compose_discard_draft_clears_state() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenCompose);
+        let _ = app.update(Message::ComposeSubjectChanged("dirty subject".to_string()));
+        let _ = app.update(Message::ComposeAddRecipient {
+            field: RecipientField::To,
+            contact: Contact::new("X", "x@example.com"),
+        });
+        assert!(app.compose.dirty);
+        assert!(!app.compose.subject.is_empty());
+
+        let _ = app.update(Message::ComposeDiscardDraft);
+
+        assert_eq!(app.active_view, ActiveView::Inbox);
+        assert!(app.compose.draft_id.is_none());
+        assert!(app.compose.subject.is_empty());
+        assert!(app.compose.to.is_empty());
+        assert!(!app.compose.dirty);
+        assert_eq!(app.compose.save_generation, 0);
+        assert_eq!(app.compose.send_state, ComposeSendState::Idle);
+    }
+
+    #[test]
+    fn validate_smtp_recipient_accepts_valid_addresses() {
+        let plain = super::validate_smtp_recipient("alan@example.com")
+            .expect("plain bare address should parse");
+        assert_eq!(plain.address, "alan@example.com");
+
+        let named = super::validate_smtp_recipient("Alan Gaudet <alan@example.com>")
+            .expect("named address should parse");
+        assert_eq!(named.address, "alan@example.com");
+        assert_eq!(named.name, "Alan Gaudet");
+    }
+
+    #[test]
+    fn validate_smtp_recipient_rejects_invalid() {
+        // Empty input.
+        assert!(super::validate_smtp_recipient("").is_err());
+        assert!(super::validate_smtp_recipient("   ").is_err());
+
+        // Garbage that doesn't contain an address.
+        assert!(super::validate_smtp_recipient("not-an-email").is_err());
+
+        // Two addresses on one line -- the validator only accepts one.
+        let multi = super::validate_smtp_recipient("two@addresses.com, three@addresses.com");
+        assert!(multi.is_err());
+    }
+
+    #[test]
+    fn compose_attachment_too_large_does_not_add() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenCompose);
+        assert!(app.compose.attachments.is_empty());
+
+        let _ = app.update(Message::ComposeAttachmentTooLarge);
+
+        // The handler is purely advisory in M35b -- it must NOT mutate
+        // the attachments list. Phase 8 surfaces a snackbar.
+        assert!(app.compose.attachments.is_empty());
+        assert!(!app.compose.dirty);
+    }
+
+    #[test]
+    fn compose_dismiss_sent_notice_clears_state_from_sent() {
+        // Gemini G9 two-phase commit dismiss flow: from Sent state, the
+        // dismiss message resets compose to default and returns to the
+        // previous view.
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenCompose);
+        let _ = app.update(Message::ComposeSubjectChanged("Outgoing".to_string()));
+        // Manually park the state in Sent { dismiss_pending: true } as
+        // the Phase 12 send bridge would.
+        app.compose.send_state = ComposeSendState::Sent {
+            dismiss_pending: true,
+        };
+
+        let _ = app.update(Message::ComposeDismissSentNotice);
+
+        assert_eq!(app.compose.send_state, ComposeSendState::Idle);
+        assert!(app.compose.draft_id.is_none());
+        assert!(app.compose.subject.is_empty());
+        assert!(!app.compose.dirty);
+        assert_eq!(app.active_view, ActiveView::Inbox);
+    }
+
+    #[test]
+    fn compose_subject_changed_blocked_during_sending() {
+        // Gemini G5 isolation: while the SMTP send is in flight, every
+        // field-change handler must refuse to mutate state. Otherwise
+        // the user could type into the subject mid-send and the
+        // committed-to-disk draft would diverge from what was actually
+        // put on the wire.
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenCompose);
+        let _ = app.update(Message::ComposeSubjectChanged("original".to_string()));
+        app.compose.send_state = ComposeSendState::Sending;
+        let snapshot_generation = app.compose.save_generation;
+
+        let _ = app.update(Message::ComposeSubjectChanged("clobbered".to_string()));
+
+        assert_eq!(
+            app.compose.subject, "original",
+            "subject must not change while Sending"
+        );
+        assert_eq!(
+            app.compose.send_state,
+            ComposeSendState::Sending,
+            "send_state must remain Sending"
+        );
+        assert_eq!(
+            app.compose.save_generation, snapshot_generation,
+            "save_generation must not bump while Sending"
+        );
+    }
+
+    // ===== M35 Phase 9: SpeedDialFab → OpenCompose wiring =====
+    //
+    // The SpeedDialFab onclick dispatches Message::OpenCompose. The
+    // following tests exercise the OpenCompose contract from each
+    // possible starting view, since the FAB is reachable from any of
+    // them. Component-level rendering can't be tested without a
+    // headless harness; the equivalent state-machine assertions are
+    // here.
+
+    #[test]
+    fn open_compose_from_inbox_round_trips_via_close() {
+        // Starting in Inbox, FAB → OpenCompose → CloseCompose should
+        // return the user to Inbox with the same active_nav state.
+        let mut app = Inboxly::default();
+        assert_eq!(app.active_view, ActiveView::Inbox);
+
+        let _ = app.update(Message::OpenCompose);
+        assert_eq!(app.active_view, ActiveView::Compose);
+        assert_eq!(app.previous_view, ActiveView::Inbox);
+
+        let _ = app.update(Message::CloseCompose);
+        assert_eq!(
+            app.active_view,
+            ActiveView::Inbox,
+            "CloseCompose must restore previous_view"
+        );
+    }
+
+    #[test]
+    fn open_compose_from_done_captures_previous_view() {
+        // FAB pressed while in Done view: previous_view must be Done
+        // so CloseCompose returns there, not to Inbox.
+        let mut app = Inboxly::default();
+        app.active_view = ActiveView::Done;
+
+        let _ = app.update(Message::OpenCompose);
+
+        assert_eq!(app.active_view, ActiveView::Compose);
+        assert_eq!(
+            app.previous_view,
+            ActiveView::Done,
+            "previous_view must capture the view the FAB was pressed from"
+        );
+
+        let _ = app.update(Message::CloseCompose);
+        assert_eq!(
+            app.active_view,
+            ActiveView::Done,
+            "CloseCompose must return to Done, not Inbox"
+        );
+    }
+
+    #[test]
+    fn open_compose_when_already_in_compose_resets_state() {
+        // Defensive: dispatching OpenCompose while already in compose
+        // mode (e.g. user clicks the FAB twice) should reset to a fresh
+        // draft. The Phase 6 handler discards the existing dirty state
+        // with a warning, which matches "single compose at a time" UX
+        // for M35b.
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenCompose);
+        let first_draft_id = app.compose.draft_id.clone();
+        let _ = app.update(Message::ComposeSubjectChanged(
+            "draft 1 subject".to_string(),
+        ));
+        assert!(app.compose.dirty);
+
+        let _ = app.update(Message::OpenCompose);
+
+        assert_eq!(
+            app.active_view,
+            ActiveView::Compose,
+            "still in compose view after second OpenCompose"
+        );
+        assert!(
+            app.compose.draft_id.is_some(),
+            "second OpenCompose must produce a draft_id"
+        );
+        assert_ne!(
+            app.compose.draft_id, first_draft_id,
+            "second OpenCompose must produce a NEW draft_id"
+        );
+        assert!(
+            app.compose.subject.is_empty(),
+            "second OpenCompose must clear the subject"
+        );
+        assert!(
+            !app.compose.dirty,
+            "second OpenCompose must clear the dirty flag"
         );
     }
 }

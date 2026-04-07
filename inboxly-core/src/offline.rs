@@ -6,6 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::email::DraftEmail;
+
 /// An action taken by the user while offline (or during sync).
 ///
 /// Queued in SQLite's `offline_queue` table as JSON and replayed
@@ -63,9 +65,52 @@ pub enum OfflineAction {
         imap_uid: u32,
     },
     /// Send a queued draft (composed offline). Handled by SMTP (M23).
+    ///
+    /// Legacy form: only the maildir `.eml` path is preserved, so the
+    /// replay handler must reparse the file back into a `DraftEmail`.
+    /// Kept for backwards compatibility with queue entries written
+    /// before M35b — new entries should use [`Self::SendDraftFull`].
     SendDraft {
         account_id: String,
         draft_maildir_path: String,
+    },
+
+    /// **M35b path**: Send a draft whose full [`DraftEmail`] is embedded
+    /// in the action payload. Replaces the legacy [`Self::SendDraft`]
+    /// for new drafts queued by Phase 12's send bridge. The legacy
+    /// variant is preserved so existing queue entries from before M35b
+    /// still replay correctly.
+    ///
+    /// `draft` is boxed so this variant doesn't bloat the size of the
+    /// other (small) `OfflineAction` variants — `DraftEmail` is ~350
+    /// bytes due to its `Vec<Contact>` / `Vec<AttachmentDraft>` /
+    /// timestamp fields.
+    SendDraftFull {
+        /// Fully-hydrated draft, including markdown body and recipients.
+        draft: Box<DraftEmail>,
+    },
+
+    /// **M35b Gemini G6**: SMTP send succeeded but the IMAP Sent folder
+    /// `APPEND` failed (or could not be attempted because the bridge
+    /// did not own a session). The next sync's offline replay loop will
+    /// retry the `APPEND` so the user's Sent folder eventually catches
+    /// up. The user sees the standard "Sent" overlay regardless — the
+    /// email already left the wire.
+    ///
+    /// The replay handler is expected to look the message up in the
+    /// local Maildir Sent folder by `Message-ID` and replay the IMAP
+    /// `APPEND` from those bytes. For Phase 12 the handler logs and
+    /// skips because the `MaildirStore` + active `Session` are not yet
+    /// plumbed through `replay_offline_queue`'s signature; the variant
+    /// exists so the queue model is correct now and Phase 13 / M36 can
+    /// fill in the body without a schema migration.
+    AppendSent {
+        /// Account that owns the Sent folder copy. Stored as the
+        /// account's email address (matches the bridge's accessor).
+        account_id: String,
+        /// `Message-ID` of the sent message. The replay handler uses
+        /// this to look up the local Maildir copy.
+        draft_message_id: String,
     },
 }
 
@@ -82,6 +127,8 @@ impl OfflineAction {
             Self::MoveToFolder { .. } => "move_to_folder",
             Self::MarkAnswered { .. } => "mark_answered",
             Self::SendDraft { .. } => "send_draft",
+            Self::SendDraftFull { .. } => "send_draft_full",
+            Self::AppendSent { .. } => "append_sent",
         }
     }
 }
@@ -89,6 +136,7 @@ impl OfflineAction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::id::AccountId;
 
     #[test]
     fn test_variant_names() {
@@ -161,6 +209,13 @@ mod tests {
                 account_id: "a".into(),
                 draft_maildir_path: "/tmp/d.eml".into(),
             },
+            OfflineAction::SendDraftFull {
+                draft: Box::new(DraftEmail::new_empty(AccountId::new())),
+            },
+            OfflineAction::AppendSent {
+                account_id: "alice@example.com".into(),
+                draft_message_id: "<msg-1@inboxly.local>".into(),
+            },
         ];
 
         let expected_names = [
@@ -173,6 +228,8 @@ mod tests {
             "move_to_folder",
             "mark_answered",
             "send_draft",
+            "send_draft_full",
+            "append_sent",
         ];
 
         for (action, expected) in variants.iter().zip(expected_names.iter()) {
@@ -181,6 +238,41 @@ mod tests {
             let json = serde_json::to_string(action).unwrap();
             let back: OfflineAction = serde_json::from_str(&json).unwrap();
             assert_eq!(back.variant_name(), *expected);
+        }
+    }
+
+    /// **M35b Phase 12 — Gemini G6**: focused round-trip test for the
+    /// new `AppendSent` variant. Verifies that the variant serialises
+    /// to a JSON-tagged form whose `account_id` and `draft_message_id`
+    /// fields survive a round trip, that `variant_name()` reports
+    /// `"append_sent"`, and that the deserialised value still matches
+    /// the original.
+    ///
+    /// `test_all_variants_serialize` above already covers `AppendSent`
+    /// inside its loop, but the loop only checks `variant_name()` —
+    /// this test asserts the *field-level* round trip so a future
+    /// rename (or accidental `#[serde(skip)]`) would fail loudly.
+    #[test]
+    fn append_sent_serialize_round_trip() {
+        let action = OfflineAction::AppendSent {
+            account_id: "alice@example.com".into(),
+            draft_message_id: "<msg-roundtrip@inboxly.local>".into(),
+        };
+        assert_eq!(action.variant_name(), "append_sent");
+
+        let json = serde_json::to_string(&action).expect("AppendSent must serialise");
+        let back: OfflineAction = serde_json::from_str(&json).expect("AppendSent must round-trip");
+        assert_eq!(back.variant_name(), "append_sent");
+
+        match back {
+            OfflineAction::AppendSent {
+                account_id,
+                draft_message_id,
+            } => {
+                assert_eq!(account_id, "alice@example.com");
+                assert_eq!(draft_message_id, "<msg-roundtrip@inboxly.local>");
+            }
+            other => panic!("expected AppendSent variant, got {other:?}"),
         }
     }
 }

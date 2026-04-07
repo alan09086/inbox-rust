@@ -1129,3 +1129,276 @@ body {
     flex: 1;
     word-break: break-word;
 }
+
+/* ============================================================
+   16. Compose view (M35)
+   ============================================================ */
+
+/* Container for the entire compose view, occupying the content area
+   below the toolbar. Uses a column flex layout so the body grows to
+   fill remaining vertical space and the footer sticks to the bottom. */
+.compose-view {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: var(--bg-color);
+    color: var(--text-primary);
+    overflow: hidden;
+}
+
+/* Sticky header with back arrow + title + account picker dropdown.
+   Visually distinct from the toolbar (which still owns the colored
+   bar above) so the user knows they are in compose mode. */
+.compose-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px var(--default-padding);
+    background: var(--surface-color);
+    border-bottom: 1px solid var(--divider-color);
+    flex-shrink: 0;
+}
+
+/* The form container scrolls if content exceeds available space.
+   Footer stays pinned via the parent flex layout. */
+.compose-form {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px var(--default-padding);
+    background: var(--surface-color);
+}
+
+/* Each labeled field row (Subject, To, Cc, Bcc, Body) gets the same
+   vertical rhythm and divider treatment. */
+.compose-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--divider-color);
+}
+
+/* Recipient row groups the chip list and the input field on one line. */
+.compose-recipients {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+/* Chip representing a single accepted recipient (a parsed Contact). */
+.recipient-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: var(--active-bg);
+    color: var(--accent-blue);
+    border-radius: 16px;
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.recipient-chip-remove {
+    cursor: pointer;
+    background: none;
+    border: none;
+    color: var(--accent-blue);
+    font-size: 14px;
+    padding: 0 2px;
+    line-height: 1;
+}
+
+.recipient-chip-remove:hover {
+    color: var(--menu-destructive-text);
+}
+
+/* Subject line — single-row text input with no decoration so the
+   layout stays clean. Larger font to anchor the message visually. */
+.compose-subject {
+    width: 100%;
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 16px;
+    font-weight: 500;
+    padding: 4px 0;
+    outline: none;
+}
+
+/* Body container holds either the textarea or the rendered preview,
+   plus the toggle button. */
+.compose-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 240px;
+}
+
+/* The Markdown source textarea. Monospace so users can see fenced
+   code blocks line up. */
+.compose-body-textarea {
+    width: 100%;
+    min-height: 220px;
+    border: 1px solid var(--divider-color);
+    border-radius: 6px;
+    background: var(--surface-color);
+    color: var(--text-primary);
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
+    font-size: 14px;
+    line-height: 1.5;
+    padding: 12px;
+    resize: vertical;
+    outline: none;
+}
+
+.compose-body-textarea:focus {
+    border-color: var(--accent-blue);
+}
+
+/* Rendered Markdown preview (innerHTML, sanitised) — proportional
+   font, comfortable reading width. */
+.compose-body-preview {
+    min-height: 220px;
+    padding: 12px;
+    border: 1px solid var(--divider-color);
+    border-radius: 6px;
+    background: var(--surface-color);
+    color: var(--text-primary);
+    font-size: 14px;
+    line-height: 1.6;
+    overflow-y: auto;
+}
+
+.compose-toggle-preview {
+    align-self: flex-start;
+    background: none;
+    border: 1px solid var(--divider-color);
+    border-radius: 4px;
+    padding: 4px 12px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.compose-toggle-preview:hover {
+    background: var(--menu-hover);
+}
+
+/* Attachment chip row — wraps if there are many attachments. */
+.compose-attachments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.attachment-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: var(--surface-selected);
+    border: 1px solid var(--divider-color);
+    border-radius: 6px;
+    font-size: 13px;
+    max-width: 280px;
+}
+
+.attachment-chip-icon {
+    font-size: 16px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+.attachment-chip-filename {
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+}
+
+.attachment-chip-size {
+    color: var(--text-secondary);
+    font-size: 11px;
+    flex-shrink: 0;
+}
+
+.attachment-chip-remove {
+    cursor: pointer;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 14px;
+    padding: 0 2px;
+    line-height: 1;
+}
+
+.attachment-chip-remove:hover {
+    color: var(--menu-destructive-text);
+}
+
+/* Footer with Discard / Save Draft / Send buttons. Sticks to the
+   bottom of the compose view via the parent flex layout. */
+.compose-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px var(--default-padding);
+    background: var(--surface-color);
+    border-top: 1px solid var(--divider-color);
+    flex-shrink: 0;
+}
+
+.compose-send-button {
+    background: var(--accent-blue);
+    color: var(--toolbar-text);
+    border: none;
+    border-radius: 4px;
+    padding: 8px 20px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.compose-send-button:hover {
+    filter: brightness(1.1);
+}
+
+.compose-send-button:disabled {
+    background: var(--divider-color);
+    color: var(--text-secondary);
+    cursor: not-allowed;
+    filter: none;
+}
+
+.compose-discard-button {
+    background: none;
+    border: 1px solid var(--divider-color);
+    border-radius: 4px;
+    padding: 8px 16px;
+    color: var(--text-primary);
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.compose-discard-button:hover {
+    background: var(--menu-destructive-hover);
+    color: var(--menu-destructive-text);
+}
+
+/* Error banner shown above the footer when send fails. Uses the
+   menu-destructive tokens for cross-theme consistency. */
+.compose-error-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 8px var(--default-padding);
+    padding: 10px 14px;
+    background: var(--menu-destructive-hover);
+    color: var(--menu-destructive-text);
+    border-left: 4px solid var(--menu-destructive-text);
+    border-radius: 6px;
+    font-size: 13px;
+}

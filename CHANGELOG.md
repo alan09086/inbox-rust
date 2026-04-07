@@ -2,6 +2,199 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.35.0] - 2026-04-07
+
+### Added (M35 — SMTP Engine + Compose View)
+
+Closes the read/write loop. After M34, users could READ email via the thread
+detail view; after M35, they can WRITE it too. Sixteen commits across two
+sub-milestones (M35a refactor + M35b feature work) under a `/plan-eng-review`
+audit (16 issues) and a Gemini outside-voice pass (9 additional findings, G1-G9).
+All 25 findings were resolved interactively before implementation began.
+
+#### M35a — God-object refactor (pre-requisite, behaviour-preserving)
+
+Before adding ~14 new compose state fields, the 53-field `Inboxly` god-object
+was refactored into three sub-structs so M35b's new fields could land in a
+clean shape from day one. Isolated as its own sub-milestone to contain
+regression risk (Gemini G7).
+
+- `inboxly-ui/src/state/settings_state.rs` — `SettingsState` (21 fields):
+  `theme_preference`, `default_view`, `undo_timeout_secs`, account form,
+  storage display, keyboard shortcuts, notifications, bundles, settings tab.
+- `inboxly-ui/src/state/menu_state.rs` — `MenuState` (5 fields): overflow +
+  context menu state with `close()` helper replacing `Inboxly::close_menus()`.
+- `inboxly-ui/src/state/snooze_state.rs` — `SnoozeState` (2 fields): picker
+  thread + position.
+- Every handler, component, and test updated to use the new dotted paths
+  (`app.settings.theme_preference`, `app.menus.overflow_thread`, etc.).
+  All 884 existing tests continued to pass — refactor was behaviour-preserving.
+
+#### M35b — SMTP + Compose + Drafts (the new feature)
+
+**Phase 0 — lettre 0.11 API verification.** Downloaded the crate and grepped
+its source to confirm two API unknowns before writing any SMTP code. Documented
+in `docs/superpowers/notes/2026-04-07-lettre-api-verification.md`:
+- `Mechanism::Xoauth2` exists as a built-in enum variant with no feature gate.
+  **Critical:** not in `DEFAULT_MECHANISMS` — must explicitly call
+  `.authentication(vec![Mechanism::Xoauth2])` or Gmail rejects with 534-5.7.9.
+- `MessageBuilder::bcc()` defaults to envelope-only via `drop_bcc: true`;
+  `keep_bcc()` is the documented opt-out for the Sent-folder APPEND case.
+
+**Phase 1 — Core data types + Markdown converter.** Added `DraftEmail`,
+`ComposeMode` (with placeholder Reply/ReplyAll/Forward variants for M36),
+`AttachmentDraft`, `AttachmentSource::Disk(PathBuf)` to `inboxly-core`.
+New `inboxly-core/src/markdown.rs` with `markdown_to_html` and
+`markdown_to_plaintext` via `pulldown-cmark 0.12`. Raw HTML in the source is
+dropped at the parse layer via an `Event::Html`/`Event::InlineHtml` filter
+(pulldown-cmark 0.12 dropped `Options::ENABLE_HTML` entirely, so the
+event-filter pattern replaces it). Tables, strikethrough, tasklists enabled.
+15 unit tests including the raw-HTML-dropped security invariant.
+
+**Phase 2 — Drafts table + Store CRUD.** SQLite migration v4→v5 for the
+`drafts` table (15 columns). `inboxly-store/src/drafts.rs` with `DraftRow`
++ `insert_draft`, `update_draft`, `get_draft`, `list_drafts`, `delete_draft`
+Store methods. Message-ID uniqueness is the dedup invariant across the
+three-layer persistence (SQLite, Maildir, IMAP Drafts). `references` SQL
+column renamed to `references_header` to avoid the SQLite reserved word trap.
+6 integration tests.
+
+**Phase 3 — SMTP transport + dual message builders.** `inboxly-imap/src/smtp/`
+with six new modules: `error.rs`, `retry.rs` (pure `should_retry` function),
+`redact.rs` (SHA-256 recipient hash, body never logged), `message_builder.rs`
+(TWO builders per Gemini G1: `build_rfc5322_for_smtp` with `drop_bcc: true`
+for wire send, `build_rfc5322_for_sent_folder` with `.keep_bcc()` for the
+Sent folder copy), `transport.rs` (SmtpSender), `draft_sender.rs`
+(`DraftSender` trait for mocking). Also adds
+`inboxly-imap/src/auth/shared_oauth2.rs` for cross-transport token sharing
+(Issue 1.2). 23 new unit tests including both Gemini G1 Bcc invariants.
+
+**Phase 4 — IMAP APPEND helpers + Maildir dedup.**
+`inboxly-imap/src/append.rs` with `imap_append_draft` and `imap_append_sent`
+using the `build_rfc5322_for_sent_folder` builder. `MaildirStore::has_message_id`
+linear scan + 1 unit test.
+
+**Phase 4b — Sync-side dedup wiring (Gemini G8).** New
+`MaildirStore::find_message_id` returning `Option<PathBuf>`; `process_body()`
+checks it for Drafts/Sent folders BEFORE writing, and on a match skips the
+write and points the email row at the existing file. Prevents visible
+duplicate drafts. 3 integration tests.
+
+**Phase 5 — Offline replay (additive `SendDraftFull`).** New
+`OfflineAction::SendDraftFull { draft: Box<DraftEmail> }` variant alongside
+the legacy `SendDraft`. `DraftSender` trait abstraction with a
+`MockDraftSender` for tests. `replay_offline_queue` now takes
+`Option<&dyn DraftSender>`; existing callers pass `None`. 4 unit tests.
+
+**Phase 6 — ComposeState + 23 Message variants + state-machine tests.**
+`inboxly-ui/src/state/compose_state.rs` with `ComposeState` (17 fields
+including `Arc<Contact>` recipients per Issue 4.2, eager `draft_id` per
+Gemini G4) and `ComposeSendState` (two-phase commit per Gemini G9).
+`ActiveView::Compose` added to the theme. 23 new Message variants. All
+field-change handlers respect the `Sending` guard (Gemini G5). Pure
+`validate_smtp_recipient` free function. 14 state-machine tests.
+
+**Phase 7 — CSS.** Section 16 of `inboxly-ui/assets/main.css` with ~25
+selectors using existing custom properties so dark mode works automatically.
+
+**Phase 8 — ComposeView Dioxus component.**
+`inboxly-ui/src/components/compose_view.rs`: header with back button +
+title + AccountPickerDropdown, recipient rows (To always visible, Cc/Bcc
+collapsible) with chips + Enter/comma parsing, Subject input, body textarea
+or Markdown preview (toggleable), attachment chips row, footer. Three
+sub-components: `RecipientChip`, `AttachmentChip`, `AccountPickerDropdown`.
+Gemini G9 two-phase "Sent — Dismiss" overlay and Failed error banner.
+
+**Phase 9 — FAB wiring.** `SpeedDialFab` onclick dispatches
+`Message::OpenCompose`. 3 state-machine tests for the FAB → OpenCompose
+flow (round-trip via CloseCompose, previous_view capture from Done,
+idempotent second OpenCompose).
+
+**Phase 10 — Auto-save bridge.** New `use_effect` watching
+`(compose.dirty, compose.save_generation, compose.draft_id)`. 30-second
+`tokio::time::sleep` timer with generation-snapshot stale-result guard
+(Issue 1.8). Aborts if `send_state` is `Sending`/`Sent` at wake time
+(Gemini G5). Calls `Store::update_draft` gated behind `#[cfg(not(test))]`.
+New `compose_state_to_draft_email` helper + `account_id_from_email` helper
+using deterministic UUID v5 namespace derivation. 3 helper unit tests.
+
+**Phase 11 — Attachment picker bridge.** New `use_effect` watching a
+counter. Opens `rfd::AsyncFileDialog`, reads file metadata BEFORE the bytes
+(Gemini G3 metadata-first), enforces 20 MB total cap, copies to
+`~/.local/share/inboxly/drafts/<id>/` with UUID-suffixed disk filename
+(Gemini G2). New `inboxly-store/src/draft_attachments.rs` with
+`ensure_draft_dir`, `make_draft_filename`, `cleanup_draft_dir`. All
+picker + file I/O gated behind `#[cfg(not(test))]`. 4 unit tests.
+
+**Phase 12 — Send bridge.** Final `use_effect` watching
+`compose.send_state == Sending`. Builds the `DraftEmail`, constructs an
+`SmtpSender`, runs the `should_retry` loop (3 attempts with 1s/2s delays).
+On success: enqueues `OfflineAction::AppendSent`, deletes the SQLite draft,
+runs `cleanup_draft_dir`, dispatches `ComposeSendComplete { success: true }`
+which transitions to `Sent { dismiss_pending: true }`. Stale-result guard
+for **failures only** (Gemini G9 fix). Password auth reads from
+`INBOXLY_SMTP_PASSWORD` env var. New `OfflineAction::AppendSent` variant.
+
+**Phase 13 — Verification.** Final workspace pass: **961 tests passing**
+(884 baseline + 77 new across M35a and M35b), clippy clean on library
+targets, `cargo build -p inboxly` clean, release-mode `inboxly-ui` tests
+all passing (299).
+
+### Known M35 limitations (follow-ups for M36+)
+
+These are documented explicitly so users attempting end-to-end verification
+know what to expect. None of these are regressions — they are deliberate
+M35b scope cuts that the plan authorized:
+
+- **Password auth requires `INBOXLY_SMTP_PASSWORD` env var.** There's no
+  keyring or per-account secret store yet. For manual testing, launch with
+  `INBOXLY_SMTP_PASSWORD=<password> cargo run`. M36 will add a real secrets
+  backend.
+- **OAuth2 SMTP send is not yet wired through the compose bridge.** Gmail
+  accounts with `auth_method = "oauth2"` will fail fast with a clear error:
+  *"OAuth2 SMTP send not yet wired — M36 will plumb SharedOAuth2 from the
+  sync loop."* The `SharedOAuth2` type exists and the `SmtpSender::with_oauth2`
+  constructor is wired — only the `Arc<SharedOAuth2>` plumbing from app
+  startup down to the send bridge is missing. M36.
+- **Sent folder IMAP APPEND is deferred twice.** The send bridge enqueues
+  `OfflineAction::AppendSent` on success, but the replay handler logs +
+  skips because the `MaildirStore` + active `Session` aren't plumbed
+  through `replay_offline_queue`'s signature. Consequence: even on
+  successful send, the user's IMAP Sent folder will NOT receive a copy
+  of the message until the post-M35b wiring lands. The recipient still
+  receives the email; only the user's own Sent folder is missing. M36
+  will wire this.
+- **Local Maildir Sent folder copy is not written on send.** Related to
+  the above — the bridge doesn't write the sent message to the local
+  `.Sent/` folder. The SQLite draft row IS deleted on send, so if the
+  IMAP Sent APPEND also fails (which it will until M36), the user has no
+  local record of the message. For M35b, treat this as a "sent messages
+  don't appear in your Sent folder view" limitation.
+- **Manual Save Draft button is a no-op.** The `ComposeSaveDraft` handler
+  logs a debug line but doesn't trigger an immediate save — the 30-second
+  auto-save covers the correctness case. M36 can wire explicit-save via
+  a counter pattern if users ask.
+- **AppendSent replay handler is a warn-and-skip.** The variant exists in
+  `OfflineAction`, the bridge enqueues it, but the replay body is a
+  placeholder. M36 will wire the MaildirStore + session integration.
+
+### Test count
+
+- v0.34.1: 884 tests
+- v0.35.0: **961 tests** (+77)
+  - M35a: 0 new tests (behaviour-preserving refactor)
+  - Phase 1: 15 markdown tests
+  - Phase 2: 6 drafts integration tests
+  - Phase 3: 23 SMTP tests (message builder + retry + redact)
+  - Phase 4: 1 has_message_id test
+  - Phase 4b: 3 sync dedup tests
+  - Phase 5: 4 offline replay tests with MockDraftSender
+  - Phase 6: 14 compose state-machine tests
+  - Phase 9: 3 FAB wiring tests
+  - Phase 10: 3 helper function tests
+  - Phase 11: 4 make_draft_filename tests
+  - Phase 12: 1 AppendSent serialize round-trip test
+
 ## [0.34.1] - 2026-04-07
 
 ### Fixed (post-M34 polish)

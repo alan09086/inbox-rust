@@ -44,13 +44,16 @@ use inboxly_core::config::ThemePreference;
 // so that `nav.rs`, `toolbar.rs`, and `app.rs` continue to compile without
 // changes to their import paths.
 
-/// The three primary views that drive toolbar colour and content.
+/// The primary views that drive toolbar colour and content.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ActiveView {
     #[default]
     Inbox,
     Snoozed,
     Done,
+    /// Full-screen compose view (M35). Toolbar shows the compose colour
+    /// and the back arrow returns to `previous_view`.
+    Compose,
     /// Full-screen settings view. Toolbar turns grey, hamburger becomes back arrow.
     Settings,
 }
@@ -62,6 +65,7 @@ impl ActiveView {
             Self::Inbox => "Inbox",
             Self::Snoozed => "Snoozed",
             Self::Done => "Done",
+            Self::Compose => "Compose",
             Self::Settings => "Settings",
         }
     }
@@ -69,9 +73,14 @@ impl ActiveView {
     /// Toolbar background colour for this view (light theme).
     pub fn toolbar_color(&self) -> Color {
         match self {
-            Self::Inbox => color_from_hex(0x42, 0x85, 0xf4),    // #4285f4
-            Self::Snoozed => color_from_hex(0xef, 0x6c, 0x00),  // #ef6c00
-            Self::Done => color_from_hex(0x0f, 0x9d, 0x58),     // #0f9d58
+            Self::Inbox => color_from_hex(0x42, 0x85, 0xf4), // #4285f4
+            Self::Snoozed => color_from_hex(0xef, 0x6c, 0x00), // #ef6c00
+            Self::Done => color_from_hex(0x0f, 0x9d, 0x58),  // #0f9d58
+            // Muted purple for compose — distinct from the inbox blue and
+            // the settings grey so the user can tell at a glance which
+            // mode they are in. Phase 7 adds a themed `toolbar_compose`
+            // colour token; until then we reuse `toolbar_settings`.
+            Self::Compose => color_from_hex(0x55, 0x4e, 0x91),
             Self::Settings => color_from_hex(0x45, 0x5a, 0x64),
         }
     }
@@ -83,7 +92,11 @@ impl ActiveView {
             Self::Inbox => colors.toolbar_inbox,
             Self::Snoozed => colors.toolbar_snoozed,
             Self::Done => colors.toolbar_done,
-            Self::Settings => colors.toolbar_settings,
+            // Phase 7 will introduce a dedicated `toolbar_compose`
+            // colour token. Until then, reuse the settings toolbar
+            // colour so the themed path stays consistent across light
+            // and dark mode.
+            Self::Compose | Self::Settings => colors.toolbar_settings,
         }
     }
 

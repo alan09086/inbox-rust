@@ -20,6 +20,39 @@ pub struct Attachment {
     pub content: Vec<u8>,
 }
 
+/// An attachment file the user picked while composing a draft.
+///
+/// Distinct from [`AttachmentMeta`] (which describes an attachment on an
+/// already-received email): `AttachmentDraft` describes a file the user is
+/// currently attaching to a draft. The bytes live ON DISK in the per-draft
+/// directory (`~/.local/share/inboxly/drafts/<draft_id>/`), NOT in memory.
+/// On send, lettre reads from disk; on discard, the directory is `rm -rf`'d.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttachmentDraft {
+    /// Original filename as the user picked it (e.g., "invoice.pdf").
+    /// Used for the MIME `Content-Disposition` header so recipients see the
+    /// natural name. Does NOT include the per-draft UUID suffix.
+    pub filename: String,
+    /// MIME type (e.g., "application/pdf"), inferred from the file extension.
+    pub mime_type: String,
+    /// File size in bytes (read from filesystem metadata at pick time).
+    pub size_bytes: u64,
+    /// Where the bytes live.
+    pub source: AttachmentSource,
+}
+
+/// Where an [`AttachmentDraft`]'s bytes live.
+///
+/// Currently disk-only. The plan deliberately drops the speculative `Memory`
+/// variant — keeping the SQLite drafts table small and avoiding any chance
+/// of stuffing 20 MB attachments into JSON column values.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AttachmentSource {
+    /// Bytes stored on disk at the given path. The path is inside the
+    /// per-draft directory `~/.local/share/inboxly/drafts/<draft_id>/`.
+    Disk(std::path::PathBuf),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

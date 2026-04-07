@@ -5,6 +5,7 @@ use std::sync::Arc;
 use dioxus::prelude::*;
 
 use crate::app::{Inboxly, Message};
+use crate::components::compose_view::ComposeView;
 use crate::components::empty_state::EmptyState;
 use crate::components::inbox_feed::InboxFeed;
 use crate::components::inbox_zero::InboxZero;
@@ -61,6 +62,7 @@ pub fn ContentArea() -> Element {
                         text: "No done conversations".to_string()
                     }
                 },
+                ActiveView::Compose => rsx! { ComposeView {} },
                 ActiveView::Settings => rsx! {
                     div {
                         style: "display: flex; align-items: center; justify-content: center; flex: 1; color: var(--text-secondary);",
