@@ -7,7 +7,7 @@ use mailparse::{DispositionType, MailAddr, MailHeaderMap, addrparse, dateparse, 
 
 use inboxly_core::{
     AccountId, Attachment, AttachmentMeta, Contact, EmailContent, EmailFlags, EmailId, EmailMeta,
-    ThreadId,
+    SlimEmailContent, ThreadId,
 };
 
 use crate::error::StoreError;
@@ -582,6 +582,18 @@ impl MaildirStore {
 
         parse_email_content(&data)
     }
+
+    /// Read and parse SLIM email content from a Maildir file path.
+    /// Returns body text, body HTML, and attachment metadata only —
+    /// skips headers and attachment byte content. Used by the
+    /// thread detail view (eng review Issue 2.6). Callers that need
+    /// the full EmailContent should use `read_email_content()` instead.
+    pub fn read_email_slim(&self, maildir_path: &Path) -> Result<SlimEmailContent, StoreError> {
+        let data = std::fs::read(maildir_path).map_err(|e| {
+            StoreError::Maildir(format!("Failed to read {}: {e}", maildir_path.display()))
+        })?;
+        parse_email_slim(&data)
+    }
 }
 
 /// Parse raw .eml bytes into full EmailContent.
@@ -619,6 +631,37 @@ pub fn parse_email_content(data: &[u8]) -> Result<EmailContent, StoreError> {
         body_text,
         body_html,
         headers,
+        attachments,
+    })
+}
+
+/// Parse raw .eml bytes into a slim email content struct.
+/// Extracts body (text + HTML) and attachment metadata only.
+pub fn parse_email_slim(data: &[u8]) -> Result<SlimEmailContent, StoreError> {
+    let parsed =
+        parse_mail(data).map_err(|e| StoreError::Parse(format!("Failed to parse email: {e}")))?;
+
+    let message_id = parsed
+        .headers
+        .get_first_value("Message-ID")
+        .unwrap_or_default()
+        .trim_matches(|c| c == '<' || c == '>')
+        .to_string();
+    let id = EmailId(message_id);
+
+    let body_text = find_body_text(&parsed);
+    let body_html = find_body_html(&parsed);
+
+    // Use the existing `collect_attachment_meta` helper (already
+    // defined in this file for the EmailMeta build path), which
+    // walks the MIME tree and returns only metadata, no byte content.
+    let mut attachments = Vec::new();
+    collect_attachment_meta(&parsed, &mut attachments);
+
+    Ok(SlimEmailContent {
+        id,
+        body_text,
+        body_html,
         attachments,
     })
 }
@@ -1009,5 +1052,22 @@ mod tests {
     fn test_flags_from_filename_no_info() {
         let flags = flags_from_filename("1710000000.12345.hostname");
         assert_eq!(flags, EmailFlags::default());
+    }
+
+    #[test]
+    fn parse_email_slim_strips_headers_and_attachment_bytes() {
+        let eml = b"From: alice@example.com\r\n\
+                    To: bob@example.com\r\n\
+                    Subject: Test\r\n\
+                    Message-ID: <test@ex.com>\r\n\
+                    X-Spam-Score: 0.1\r\n\
+                    \r\n\
+                    Hello world";
+        let slim = parse_email_slim(eml).expect("parse");
+        assert_eq!(slim.body_text.as_deref(), Some("Hello world"));
+        // SlimEmailContent has NO headers field — if this test compiles,
+        // that's half the assertion. The other half: no way to access
+        // header data means we never carry it.
+        assert!(slim.attachments.is_empty());
     }
 }
