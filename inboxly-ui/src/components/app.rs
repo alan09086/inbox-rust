@@ -116,6 +116,28 @@ pub fn App() -> Element {
                         None => fallback_thread(&id), // no reader wired — not an error
                     };
                     drop(snapshot);
+
+                    // F-1: stale-result guard. If the user has navigated away
+                    // (or to a different thread) while we were loading, drop
+                    // the result instead of clobbering the current state.
+                    // Without this, a slow load for thread A that finishes
+                    // after the user clicks thread B would overwrite B's
+                    // content with A's. M34's in-memory fallback_thread() is
+                    // always fast so the race is latent, but once M36/M37
+                    // wires the real ThreadReader on cold file reads this
+                    // becomes a user-visible bug.
+                    let still_current = app_state
+                        .peek()
+                        .open_thread_id
+                        .as_deref()
+                        == Some(&id);
+                    if !still_current {
+                        tracing::debug!(
+                            "ThreadReader: dropping stale load result for thread {id} (user navigated away)"
+                        );
+                        return;
+                    }
+
                     open_thread.set(Some(Arc::new(loaded)));
                 });
             }

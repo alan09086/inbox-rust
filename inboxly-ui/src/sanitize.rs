@@ -289,4 +289,44 @@ mod tests {
         // This is a conservative tradeoff — see "Eng Review Decisions" in plan.
         assert!(!clean.contains("data:image"));
     }
+
+    #[test]
+    fn sentinel_embedded_attack_falls_to_handler_allowlist() {
+        // Final review finding F-5: defence-in-depth pin test for the
+        // attacker-crafted href case. An attacker can embed a sentinel-
+        // prefixed javascript: URL in their email HTML, hoping the JS
+        // bridge will strip the sentinel and round-trip the dangerous
+        // scheme. The chain that prevents this is:
+        //   1. ammonia's attribute_filter leaves #-prefixed hrefs alone
+        //      (in-page anchor branch).
+        //   2. The JS bridge strips the sentinel and forwards the
+        //      remaining string to Rust.
+        //   3. The Rust OpenExternalUrl handler's allowlist rejects
+        //      anything that isn't http/https/mailto.
+        //
+        // This test pins the SANITISER step: the attacker-crafted href
+        // does pass through unchanged (it's a fragment from ammonia's
+        // POV), and `extract_ext_url` does unwrap it to the dangerous
+        // form. The defence is in the OpenExternalUrl handler, which has
+        // its own pin tests in inboxly-ui/src/app.rs::tests.
+        let dirty = "<a href=\"#inboxly-ext:javascript:alert(1)\">click</a>";
+        let clean = sanitize_html(dirty);
+
+        // Sanitiser preserves the in-page-anchor-shaped href.
+        assert!(
+            clean.contains("href=\"#inboxly-ext:javascript:alert(1)\""),
+            "sanitiser should preserve sentinel-prefixed hrefs as in-page anchors: {clean}"
+        );
+
+        // extract_ext_url unwraps to the dangerous form. This is
+        // intentional — the defence is at the handler, not here.
+        let extracted = extract_ext_url("#inboxly-ext:javascript:alert(1)");
+        assert_eq!(extracted, Some("javascript:alert(1)"));
+
+        // The OpenExternalUrl allowlist (tested separately in app.rs) is
+        // the layer that rejects the dangerous scheme. This test exists
+        // to lock in the SANITISER+EXTRACTOR contract so a future
+        // refactor can't break the assumption that "anything sentinel-
+        // unwrapped will be re-validated".
+    }
 }

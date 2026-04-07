@@ -605,6 +605,12 @@ impl Inboxly {
                 if index < self.accounts.len() {
                     self.active_account_index = index;
                     self.account_switcher_open = false;
+                    // F-2: switching accounts dismisses any open thread so the
+                    // user doesn't see thread A's content while viewing account
+                    // B's inbox once ThreadReader is wired (cross-account
+                    // contamination). Mirrors the behaviour of switching to
+                    // Settings / Done views.
+                    self.open_thread_id = None;
                     self.reload_feed();
                 } else {
                     tracing::warn!(
@@ -2587,6 +2593,29 @@ mod tests {
             "OpenThread must dismiss the account switcher"
         );
         assert_eq!(app.open_thread_id.as_deref(), Some("t1"));
+    }
+
+    #[test]
+    fn switch_account_clears_open_thread_id() {
+        // Final review finding F-2: switching accounts while a thread is
+        // open must clear open_thread_id so the user doesn't see thread A
+        // from account 1 while viewing account 2's inbox once ThreadReader
+        // is wired (cross-account contamination). Without the clear, the
+        // stale intent would survive the account swap and the bridge in
+        // components::app would attempt to load it against the new
+        // account's store.
+        let mut app = Inboxly::with_accounts(vec![
+            make_test_account("first@example.com", "First"),
+            make_test_account("second@example.com", "Second"),
+        ]);
+        let _ = app.update(Message::OpenThread("t1".into()));
+        assert_eq!(app.open_thread_id.as_deref(), Some("t1"));
+        let _ = app.update(Message::SwitchAccount(1));
+        assert_eq!(app.active_account_index, 1);
+        assert!(
+            app.open_thread_id.is_none(),
+            "SwitchAccount must dismiss any open thread to avoid cross-account contamination"
+        );
     }
 
     // -- M34 Phase 9: OpenExternalUrl URL allowlist + smoke tests --
