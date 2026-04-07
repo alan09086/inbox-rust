@@ -3329,4 +3329,94 @@ mod tests {
             "save_generation must not bump while Sending"
         );
     }
+
+    // ===== M35 Phase 9: SpeedDialFab → OpenCompose wiring =====
+    //
+    // The SpeedDialFab onclick dispatches Message::OpenCompose. The
+    // following tests exercise the OpenCompose contract from each
+    // possible starting view, since the FAB is reachable from any of
+    // them. Component-level rendering can't be tested without a
+    // headless harness; the equivalent state-machine assertions are
+    // here.
+
+    #[test]
+    fn open_compose_from_inbox_round_trips_via_close() {
+        // Starting in Inbox, FAB → OpenCompose → CloseCompose should
+        // return the user to Inbox with the same active_nav state.
+        let mut app = Inboxly::default();
+        assert_eq!(app.active_view, ActiveView::Inbox);
+
+        let _ = app.update(Message::OpenCompose);
+        assert_eq!(app.active_view, ActiveView::Compose);
+        assert_eq!(app.previous_view, ActiveView::Inbox);
+
+        let _ = app.update(Message::CloseCompose);
+        assert_eq!(
+            app.active_view,
+            ActiveView::Inbox,
+            "CloseCompose must restore previous_view"
+        );
+    }
+
+    #[test]
+    fn open_compose_from_done_captures_previous_view() {
+        // FAB pressed while in Done view: previous_view must be Done
+        // so CloseCompose returns there, not to Inbox.
+        let mut app = Inboxly::default();
+        app.active_view = ActiveView::Done;
+
+        let _ = app.update(Message::OpenCompose);
+
+        assert_eq!(app.active_view, ActiveView::Compose);
+        assert_eq!(
+            app.previous_view,
+            ActiveView::Done,
+            "previous_view must capture the view the FAB was pressed from"
+        );
+
+        let _ = app.update(Message::CloseCompose);
+        assert_eq!(
+            app.active_view,
+            ActiveView::Done,
+            "CloseCompose must return to Done, not Inbox"
+        );
+    }
+
+    #[test]
+    fn open_compose_when_already_in_compose_resets_state() {
+        // Defensive: dispatching OpenCompose while already in compose
+        // mode (e.g. user clicks the FAB twice) should reset to a fresh
+        // draft. The Phase 6 handler discards the existing dirty state
+        // with a warning, which matches "single compose at a time" UX
+        // for M35b.
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenCompose);
+        let first_draft_id = app.compose.draft_id.clone();
+        let _ = app.update(Message::ComposeSubjectChanged("draft 1 subject".to_string()));
+        assert!(app.compose.dirty);
+
+        let _ = app.update(Message::OpenCompose);
+
+        assert_eq!(
+            app.active_view,
+            ActiveView::Compose,
+            "still in compose view after second OpenCompose"
+        );
+        assert!(
+            app.compose.draft_id.is_some(),
+            "second OpenCompose must produce a draft_id"
+        );
+        assert_ne!(
+            app.compose.draft_id, first_draft_id,
+            "second OpenCompose must produce a NEW draft_id"
+        );
+        assert!(
+            app.compose.subject.is_empty(),
+            "second OpenCompose must clear the subject"
+        );
+        assert!(
+            !app.compose.dirty,
+            "second OpenCompose must clear the dirty flag"
+        );
+    }
 }
