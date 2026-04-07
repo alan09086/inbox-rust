@@ -279,6 +279,48 @@ where
                 );
             }
         }
+        OfflineAction::AppendSent {
+            account_id,
+            draft_message_id,
+        } => {
+            // **M35b Phase 12 — Gemini G6 fallback (deferred body).**
+            //
+            // The send bridge enqueues this variant whenever an SMTP
+            // send succeeds but the Sent folder `APPEND` cannot be
+            // attempted (no IMAP session available in the bridge
+            // context, or the `APPEND` itself failed). The intent is
+            // that the next replay pass looks the message up in the
+            // local Maildir Sent folder by `Message-ID` and replays the
+            // `APPEND` from those bytes.
+            //
+            // For Phase 12 the body is intentionally a log + skip:
+            //
+            // 1. The local Maildir Sent copy is written by the binary's
+            //    `MaildirStore` handle, which is not currently passed
+            //    into `replay_offline_queue`. Wiring it through would
+            //    require adding a `MaildirStore` parameter to this
+            //    function and updating every caller (sync_loop, IDLE
+            //    reconnect). That refactor is Phase 13 / M36 scope.
+            //
+            // 2. Even with the Maildir handle, the `APPEND` would still
+            //    need a fresh `Mailbox` to render the `From:` line —
+            //    which means resolving the `AccountConfig` from the
+            //    store by email, the same way the `SendDraftFull` arm
+            //    above does. That's not blocking the variant from
+            //    EXISTING, just from being EXECUTED.
+            //
+            // The variant's enqueue side (Phase 12 send bridge) is what
+            // lets us model the failure mode correctly NOW so the
+            // replay body can be filled in without a schema migration.
+            // The user can manually trigger a future "retry sync"
+            // button to re-attempt; in the meantime the queue grows
+            // bounded by send-success rate, not by retry attempts.
+            tracing::warn!(
+                account_id = %account_id,
+                message_id = %draft_message_id,
+                "AppendSent replay deferred -- pending MaildirStore + session integration (Phase 13/M36)"
+            );
+        }
     }
 
     Ok(())

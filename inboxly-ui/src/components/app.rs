@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use dioxus::prelude::*;
+use inboxly_core::AuthMethod;
 
 use crate::app::{Inboxly, Message};
 use crate::components::content_area::ContentArea;
@@ -144,6 +145,242 @@ fn mime_from_extension(filename: &str) -> String {
 #[allow(dead_code)]
 fn window_title(view: ActiveView) -> String {
     format!("Inboxly \u{2014} {}", view.title())
+}
+
+/// Run the SMTP send pipeline for the currently-Sending compose draft.
+///
+/// Hosted as a free function (gated behind `cfg(not(test))`) so the
+/// Phase 12 send bridge in `App` can call into it without dragging a
+/// pile of `#[cfg(test)]` arms through the closure body. The bridge is
+/// a complete no-op in test builds — see the test arm of the
+/// `use_effect` for `send_state_signal` below for the rationale.
+///
+/// This function:
+///
+/// 1. Snapshots the FROM `AccountConfig`, builds a `DraftEmail` via
+///    [`compose_state_to_draft_email`], and captures the current
+///    `save_generation` (Gemini G9 stale-result guard for failures
+///    only — see step 4).
+/// 2. Constructs an [`inboxly_imap::SmtpSender`]:
+///      - `Password` / `AppPassword` -> reads the credential from the
+///        `INBOXLY_SMTP_PASSWORD` env var. **M35b limitation**: there
+///        is no keyring or per-account secrets store yet. M36 will
+///        plumb a real secrets backend; until then the user must
+///        `INBOXLY_SMTP_PASSWORD=foo cargo run` (or set it in the
+///        desktop entry's `Exec=`) for manual end-to-end verification.
+///      - `OAuth2` -> reports a "not yet wired" error. The
+///        `SharedOAuth2` token cache lives in the IMAP sync loop and
+///        is not threaded down to this bridge yet; plumbing it
+///        through is M36 scope.
+/// 3. Enters a retry loop using [`inboxly_imap::smtp::should_retry`]:
+///    up to three attempts, with 1 s and 2 s delays for transient
+///    errors, immediate stop for permanent rejections.
+/// 4. **Stale-result guard for FAILURES ONLY** (Gemini G9 fix): on
+///    send SUCCESS we ALWAYS commit the result -- the email already
+///    left the wire and the user MUST be told, regardless of whether
+///    they typed in the compose view during the send window. On send
+///    FAILURE we drop the result if `save_generation` advanced, so a
+///    stale failure can never clobber a fresh edit.
+/// 5. On success the function:
+///      - Enqueues an [`inboxly_core::OfflineAction::AppendSent`] so
+///        the next replay pass copies the message to the IMAP Sent
+///        folder (Gemini G6 fallback). The actual `APPEND` is deferred
+///        because this bridge does not own a session.
+///      - Deletes the SQLite draft row via `Store::delete_draft`.
+///      - Calls [`inboxly_store::cleanup_draft_dir`] to remove the
+///        per-draft attachment directory.
+///      - Dispatches `Message::ComposeSendComplete { success: true }`
+///        which transitions `send_state` to
+///        `Sent { dismiss_pending: true }`. The `ComposeView` shows a
+///        "Sent -- Dismiss" overlay until the user clicks dismiss.
+/// 6. On failure the function dispatches
+///    `Message::ComposeSendComplete { success: false, error: Some(redacted) }`
+///    using [`inboxly_imap::smtp::redact_for_log`] so credentials and
+///    PII never reach the UI's error banner.
+#[cfg(not(test))]
+async fn run_send_pipeline(mut app_state: Signal<Inboxly>) {
+    // -- Snapshot pass: resolve the account, draft, and captured
+    //    generation from a single `peek()`. peek does NOT subscribe
+    //    so this task cannot re-fire its parent effect from inside.
+    //    The borrow is dropped at the end of the inner block before
+    //    any `app_state.write()` calls so the dispatch path is free
+    //    of guard-overlap borrow issues (mirrors the Phase 10 bridge
+    //    pattern).
+    let (account_config_opt, draft_opt, captured_generation) = {
+        let snapshot = app_state.peek();
+        let account_config = snapshot
+            .accounts
+            .get(snapshot.compose.from_account_index)
+            .cloned();
+        let draft = match account_config.as_ref() {
+            Some(cfg) => {
+                let account_id = account_id_from_email(&cfg.email);
+                compose_state_to_draft_email(&snapshot.compose, account_id)
+            }
+            None => None,
+        };
+        let captured_generation = snapshot.compose.save_generation;
+        (account_config, draft, captured_generation)
+    };
+
+    let Some(account_config) = account_config_opt else {
+        app_state.write().update(Message::ComposeSendComplete {
+            success: false,
+            error: Some("no account configured for this draft".to_string()),
+        });
+        return;
+    };
+    let Some(draft) = draft_opt else {
+        app_state.write().update(Message::ComposeSendComplete {
+            success: false,
+            error: Some("compose has no draft_id (OpenCompose did not run)".to_string()),
+        });
+        return;
+    };
+
+    // -- Build the SmtpSender for the resolved auth method.
+    let sender = match account_config.auth_method {
+        AuthMethod::Password | AuthMethod::AppPassword => {
+            let Some(password) = std::env::var("INBOXLY_SMTP_PASSWORD").ok() else {
+                app_state.write().update(Message::ComposeSendComplete {
+                    success: false,
+                    error: Some(
+                        "password required but INBOXLY_SMTP_PASSWORD env var is not set (M35b limitation; M36 will add a keyring)"
+                            .to_string(),
+                    ),
+                });
+                return;
+            };
+            inboxly_imap::SmtpSender::with_password(account_config.clone(), password)
+        }
+        AuthMethod::OAuth2 => {
+            app_state.write().update(Message::ComposeSendComplete {
+                success: false,
+                error: Some(
+                    "OAuth2 SMTP send is not yet wired through the compose bridge -- M36 will plumb SharedOAuth2 from the sync loop"
+                        .to_string(),
+                ),
+            });
+            return;
+        }
+    };
+
+    // -- Retry loop. Up to three attempts: 1 s delay, 2 s delay,
+    //    then stop. Permanent errors (5xx, malformed message) stop
+    //    immediately regardless of attempt number.
+    let send_result: Result<(), inboxly_imap::smtp::SmtpError> = {
+        use inboxly_imap::smtp::{RetryDecision, should_retry};
+
+        let mut attempt: u32 = 0;
+        loop {
+            attempt = attempt.saturating_add(1);
+            match sender.send(&draft).await {
+                Ok(()) => break Ok(()),
+                Err(err) => match should_retry(&err, attempt) {
+                    RetryDecision::Retry { delay_ms } => {
+                        tracing::warn!(
+                            attempt,
+                            delay_ms,
+                            error = ?err,
+                            "SMTP send failed, will retry"
+                        );
+                        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                    }
+                    RetryDecision::Stop => break Err(err),
+                },
+            }
+        }
+    };
+
+    match send_result {
+        Ok(()) => {
+            tracing::info!(message_id = %draft.message_id, "SMTP send succeeded");
+
+            // -- Step 5a: enqueue the AppendSent fallback so the next
+            //    replay pass writes the IMAP Sent folder copy. The
+            //    bridge does not own an IMAP session so it cannot
+            //    APPEND directly; the queued action is the recovery
+            //    path.
+            let store_handle = app_state.peek().store.as_ref().cloned();
+            if let Some(store) = store_handle.as_ref() {
+                let queue_action = inboxly_core::OfflineAction::AppendSent {
+                    account_id: account_config.email.clone(),
+                    draft_message_id: draft.message_id.clone(),
+                };
+                match serde_json::to_string(&queue_action) {
+                    Ok(payload) => {
+                        if let Err(e) =
+                            store.enqueue_offline_action(queue_action.variant_name(), &payload)
+                        {
+                            tracing::warn!(
+                                error = %e,
+                                "failed to enqueue AppendSent offline action"
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            "failed to serialize AppendSent offline action"
+                        );
+                    }
+                }
+            }
+
+            // -- Step 5b: delete the SQLite draft row + clean up the
+            //    per-draft attachment directory. The
+            //    DismissSentNotice handler will call
+            //    cleanup_draft_dir again as a safety net -- that
+            //    second call is a no-op when the dir is already
+            //    gone.
+            if let Some(store) = store_handle
+                && let Err(e) = store.delete_draft(&draft.id)
+            {
+                tracing::warn!(
+                    draft_id = %draft.id,
+                    error = %e,
+                    "failed to delete draft after send"
+                );
+            }
+            if let Err(e) = inboxly_store::cleanup_draft_dir(&draft.id) {
+                tracing::warn!(
+                    draft_id = %draft.id,
+                    error = %e,
+                    "failed to cleanup draft attachment dir after send"
+                );
+            }
+
+            // captured_generation is intentionally unused on the
+            // success path -- Gemini G9 mandates we ALWAYS commit
+            // success regardless of generation drift.
+            let _ = captured_generation;
+
+            app_state.write().update(Message::ComposeSendComplete {
+                success: true,
+                error: None,
+            });
+        }
+        Err(err) => {
+            // Stale-result guard FOR FAILURES ONLY (Gemini G9 fix):
+            // if the user typed during the send window, drop the
+            // failure rather than clobber the fresh edit.
+            let current_generation = app_state.peek().compose.save_generation;
+            if current_generation != captured_generation {
+                tracing::warn!(
+                    captured = captured_generation,
+                    current = current_generation,
+                    "SMTP send failed but compose generation drifted -- dropping stale failure"
+                );
+                return;
+            }
+            let redacted = inboxly_imap::smtp::redact_for_log(&err, &draft);
+            tracing::warn!(error = %redacted, "SMTP send failed");
+            app_state.write().update(Message::ComposeSendComplete {
+                success: false,
+                error: Some(redacted),
+            });
+        }
+    }
 }
 
 /// CSS asset for the main stylesheet.
@@ -609,6 +846,44 @@ pub fn App() -> Element {
             app_state
                 .write()
                 .update(Message::ComposeAttachmentAdded(Arc::new(att)));
+        });
+    });
+
+    // ===== M35 Phase 12: Compose send bridge =====
+    //
+    // Watches `compose.send_state`. When the
+    // `Message::ComposeSendDraft` handler transitions
+    // `Idle -> Sending`, this effect spawns
+    // [`run_send_pipeline`] (defined above) which owns the entire
+    // SMTP -> retry -> AppendSent -> dismiss flow. The pipeline is a
+    // hard no-op in test builds (M34 side-effects-in-tests
+    // precedent). See `run_send_pipeline`'s doc comment for the full
+    // success/failure/Gemini G6/G9 semantics.
+    let send_state_signal = use_memo(move || {
+        let s = app_state.read();
+        matches!(s.compose.send_state, ComposeSendState::Sending)
+    });
+    use_effect(move || {
+        let is_sending = *send_state_signal.read();
+        if !is_sending {
+            return;
+        }
+        let app_state = app_state;
+        spawn(async move {
+            // The entire send pipeline is a no-op in test builds. The
+            // bridge would otherwise need to dial real SMTP servers,
+            // touch the user's SQLite store, and read environment
+            // variables -- side effects that are forbidden in tests
+            // per the M34 incident precedent. Tests that exercise
+            // the state machine after a "send" should dispatch
+            // `Message::ComposeSendComplete` directly rather than
+            // relying on this bridge.
+            #[cfg(not(test))]
+            run_send_pipeline(app_state).await;
+            #[cfg(test)]
+            {
+                let _ = app_state;
+            }
         });
     });
 

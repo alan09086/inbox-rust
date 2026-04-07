@@ -1699,6 +1699,16 @@ impl Inboxly {
             }
             Message::ComposeDismissSentNotice => {
                 if matches!(self.compose.send_state, ComposeSendState::Sent { .. }) {
+                    // Phase 12 wiring: clean up the per-draft attachment
+                    // directory. The send bridge already calls this on
+                    // success, so this is a defensive safety net for
+                    // the case where the bridge skipped cleanup (test
+                    // mode, missing store) — `cleanup_draft_dir` is a
+                    // no-op when the directory is already gone.
+                    #[cfg(not(test))]
+                    if let Some(draft_id) = &self.compose.draft_id {
+                        let _ = inboxly_store::cleanup_draft_dir(draft_id);
+                    }
                     self.compose = ComposeState::default();
                     self.active_view = self.previous_view;
                     self.active_nav = NavTarget::View(self.previous_view);
@@ -1707,6 +1717,22 @@ impl Inboxly {
                 }
             }
             Message::ComposeDiscardDraft => {
+                // Phase 12 wiring: clean up the per-draft attachment
+                // directory before clearing the compose state. The
+                // dispatcher in `components::app` does NOT touch disk
+                // for discard so the call lives here, gated behind
+                // cfg(not(test)) per the M34 side-effects-in-tests
+                // precedent.
+                #[cfg(not(test))]
+                if let Some(draft_id) = &self.compose.draft_id
+                    && let Err(e) = inboxly_store::cleanup_draft_dir(draft_id)
+                {
+                    tracing::warn!(
+                        draft_id = %draft_id,
+                        error = %e,
+                        "failed to cleanup draft attachment dir on discard"
+                    );
+                }
                 self.compose = ComposeState::default();
                 self.active_view = self.previous_view;
                 self.active_nav = NavTarget::View(self.previous_view);
@@ -3398,7 +3424,9 @@ mod tests {
         let mut app = Inboxly::default();
         let _ = app.update(Message::OpenCompose);
         let first_draft_id = app.compose.draft_id.clone();
-        let _ = app.update(Message::ComposeSubjectChanged("draft 1 subject".to_string()));
+        let _ = app.update(Message::ComposeSubjectChanged(
+            "draft 1 subject".to_string(),
+        ));
         assert!(app.compose.dirty);
 
         let _ = app.update(Message::OpenCompose);
