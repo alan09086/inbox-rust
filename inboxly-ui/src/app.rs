@@ -412,6 +412,43 @@ pub enum Message {
     CloseSnoozePicker,
 }
 
+/// Validate an external URL against M34's scheme allowlist for the
+/// `OpenExternalUrl` handler.
+///
+/// Returns `Ok(())` if the URL parses cleanly and uses an allowed
+/// scheme (`http`, `https`, or `mailto`), or `Err(reason)` describing
+/// why it was rejected. The handler logs the rejection reason via
+/// `tracing::warn!` and drops the URL.
+///
+/// **Why this is a free function, not a closure inside the handler:**
+/// extracting the validation as a pure function lets us unit-test it
+/// directly (no `Inboxly::default()`, no `app.update(Message::...)`,
+/// no risk of accidentally hitting the side-effect-having
+/// `open::that()` call). The post-M34 incident — where the original
+/// handler tests dispatched real URLs and overnight test runs spawned
+/// ~10 browser + ~10 kmail compose windows — was caused by tests
+/// going through the handler. Pure-function tests can never do that.
+///
+/// Eng review Issue 2.2: defence-in-depth — the sanitiser already
+/// strips `javascript:` / `data:` / etc. via ammonia's default scheme
+/// allowlist BEFORE the link gets to the JS bridge, but this second
+/// validation layer protects against future ammonia upgrades or
+/// edge cases in the sentinel-rewrite logic that might let an unsafe
+/// scheme through.
+///
+/// The leading `::` on `::url::Url` disambiguates the `url` crate from
+/// the `url` parameter in the handler that calls this — defensive,
+/// no shadowing today but future-proofs against silent breakage if a
+/// local `url` binding is added.
+pub fn validate_external_url(url: &str) -> Result<(), String> {
+    let parsed = ::url::Url::parse(url)
+        .map_err(|e| format!("failed to parse {url:?}: {e}"))?;
+    match parsed.scheme() {
+        "http" | "https" | "mailto" => Ok(()),
+        other => Err(format!("rejected scheme {other:?} for url {url:?}")),
+    }
+}
+
 impl Default for Inboxly {
     fn default() -> Self {
         Self {
@@ -784,46 +821,30 @@ impl Inboxly {
                 self.open_thread_id = None;
             }
             Message::OpenExternalUrl(url) => {
-                // Eng review Issue 2.2: defence-in-depth URL validation BEFORE
-                // calling open::that(). The sanitiser already strips javascript:
-                // URLs (and other unsafe schemes) but a future ammonia version,
-                // or an edge case in the url_filter_map ordering, could let one
-                // slip through. Parse the URL and check the scheme against an
-                // allowlist before handing it to the system browser.
-                // Leading `::` disambiguates the `url` crate from the `url`
-                // parameter in scope (defensive — no shadowing today, but
-                // future-proofs the call against silent breakage if a local
-                // `url` binding is added).
-                match ::url::Url::parse(&url) {
-                    Ok(parsed) => match parsed.scheme() {
-                        "http" | "https" | "mailto" => {
-                            // CRITICAL: skip the actual `open::that` call in
-                            // test mode. Without this gate, `cargo test`
-                            // launches the user's real browser and mail
-                            // client every time the OpenExternalUrl unit
-                            // tests run — see the post-M34 incident where
-                            // ~10 background test runs spawned 10 browser
-                            // windows and 10 kmail compose windows
-                            // overnight. The validation logic above is
-                            // still exercised in tests; only the system
-                            // side effect is gated out.
-                            #[cfg(not(test))]
-                            if let Err(e) = open::that(&url) {
-                                tracing::warn!("open::that({url}) failed: {e}");
-                            }
-                            #[cfg(test)]
-                            tracing::debug!(
-                                "OpenExternalUrl: would open {url} (skipped in test mode)"
-                            );
+                // Thin wrapper: validate the URL via the pure helper, then
+                // hand it to the system browser. The pure helper is unit-
+                // tested separately (see `validate_external_url_*` tests
+                // below) so the side-effect-having `open::that` call is
+                // never reached from `cargo test`. The `#[cfg(not(test))]`
+                // gate is defence-in-depth — see the post-M34 incident
+                // where the original handler tests dispatched real URLs
+                // through this branch and overnight test runs spawned ~10
+                // browser + ~10 kmail compose windows. Belt and suspenders:
+                // pure helper for unit testing AND cfg gate for any
+                // future test that accidentally dispatches the message.
+                match validate_external_url(&url) {
+                    Ok(()) => {
+                        #[cfg(not(test))]
+                        if let Err(e) = open::that(&url) {
+                            tracing::warn!("open::that({url}) failed: {e}");
                         }
-                        other => {
-                            tracing::warn!(
-                                "OpenExternalUrl rejected scheme {other:?} for url {url:?}"
-                            );
-                        }
-                    },
-                    Err(e) => {
-                        tracing::warn!("OpenExternalUrl: failed to parse {url:?}: {e}");
+                        #[cfg(test)]
+                        tracing::debug!(
+                            "OpenExternalUrl: would open {url} (skipped in test mode)"
+                        );
+                    }
+                    Err(reason) => {
+                        tracing::warn!("OpenExternalUrl: {reason}");
                     }
                 }
             }
@@ -2633,60 +2654,72 @@ mod tests {
         );
     }
 
-    // -- M34 Phase 9: OpenExternalUrl URL allowlist + smoke tests --
+    // -- M34 Phase 9: validate_external_url scheme allowlist tests --
+    //
+    // These tests exercise the pure validation function directly, NOT
+    // the OpenExternalUrl handler. The handler is a thin wrapper that
+    // calls validate_external_url and then open::that, so testing the
+    // pure function gives us full coverage of the security-critical
+    // logic without any risk of triggering open::that's side effect.
+    //
+    // The original Phase 9 tests went through the handler via
+    // `app.update(Message::OpenExternalUrl(...))` which actually
+    // launched the user's browser and mail client every time
+    // `cargo test` ran — the post-M34 incident spawned ~10 example.com
+    // windows and ~10 kmail compose windows overnight before the bug
+    // was caught. Refactoring to pure-function tests removes any
+    // chance of a future test (or a future refactor) accidentally
+    // dispatching the handler with a real URL.
 
     #[test]
-    fn open_external_url_https_does_not_panic() {
-        // We can't actually verify that open::that() launched a browser
-        // from a unit test (no system browser in CI), but we CAN verify
-        // that the handler runs to completion without panicking on a
-        // valid scheme. open::that() returns Err when no browser is
-        // configured, which the handler swallows via tracing::warn.
-        let mut app = Inboxly::default();
-        let _ = app.update(Message::OpenExternalUrl("https://example.com".into()));
-        assert!(app.open_thread_id.is_none());
+    fn validate_external_url_accepts_https() {
+        assert!(super::validate_external_url("https://example.com").is_ok());
     }
 
     #[test]
-    fn open_external_url_rejects_javascript_scheme() {
+    fn validate_external_url_accepts_http() {
+        assert!(super::validate_external_url("http://example.com").is_ok());
+    }
+
+    #[test]
+    fn validate_external_url_accepts_mailto() {
+        // mailto: is on the allowlist for compose-from-link in M36+.
+        // For M34 the handler still hands it to open::that() which
+        // routes to the user's default mail client.
+        assert!(super::validate_external_url("mailto:friend@example.com").is_ok());
+    }
+
+    #[test]
+    fn validate_external_url_rejects_javascript_scheme() {
         // Eng review Issue 2.2 defence in depth: even if a javascript:
-        // URL somehow slips past the sanitiser, the handler must reject
-        // it before calling open::that(). This test pins the allowlist
-        // behavior so future refactors of the handler can't silently
-        // drop the scheme check.
-        let mut app = Inboxly::default();
-        let _ = app.update(Message::OpenExternalUrl("javascript:alert(1)".into()));
-        assert!(app.open_thread_id.is_none());
+        // URL somehow slips past the sanitiser, validation must reject
+        // it before the handler calls open::that(). Pin the allowlist.
+        let result = super::validate_external_url("javascript:alert(1)");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("javascript"), "rejection should name the scheme: {err}");
     }
 
     #[test]
-    fn open_external_url_rejects_file_scheme() {
+    fn validate_external_url_rejects_file_scheme() {
         // file:// URLs in emails are typically attacks (path traversal,
         // SMB credential theft on Windows, etc.). The allowlist excludes
         // them by virtue of only listing http/https/mailto.
-        let mut app = Inboxly::default();
-        let _ = app.update(Message::OpenExternalUrl("file:///etc/passwd".into()));
-        assert!(app.open_thread_id.is_none());
+        let result = super::validate_external_url("file:///etc/passwd");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("file"), "rejection should name the scheme: {err}");
     }
 
     #[test]
-    fn open_external_url_rejects_garbage_input() {
-        // Malformed URLs should not panic the handler — `Url::parse`
-        // returns Err and we log + drop.
-        let mut app = Inboxly::default();
-        let _ = app.update(Message::OpenExternalUrl("not a url at all !!!".into()));
-        assert!(app.open_thread_id.is_none());
-    }
-
-    #[test]
-    fn open_external_url_accepts_mailto() {
-        // mailto: is on the allowlist for compose-from-link in M36+.
-        // For M34, it's accepted by the handler (no panic) and routed
-        // to open::that(), which the user's mail client will handle.
-        let mut app = Inboxly::default();
-        let _ = app.update(Message::OpenExternalUrl(
-            "mailto:friend@example.com".into(),
-        ));
-        assert!(app.open_thread_id.is_none());
+    fn validate_external_url_rejects_garbage_input() {
+        // Malformed URLs return parse-error, not scheme-rejection.
+        let result = super::validate_external_url("not a url at all !!!");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("failed to parse"),
+            "garbage input should fail at parse, not scheme: {err}"
+        );
     }
 }
