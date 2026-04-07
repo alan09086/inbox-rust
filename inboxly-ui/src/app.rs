@@ -2505,4 +2505,56 @@ mod tests {
         let app = Inboxly::default();
         assert!(app.feed_sections.is_empty());
     }
+
+    // -- M34 Phase 8: OpenThread / CloseThread lifecycle --
+
+    #[test]
+    fn open_thread_sets_open_thread_id_field() {
+        let mut app = Inboxly::default();
+        assert!(app.open_thread_id.is_none());
+        let _ = app.update(Message::OpenThread("t1".into()));
+        assert_eq!(app.open_thread_id.as_deref(), Some("t1"));
+    }
+
+    #[test]
+    fn close_thread_clears_open_thread_id_field() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenThread("t1".into()));
+        let _ = app.update(Message::CloseThread);
+        assert!(app.open_thread_id.is_none());
+    }
+
+    #[test]
+    fn open_thread_dismisses_open_menus() {
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenContextMenu {
+            thread_id: "t1".into(),
+            sender_address: "a@b.com".into(),
+            position: Point::ORIGIN,
+        });
+        assert_eq!(app.context_menu_thread, Some("t1".into()));
+        let _ = app.update(Message::OpenThread("t1".into()));
+        // Opening a thread must dismiss any open menu (close_menus()
+        // invariant from M33 Phase 7A).
+        assert!(app.context_menu_thread.is_none());
+        assert!(app.menu_thread_sender.is_none());
+        // And it must record the intent.
+        assert_eq!(app.open_thread_id.as_deref(), Some("t1"));
+    }
+
+    #[test]
+    fn opening_thread_does_not_load_body_into_inboxly() {
+        // Regression test for the Issue 1.4 design: dispatching OpenThread
+        // must NOT cause any body data to be cloned into Inboxly. The
+        // body lives in a separate signal that this test can't see —
+        // we just verify Inboxly itself stays small.
+        let mut app = Inboxly::default();
+        let _ = app.update(Message::OpenThread("t1".into()));
+        // The id is stored, but no LoadedThread or LoadedMessage anywhere
+        // in Inboxly. (This is enforced by the type system: Inboxly has
+        // no field of type LoadedThread.) The test exists to document
+        // the contract for future contributors who might be tempted to
+        // add an `Option<LoadedThread>` to Inboxly "for convenience".
+        assert_eq!(app.open_thread_id.as_deref(), Some("t1"));
+    }
 }
