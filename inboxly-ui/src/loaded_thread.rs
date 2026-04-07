@@ -24,6 +24,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 
 use inboxly_core::AttachmentMeta;
+use inboxly_store::thread_reader::LoadedEmail;
 
 /// All data needed to render the thread detail view.
 ///
@@ -179,6 +180,64 @@ pub fn fallback_thread(thread_id: &str) -> LoadedThread {
     }
 }
 
+/// Convert raw `LoadedEmail` rows from the storage facade into the
+/// UI's `LoadedThread` shape. Picks display names (sender name OR
+/// sender address as fallback), converts UNIX timestamps to
+/// `DateTime<Utc>`, and passes through attachment metadata.
+///
+/// `LoadedEmail.content` is already a `SlimEmailContent` (eng review
+/// Issue 2.6) carrying only body text/HTML and attachment metadata —
+/// headers and attachment byte content are NEVER loaded for the
+/// thread detail view. This converter just maps the slim fields 1:1.
+///
+/// Returns `Err` if `emails` is empty (the caller should fall back
+/// to `fallback_thread()`).
+pub fn build_loaded_thread(
+    thread_id: &str,
+    emails: Vec<LoadedEmail>,
+) -> Result<LoadedThread, String> {
+    if emails.is_empty() {
+        return Err(format!("no emails in thread {thread_id}"));
+    }
+    let subject = emails[0].row.subject.clone();
+    let messages = emails
+        .into_iter()
+        .map(|le| {
+            let LoadedEmail { row, content } = le;
+            let (body_text, body_html, attachments) = match content {
+                Some(c) => (c.body_text, c.body_html, c.attachments),
+                None => (
+                    Some("(body not yet downloaded)".to_string()),
+                    None,
+                    Vec::new(),
+                ),
+            };
+            // Issue 2.8: wrap each LoadedMessage in Arc so per-render
+            // clones in ThreadDetailView's `for` loop are refcount
+            // bumps, not deep clones of the body bytes.
+            Arc::new(LoadedMessage {
+                email_id: row.id,
+                from_name: row.from_name.unwrap_or_else(|| row.from_address.clone()),
+                from_address: row.from_address,
+                // Issue 2.7: from_timestamp returns None for invalid
+                // input. Pass it through as-is — the renderer will
+                // show "(unknown time)" for None instead of the
+                // misleading "right now" fallback.
+                date: chrono::DateTime::<chrono::Utc>::from_timestamp(row.date, 0),
+                body_text,
+                body_html,
+                attachments,
+            })
+        })
+        .collect();
+    Ok(LoadedThread {
+        thread_id: thread_id.to_string(),
+        subject,
+        messages,
+        error_message: None, // success path
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,5 +341,148 @@ mod tests {
         assert_eq!(thread.messages.len(), 2);
         #[cfg(not(debug_assertions))]
         assert!(thread.messages.is_empty());
+    }
+
+    // build_loaded_thread tests (M34 phase 4 / eng review Issue 3.2)
+
+    #[test]
+    fn build_loaded_thread_empty_returns_err() {
+        let result = build_loaded_thread("t1", vec![]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn build_loaded_thread_uses_address_when_name_missing() {
+        use inboxly_store::EmailRow;
+        use inboxly_store::thread_reader::LoadedEmail;
+
+        let row = EmailRow {
+            id: "e1".into(),
+            account_id: "a1".into(),
+            thread_id: "t1".into(),
+            from_name: None,
+            from_address: "alice@example.com".into(),
+            to_json: "[]".into(),
+            cc_json: "[]".into(),
+            subject: "Hello".into(),
+            snippet: "Hi there".into(),
+            date: 1_700_000_000,
+            maildir_path: String::new(),
+            flags: 0,
+            size_bytes: 100,
+            imap_uid: 1,
+            imap_folder: "INBOX".into(),
+            has_attachments: false,
+            body_downloaded: false,
+            message_id_header: None,
+            in_reply_to: None,
+            references_json: None,
+        };
+        let loaded = LoadedEmail { row, content: None };
+        let result = build_loaded_thread("t1", vec![loaded]).expect("non-empty");
+        assert_eq!(result.subject, "Hello");
+        assert_eq!(result.messages.len(), 1);
+        assert_eq!(result.messages[0].from_name, "alice@example.com");
+        assert_eq!(result.messages[0].from_address, "alice@example.com");
+        assert!(result.messages[0].body_text.is_some());
+        assert!(result.messages[0].body_html.is_none());
+        assert!(result.messages[0].date.is_some());
+    }
+
+    #[test]
+    fn build_loaded_thread_with_content_passes_through_body_and_attachments() {
+        use inboxly_core::{AttachmentMeta, EmailId, SlimEmailContent};
+        use inboxly_store::EmailRow;
+        use inboxly_store::thread_reader::LoadedEmail;
+
+        let row = EmailRow {
+            id: "e1".into(),
+            account_id: "a1".into(),
+            thread_id: "t1".into(),
+            from_name: Some("Alice".into()),
+            from_address: "alice@example.com".into(),
+            to_json: "[]".into(),
+            cc_json: "[]".into(),
+            subject: "Re: Hello".into(),
+            snippet: "snip".into(),
+            date: 1_700_000_000,
+            maildir_path: "/tmp/fake.eml".into(),
+            flags: 0,
+            size_bytes: 200,
+            imap_uid: 1,
+            imap_folder: "INBOX".into(),
+            has_attachments: true,
+            body_downloaded: true,
+            message_id_header: None,
+            in_reply_to: None,
+            references_json: None,
+        };
+        let content = SlimEmailContent {
+            id: EmailId("<e1@example.com>".into()),
+            body_text: Some("plain text body".into()),
+            body_html: Some("<p>html <strong>body</strong></p>".into()),
+            attachments: vec![AttachmentMeta {
+                filename: "invoice.pdf".into(),
+                mime_type: "application/pdf".into(),
+                size_bytes: 4096,
+            }],
+        };
+        let loaded = LoadedEmail {
+            row,
+            content: Some(content),
+        };
+        let result = build_loaded_thread("t1", vec![loaded]).expect("non-empty");
+        assert_eq!(result.thread_id, "t1");
+        assert_eq!(result.subject, "Re: Hello");
+        assert!(result.error_message.is_none(), "success path has no error");
+        assert_eq!(result.messages.len(), 1);
+        let msg = &result.messages[0];
+        assert_eq!(msg.from_name, "Alice");
+        assert_eq!(msg.from_address, "alice@example.com");
+        assert_eq!(msg.body_text.as_deref(), Some("plain text body"));
+        assert_eq!(
+            msg.body_html.as_deref(),
+            Some("<p>html <strong>body</strong></p>")
+        );
+        assert_eq!(msg.attachments.len(), 1);
+        assert_eq!(msg.attachments[0].filename, "invoice.pdf");
+        assert_eq!(msg.attachments[0].mime_type, "application/pdf");
+        assert_eq!(msg.attachments[0].size_bytes, 4096);
+        assert!(msg.date.is_some(), "valid Unix timestamp must yield Some");
+    }
+
+    #[test]
+    fn build_loaded_thread_handles_invalid_timestamp() {
+        use inboxly_store::EmailRow;
+        use inboxly_store::thread_reader::LoadedEmail;
+
+        let row = EmailRow {
+            id: "e-bad-date".into(),
+            account_id: "a1".into(),
+            thread_id: "t1".into(),
+            from_name: Some("Alice".into()),
+            from_address: "alice@example.com".into(),
+            to_json: "[]".into(),
+            cc_json: "[]".into(),
+            subject: "Bad date".into(),
+            snippet: "".into(),
+            date: i64::MIN,
+            maildir_path: String::new(),
+            flags: 0,
+            size_bytes: 0,
+            imap_uid: 1,
+            imap_folder: "INBOX".into(),
+            has_attachments: false,
+            body_downloaded: false,
+            message_id_header: None,
+            in_reply_to: None,
+            references_json: None,
+        };
+        let loaded = LoadedEmail { row, content: None };
+        let result = build_loaded_thread("t1", vec![loaded]).expect("non-empty");
+        assert!(
+            result.messages[0].date.is_none(),
+            "i64::MIN must yield None, not a fallback timestamp"
+        );
     }
 }
