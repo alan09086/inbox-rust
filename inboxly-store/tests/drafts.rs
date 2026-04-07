@@ -330,3 +330,91 @@ fn has_message_id_finds_existing_and_skips_unrelated() {
         "bracket-only Message-ID must not match anything"
     );
 }
+
+// ===== M35b Phase 4b: MaildirStore::find_message_id =====
+//
+// `find_message_id` is the path-returning variant that the IMAP body
+// processor uses to discover the on-disk location of a compose-written
+// duplicate so it can mark the SQLite row as downloaded WITHOUT writing
+// a second `.eml`. `has_message_id` is a 1-line wrapper over this
+// helper, so its existing test (above) covers the boolean semantics —
+// this test focuses on what `find_message_id` adds: a usable path.
+
+#[test]
+fn find_message_id_returns_existing_path_and_none_when_absent() {
+    let tmp = TempDir::new().expect("tmpdir");
+    let store = MaildirStore::new(tmp.path().to_path_buf());
+    store.init().expect("init maildir");
+
+    let target_eml = make_eml("<find-target@inboxly.local>");
+    store
+        .store_cur(
+            &StandardFolder::Drafts,
+            &target_eml,
+            &inboxly_core::EmailFlags {
+                draft: true,
+                ..Default::default()
+            },
+        )
+        .expect("store target draft");
+
+    // Hit: returns Some(path) pointing at a real, readable file inside
+    // the Drafts maildir.
+    let hit = store
+        .find_message_id(StandardFolder::Drafts, "<find-target@inboxly.local>")
+        .expect("find_message_id ok");
+    let hit_path = hit.expect("expected Some(path) for known Message-ID");
+    assert!(
+        hit_path.exists(),
+        "find_message_id returned non-existent path: {}",
+        hit_path.display()
+    );
+    assert!(
+        hit_path.is_file(),
+        "find_message_id returned non-file path: {}",
+        hit_path.display()
+    );
+    let hit_str = hit_path.to_string_lossy();
+    assert!(
+        hit_str.contains("/.Drafts/"),
+        "expected path to live inside the .Drafts maildir, got: {hit_str}"
+    );
+    // The returned file's contents must actually be the email we wrote
+    // (not just any random match) — re-reading and re-parsing it must
+    // yield the same Message-ID.
+    let contents = fs::read(&hit_path).expect("read returned path");
+    let parsed = mailparse::parse_mail(&contents).expect("parse returned eml");
+    let header = parsed
+        .headers
+        .iter()
+        .find(|h| h.get_key().eq_ignore_ascii_case("Message-ID"))
+        .expect("Message-ID header present");
+    assert_eq!(header.get_value().trim(), "<find-target@inboxly.local>");
+
+    // Unbracketed needle must also resolve to the same file (normalisation
+    // applies to both sides).
+    let hit_unbracketed = store
+        .find_message_id(StandardFolder::Drafts, "find-target@inboxly.local")
+        .expect("find_message_id ok")
+        .expect("unbracketed needle must also match");
+    assert_eq!(hit_unbracketed, hit_path);
+
+    // Miss: returns Ok(None) for an id that does not exist.
+    assert!(
+        store
+            .find_message_id(StandardFolder::Drafts, "<absent@example.com>")
+            .expect("find_message_id ok")
+            .is_none(),
+        "find_message_id must return None for unknown Message-ID"
+    );
+
+    // Empty needle must return Ok(None), mirroring the has_message_id
+    // bracket-only / empty needle behaviour.
+    assert!(
+        store
+            .find_message_id(StandardFolder::Drafts, "")
+            .expect("find_message_id ok")
+            .is_none(),
+        "empty Message-ID needle must return None"
+    );
+}

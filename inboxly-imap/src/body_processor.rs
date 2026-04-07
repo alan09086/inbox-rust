@@ -21,6 +21,23 @@
 //!       └──► Store::mark_body_downloaded(email_id, maildir_path)
 //!                └──► UPDATE emails SET body_downloaded = 1
 //! ```
+//!
+//! ## M35b Phase 4b — sync-side Message-ID dedup
+//!
+//! For Drafts and Sent folders, the compose path writes a local `.eml` to
+//! the Maildir at compose time (to avoid losing in-flight drafts) AND
+//! IMAP-APPENDs the same RFC 5322 bytes to the server. On the next sync,
+//! the server reports the same message back. Without dedup, `process_body`
+//! would `store_cur` it a second time and the user would see two draft
+//! entries in the UI.
+//!
+//! Phase 4b extracts the `Message-ID:` header from the raw bytes BEFORE the
+//! Maildir write and asks `MaildirStore::find_message_id` whether the same
+//! id is already present in the destination folder. On a hit it skips
+//! `store_cur` entirely and points the `emails` row at the pre-existing
+//! file. The dedup check only runs for Drafts and Sent — Inbox, Trash, and
+//! everything else cannot have a locally-written counterpart and always
+//! take the normal write path.
 
 use inboxly_store::Store;
 use inboxly_store::maildir_store::{MaildirStore, StandardFolder};
@@ -28,15 +45,24 @@ use inboxly_store::maildir_store::{MaildirStore, StandardFolder};
 use crate::error::ImapError;
 
 /// Process a single fetched RFC822 body:
-/// 1. Write raw .eml to Maildir
-/// 2. Extract plaintext body for search indexing
-/// 3. Mark `body_downloaded = true` in SQLite and update `maildir_path`
+/// 1. (Drafts/Sent only) check for an existing Maildir file with the same
+///    `Message-ID:` header — if found, skip the write and point the email
+///    row at the existing file (M35b Phase 4b dedup).
+/// 2. Write raw .eml to Maildir.
+/// 3. Mark `body_downloaded = true` in SQLite and update `maildir_path`.
 ///
 /// Search index update is handled separately by the caller (Phase 2
 /// orchestrator or on-demand fetch) because the `SearchIndex` requires
 /// an `EmailMeta` which the caller already has access to.
 ///
-/// Returns the Maildir path where the email was stored.
+/// Returns the Maildir path where the email is stored — either a freshly
+/// written file from `store_cur` or the path of the pre-existing
+/// duplicate the dedup check found.
+///
+/// # Errors
+///
+/// Returns [`ImapError::MaildirWrite`] if the Maildir scan or write fails,
+/// and [`ImapError::DatabaseError`] if the SQLite update fails.
 pub fn process_body(
     email_id: &str,
     imap_folder: &str,
@@ -48,19 +74,64 @@ pub fn process_body(
     // Step 1: Determine the standard folder from the IMAP folder name.
     let folder = StandardFolder::from_imap_name(imap_folder).unwrap_or(StandardFolder::Inbox);
 
-    // Step 2: Write to Maildir (atomic: tmp -> cur with flags).
+    // Step 2: For Drafts and Sent folders, check whether the compose path
+    // has already written a local .eml with the same Message-ID. If so,
+    // skip the duplicate Maildir write and point the email row at the
+    // existing file (M35b Phase 4b — Gemini G8 dedup).
+    if matches!(folder, StandardFolder::Drafts | StandardFolder::Sent)
+        && let Some(message_id) = extract_message_id(raw_rfc822)
+        && let Some(existing_path) = maildir
+            .find_message_id(folder, &message_id)
+            .map_err(|e| ImapError::MaildirWrite(format!("dedup scan: {e}")))?
+    {
+        let existing_path_str = existing_path.to_string_lossy().into_owned();
+        let kind = match folder {
+            StandardFolder::Drafts => "draft",
+            StandardFolder::Sent => "sent",
+            _ => "message", // unreachable per the matches! above
+        };
+        tracing::info!(
+            email_id = %email_id,
+            message_id = %message_id,
+            existing_path = %existing_path_str,
+            "skipping duplicate {kind} write — already present in maildir"
+        );
+        store
+            .mark_body_downloaded(email_id, &existing_path_str)
+            .map_err(|e| ImapError::DatabaseError(e.to_string()))?;
+        return Ok(existing_path_str);
+    }
+
+    // Step 3: Write to Maildir (atomic: tmp -> cur with flags).
     let stored = maildir
         .store_cur(&folder, raw_rfc822, flags)
         .map_err(|e| ImapError::MaildirWrite(e.to_string()))?;
 
     let path_str = stored.path.to_string_lossy().into_owned();
 
-    // Step 3: Mark body_downloaded = true in SQLite and update maildir_path.
+    // Step 4: Mark body_downloaded = true in SQLite and update maildir_path.
     store
         .mark_body_downloaded(email_id, &path_str)
         .map_err(|e| ImapError::DatabaseError(e.to_string()))?;
 
     Ok(path_str)
+}
+
+/// Extract the `Message-ID:` header from raw RFC 5322 bytes.
+///
+/// Returns `None` if the email is unparseable or has no `Message-ID:`
+/// header. The returned string is NOT normalised — it may or may not have
+/// surrounding angle brackets depending on how the sender formatted it.
+/// `MaildirStore::find_message_id` normalises both the needle and the
+/// scanned values, so callers can pass this through unchanged.
+fn extract_message_id(raw: &[u8]) -> Option<String> {
+    use mailparse::MailHeaderMap;
+    let parsed = mailparse::parse_mail(raw).ok()?;
+    let id = parsed
+        .headers
+        .get_first_value("Message-ID")
+        .unwrap_or_default();
+    if id.is_empty() { None } else { Some(id) }
 }
 
 /// Extract plaintext body from raw RFC822 bytes for search indexing.

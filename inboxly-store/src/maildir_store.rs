@@ -998,14 +998,19 @@ pub fn rebuild_emails_from_maildir(
 // M35b Phase 4: Message-ID dedup lookup for the compose draft sync path.
 
 impl MaildirStore {
-    /// Return `true` if any message in `folder` has a `Message-ID:` header
-    /// matching `message_id`.
+    /// Return the on-disk path of any message in `folder` whose `Message-ID:`
+    /// header matches `message_id`, or `Ok(None)` if no match is found.
     ///
     /// Used by the M35b draft sync dedup path (Phase 4b) to avoid downloading
-    /// an IMAP Drafts folder entry that was already written locally via the
-    /// compose-time Maildir save. Walks the folder's `cur/` and `new/`
-    /// entries and parses each one's headers via `mailparse` until a match
-    /// is found or the folder is exhausted.
+    /// an IMAP Drafts/Sent folder entry that was already written locally via
+    /// the compose-time Maildir save. The IMAP body processor calls this
+    /// helper to discover the existing file's path so it can point the
+    /// `emails` row at it (via `mark_body_downloaded`) without writing a
+    /// duplicate `.eml`.
+    ///
+    /// Walks the folder's `cur/` and `new/` entries and parses each one's
+    /// headers via `mailparse` until a match is found or the folder is
+    /// exhausted.
     ///
     /// `message_id` may be passed with or without surrounding angle brackets
     /// (e.g. both `"<uuid@inboxly.local>"` and `"uuid@inboxly.local"` work) —
@@ -1014,7 +1019,7 @@ impl MaildirStore {
     ///
     /// # Behaviour on missing folders
     ///
-    /// Returns `Ok(false)` (NOT `Err`) if the folder's underlying directory
+    /// Returns `Ok(None)` (NOT `Err`) if the folder's underlying directory
     /// does not yet exist on disk. This is the expected state for a fresh
     /// account that has never had a draft synced. The `maildir` crate's
     /// `list_cur` / `list_new` iterators yield zero entries (rather than
@@ -1035,16 +1040,16 @@ impl MaildirStore {
     /// Drafts folders are typically tiny (<100 entries) so this is acceptable
     /// for M35b. A future optimisation can maintain an in-memory Message-ID
     /// index alongside the Maildir.
-    pub fn has_message_id(
+    pub fn find_message_id(
         &self,
         folder: StandardFolder,
         message_id: &str,
-    ) -> Result<bool, StoreError> {
+    ) -> Result<Option<std::path::PathBuf>, StoreError> {
         let normalized_target = message_id.trim_matches(|c| c == '<' || c == '>');
         if normalized_target.is_empty() {
             // An empty needle would match every parsed message that lacks a
             // Message-ID header (because we'd compare "" == ""). Bail early.
-            return Ok(false);
+            return Ok(None);
         }
 
         let md = self.maildir_for(&folder);
@@ -1054,13 +1059,13 @@ impl MaildirStore {
         for entry in md.list_new().chain(md.list_cur()) {
             let entry = entry.map_err(|e| {
                 StoreError::Maildir(format!(
-                    "has_message_id: failed to enumerate {:?}: {e}",
+                    "find_message_id: failed to enumerate {:?}: {e}",
                     folder
                 ))
             })?;
 
-            let path = entry.path();
-            let data = match std::fs::read(path) {
+            let path = entry.path().to_path_buf();
+            let data = match std::fs::read(&path) {
                 Ok(d) => d,
                 Err(_) => continue, // skip unreadable files
             };
@@ -1077,11 +1082,35 @@ impl MaildirStore {
             let existing_normalized = existing.trim().trim_matches(|c| c == '<' || c == '>');
 
             if existing_normalized == normalized_target {
-                return Ok(true);
+                return Ok(Some(path));
             }
         }
 
-        Ok(false)
+        Ok(None)
+    }
+
+    /// Return `true` if any message in `folder` has a `Message-ID:` header
+    /// matching `message_id`.
+    ///
+    /// Thin wrapper around [`MaildirStore::find_message_id`] for callers that
+    /// only need a yes/no answer. Prefer `find_message_id` when you need the
+    /// matched path (e.g. to point an `emails` row at it via
+    /// `mark_body_downloaded`).
+    ///
+    /// Normalisation, missing-folder behaviour, errors, and performance are
+    /// identical to `find_message_id` — see its docs for details.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`MaildirStore::find_message_id`]: propagates
+    /// [`StoreError::Maildir`] from a failed directory enumeration.
+    pub fn has_message_id(
+        &self,
+        folder: StandardFolder,
+        message_id: &str,
+    ) -> Result<bool, StoreError> {
+        self.find_message_id(folder, message_id)
+            .map(|opt| opt.is_some())
     }
 }
 
