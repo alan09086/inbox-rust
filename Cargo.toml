@@ -29,6 +29,7 @@ dioxus = { version = "0.7", features = ["desktop"] }
 ammonia = "4"
 open = "5"
 url = "2"
+lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "smtp-transport", "builder", "tracing"] }
 
 # Internal crates
 inboxly-core = { path = "inboxly-core" }
