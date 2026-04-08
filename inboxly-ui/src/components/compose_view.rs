@@ -29,8 +29,8 @@ use dioxus::prelude::*;
 
 use crate::app::{Inboxly, Message, RecipientField};
 use crate::markdown_preview::render_markdown_preview;
-use crate::state::ComposeSendState;
-use inboxly_core::{AttachmentDraft, Contact, parse_address_list};
+use crate::state::{ComposeLayout, ComposeSendState};
+use inboxly_core::{AttachmentDraft, ComposeMode, Contact, parse_address_list};
 
 /// Full-screen compose view rendered when `active_view == Compose`.
 ///
@@ -63,6 +63,8 @@ pub fn ComposeView() -> Element {
         from_account_index,
         can_send,
         accounts,
+        layout,
+        is_reply_or_forward,
     ) = {
         let state = app_state.read();
         let compose = &state.compose;
@@ -72,6 +74,7 @@ pub fn ComposeView() -> Element {
             .enumerate()
             .map(|(i, a)| (i, a.email.clone(), a.display_name.clone()))
             .collect();
+        let is_reply_or_forward = !matches!(compose.mode, ComposeMode::New);
         (
             compose.subject.clone(),
             compose.to.clone(),
@@ -88,6 +91,8 @@ pub fn ComposeView() -> Element {
             compose.from_account_index,
             compose.can_send(),
             accounts,
+            compose.layout,
+            is_reply_or_forward,
         )
     };
 
@@ -165,6 +170,14 @@ pub fn ComposeView() -> Element {
         "Show Cc/Bcc"
     };
     let toggle_preview_label = if show_preview { "Edit" } else { "Preview" };
+    // M36 Phase 12: layout toggle button label + aria-label. The icon is
+    // a unicode arrow that matches the current direction the click will
+    // move the compose: Inline -> "Expand" (grow to full screen),
+    // FullScreen -> "Collapse" (shrink back into the inline split).
+    let (toggle_layout_label, toggle_layout_aria) = match layout {
+        ComposeLayout::Inline => ("\u{2921} Expand", "Expand compose to full screen"),
+        ComposeLayout::FullScreen => ("\u{2924} Collapse", "Collapse compose to inline"),
+    };
 
     rsx! {
         div {
@@ -181,6 +194,22 @@ pub fn ComposeView() -> Element {
                         app_state.write().update(Message::CloseCompose);
                     },
                     "\u{2190} Back" // ←
+                }
+                // M36 Phase 12: layout toggle button. Only visible for
+                // reply/forward modes — a fresh compose (New) has no
+                // thread context to collapse back to, so the button is
+                // hidden. Dispatches Message::ComposeToggleLayout; the
+                // handler lives in app.rs (Phase 11).
+                if is_reply_or_forward {
+                    button {
+                        class: "compose-discard-button",
+                        aria_label: "{toggle_layout_aria}",
+                        onclick: move |evt: Event<MouseData>| {
+                            evt.stop_propagation();
+                            app_state.write().update(Message::ComposeToggleLayout);
+                        },
+                        "{toggle_layout_label}"
+                    }
                 }
                 span {
                     style: "font-size: 16px; font-weight: 500; color: var(--text-primary); flex: 1;",
@@ -407,6 +436,29 @@ pub fn ComposeView() -> Element {
                                 app_state.write().update(Message::ComposeTogglePreview);
                             },
                             "{toggle_preview_label}"
+                        }
+                    }
+                    // M36 Phase 12: "Quoted original" placeholder
+                    // header. Only rendered for Reply/ReplyAll/Forward
+                    // modes — a fresh New compose has no original to
+                    // quote. This is a read-only summary label; the
+                    // expanded sender/date/subject view is deferred.
+                    // The original's data currently lives embedded in
+                    // body_markdown (as the attribution line written
+                    // by Phase 7's apply_reply_headers / forward
+                    // helpers) which is fragile to parse here. A
+                    // future polish can add dedicated ComposeState
+                    // fields (original_sender_display,
+                    // original_subject_display, original_date_display)
+                    // at prefill time to drive a richer preview.
+                    if is_reply_or_forward {
+                        div {
+                            class: "compose-quoted-original-summary",
+                            style: "padding: 6px 8px; margin-bottom: 4px; border-left: 2px solid var(--border-color); background: var(--hover-bg, transparent);",
+                            span {
+                                style: "font-size: 12px; color: var(--text-secondary); font-style: italic;",
+                                "Quoted original below the cursor"
+                            }
                         }
                     }
                     div { class: "compose-body", {body_section} }
