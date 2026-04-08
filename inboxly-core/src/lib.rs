@@ -12,6 +12,7 @@ pub mod id;
 pub mod inbox;
 pub mod markdown;
 pub mod offline;
+pub mod reply;
 pub mod secrets;
 pub mod store_traits;
 pub mod thread;

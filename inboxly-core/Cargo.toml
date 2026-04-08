@@ -19,6 +19,7 @@ regex = "1"
 pulldown-cmark.workspace = true
 keyring.workspace = true
 tracing = "0.1"
+unicode-normalization.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
