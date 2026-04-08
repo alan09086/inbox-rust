@@ -5,6 +5,8 @@ use std::sync::Arc;
 use dioxus::prelude::*;
 use inboxly_core::AuthMethod;
 
+use crate::startup::OAuth2Contexts;
+
 use crate::app::{Inboxly, Message};
 use crate::components::content_area::ContentArea;
 use crate::components::nav_drawer::NavDrawer;
@@ -162,16 +164,18 @@ fn window_title(view: ActiveView) -> String {
 ///    `save_generation` (Gemini G9 stale-result guard for failures
 ///    only — see step 4).
 /// 2. Constructs an [`inboxly_imap::SmtpSender`]:
-///      - `Password` / `AppPassword` -> reads the credential from the
-///        `INBOXLY_SMTP_PASSWORD` env var. **M35b limitation**: there
-///        is no keyring or per-account secrets store yet. M36 will
-///        plumb a real secrets backend; until then the user must
-///        `INBOXLY_SMTP_PASSWORD=foo cargo run` (or set it in the
-///        desktop entry's `Exec=`) for manual end-to-end verification.
-///      - `OAuth2` -> reports a "not yet wired" error. The
-///        `SharedOAuth2` token cache lives in the IMAP sync loop and
-///        is not threaded down to this bridge yet; plumbing it
-///        through is M36 scope.
+///      - `Password` / `AppPassword` -> reads the credential via
+///        [`inboxly_core::secrets::get_password`], which checks the
+///        keyring first and falls back to the `INBOXLY_SMTP_PASSWORD`
+///        environment variable when no entry is present (M36 phase 1
+///        wired the keyring backend; M36 phase 2 wires it here).
+///      - `OAuth2` -> looks up the per-account [`inboxly_imap::SharedOAuth2`]
+///        from the [`OAuth2Contexts`] map (passed in via the second
+///        argument). The map is built once at app startup from
+///        [`crate::startup::STARTUP_ACCOUNTS`] and the keyring's stored
+///        refresh tokens; if no entry exists for the FROM account the
+///        send fails with a clear "run `inboxly oauth2-authorize`"
+///        error. (M36 phase 2.)
 /// 3. Enters a retry loop using [`inboxly_imap::smtp::should_retry`]:
 ///    up to three attempts, with 1 s and 2 s delays for transient
 ///    errors, immediate stop for permanent rejections.
@@ -198,7 +202,7 @@ fn window_title(view: ActiveView) -> String {
 ///    using [`inboxly_imap::smtp::redact_for_log`] so credentials and
 ///    PII never reach the UI's error banner.
 #[cfg(not(test))]
-async fn run_send_pipeline(mut app_state: Signal<Inboxly>) {
+async fn run_send_pipeline(mut app_state: Signal<Inboxly>, oauth2_contexts: OAuth2Contexts) {
     // -- Snapshot pass: resolve the account, draft, and captured
     //    generation from a single `peek()`. peek does NOT subscribe
     //    so this task cannot re-fire its parent effect from inside.
@@ -241,27 +245,59 @@ async fn run_send_pipeline(mut app_state: Signal<Inboxly>) {
     // -- Build the SmtpSender for the resolved auth method.
     let sender = match account_config.auth_method {
         AuthMethod::Password | AuthMethod::AppPassword => {
-            let Some(password) = std::env::var("INBOXLY_SMTP_PASSWORD").ok() else {
-                app_state.write().update(Message::ComposeSendComplete {
-                    success: false,
-                    error: Some(
-                        "password required but INBOXLY_SMTP_PASSWORD env var is not set (M35b limitation; M36 will add a keyring)"
-                            .to_string(),
-                    ),
-                });
-                return;
+            // M36 phase 2: route password lookups through the keyring
+            // backend. `secrets::get_password` checks the per-account
+            // keyring entry first and only falls back to
+            // `INBOXLY_SMTP_PASSWORD` if no entry is present (and the
+            // env var is non-empty). A `SecretsError::Keyring` from a
+            // locked-wallet or DBus failure surfaces as a real error
+            // rather than degrading silently.
+            let password = match inboxly_core::secrets::get_password(&account_config.email) {
+                Ok(Some(value)) => value,
+                Ok(None) => {
+                    app_state.write().update(Message::ComposeSendComplete {
+                        success: false,
+                        error: Some(format!(
+                            "no password stored for {}; run `inboxly set-password {}` first",
+                            account_config.email, account_config.email,
+                        )),
+                    });
+                    return;
+                }
+                Err(err) => {
+                    app_state.write().update(Message::ComposeSendComplete {
+                        success: false,
+                        error: Some(format!(
+                            "keyring lookup failed for {}: {err}",
+                            account_config.email,
+                        )),
+                    });
+                    return;
+                }
             };
             inboxly_imap::SmtpSender::with_password(account_config.clone(), password)
         }
         AuthMethod::OAuth2 => {
-            app_state.write().update(Message::ComposeSendComplete {
-                success: false,
-                error: Some(
-                    "OAuth2 SMTP send is not yet wired through the compose bridge -- M36 will plumb SharedOAuth2 from the sync loop"
-                        .to_string(),
-                ),
-            });
-            return;
+            // M36 phase 2: look up the SharedOAuth2 instance built at
+            // startup from this account's keyring-stored refresh
+            // token. Keys are lowercased to match the
+            // `secrets::user_field` normalization.
+            let key = account_config.email.to_ascii_lowercase();
+            match oauth2_contexts.get(&key).cloned() {
+                Some(oauth2) => {
+                    inboxly_imap::SmtpSender::with_oauth2(account_config.clone(), oauth2)
+                }
+                None => {
+                    app_state.write().update(Message::ComposeSendComplete {
+                        success: false,
+                        error: Some(format!(
+                            "no OAuth2 refresh token registered for {}; run `inboxly oauth2-authorize {}` first",
+                            account_config.email, account_config.email,
+                        )),
+                    });
+                    return;
+                }
+            }
         }
     };
 
@@ -402,12 +438,36 @@ static CSS_INLINE: &str = include_str!("../../assets/main.css");
 #[component]
 pub fn App() -> Element {
     // Initialise app state once on first render.
+    //
+    // M36 phase 2: pre-existing-bug fix — pull the configured accounts
+    // from `crate::startup::STARTUP_ACCOUNTS`, which the binary's
+    // `main()` populates from `~/.config/inboxly/config.toml` BEFORE
+    // launching Dioxus. Prior to this, the binary set its own
+    // `STARTUP_ACCOUNTS` static and the UI never read it, so every
+    // running Inboxly instance booted with `accounts: Vec::new()` and
+    // the send pipeline could not see the configured FROM addresses.
+    // Tests skip this since they construct `Inboxly` directly via
+    // `with_accounts` rather than going through `App()`.
     let app_state = use_context_provider(|| {
+        let startup_accounts = crate::startup::STARTUP_ACCOUNTS
+            .get()
+            .cloned()
+            .unwrap_or_default();
         Signal::new(Inboxly {
             theme: ThemeConfig::from_system(),
+            accounts: startup_accounts,
             ..Inboxly::default()
         })
     });
+
+    // M36 phase 2: provide the per-account OAuth2 context map.
+    //
+    // The map is read-only after startup (the binary's `main()` builds
+    // it once from the keyring-stored refresh tokens) so this is a
+    // plain `Arc<HashMap>` rather than a `Signal`. Components that need
+    // OAuth2 lookup pull the context via `consume_context::<OAuth2Contexts>()`
+    // (or read the cloned local in the spawn-task closure below).
+    let oauth2_contexts: OAuth2Contexts = use_context_provider(crate::startup::oauth2_contexts);
 
     // Body data context — separate from Inboxly so per-write clones
     // don't drag the thread body bytes around. ThreadDetailView reads
@@ -877,6 +937,11 @@ pub fn App() -> Element {
             return;
         }
         let app_state = app_state;
+        // Clone the OAuth2Contexts handle into the spawned task. The
+        // contexts map is wrapped in `Arc` (the type alias is
+        // `Arc<HashMap<String, SharedOAuth2>>`) so the clone is one
+        // atomic increment.
+        let oauth2_contexts = oauth2_contexts.clone();
         spawn(async move {
             // The entire send pipeline is a no-op in test builds. The
             // bridge would otherwise need to dial real SMTP servers,
@@ -887,10 +952,11 @@ pub fn App() -> Element {
             // `Message::ComposeSendComplete` directly rather than
             // relying on this bridge.
             #[cfg(not(test))]
-            run_send_pipeline(app_state).await;
+            run_send_pipeline(app_state, oauth2_contexts).await;
             #[cfg(test)]
             {
                 let _ = app_state;
+                let _ = oauth2_contexts;
             }
         });
     });

@@ -5,7 +5,7 @@ pub mod xoauth2;
 
 pub use oauth2::{GmailOAuth2Config, OAuth2Token};
 pub use password::PasswordCredentials;
-pub use shared_oauth2::{SharedOAuth2, SharedOAuth2State};
+pub use shared_oauth2::{PersistCallback, SharedOAuth2, SharedOAuth2State};
 pub use xoauth2::XOAuth2Credentials;
 
 use async_imap::Session;

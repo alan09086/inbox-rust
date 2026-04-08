@@ -2408,6 +2408,7 @@ dependencies = [
  "dioxus",
  "inboxly-bundler",
  "inboxly-core",
+ "inboxly-imap",
  "inboxly-store",
  "inboxly-ui",
  "tokio",
