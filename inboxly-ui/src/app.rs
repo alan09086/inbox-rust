@@ -4540,4 +4540,643 @@ mod tests {
             "Maildir filename suffix must include the Draft flag (`D`): {filename}"
         );
     }
+
+    // ========================================================================
+    // M36 Phase 13: End-to-end state-machine sweep for the reply/forward flow
+    // ========================================================================
+    //
+    // These tests exercise the Phase 6-11 code path at the `Inboxly::update`
+    // level (dispatch messages → assert state). The real production bridge
+    // in `components::app` loads the original email via `ThreadReader` and
+    // then dispatches `ComposeReplyReady` — but `ThreadReader` holds a
+    // SQLite connection and the bridge runs on the Dioxus local executor,
+    // so it can't be driven from a plain `#[test]`. Instead, these tests
+    // build a fake `LoadedEmail`, call `compose_state_from_original`
+    // directly (same helper the bridge uses), and dispatch
+    // `Message::ComposeReplyReady` with the resulting state. That covers
+    // the exact state transition the bridge performs, just without the
+    // disk I/O leg in front of it. The bridge leg itself is covered by
+    // the Phase 7/8 tests in `components/app.rs`.
+
+    /// Phase 13 helper: build a `LoadedEmail` fixture for the reply/forward
+    /// tests. Copied from the private test module in
+    /// `inboxly-ui/src/components/app.rs` because that module is not
+    /// importable from here (private test mod), and duplicating a ~40-line
+    /// struct literal is cheaper than re-engineering visibility for one
+    /// cfg(test) fixture.
+    #[allow(clippy::too_many_arguments)] // test fixture: each arg overrides one EmailRow column
+    fn p13_fake_loaded_email(
+        subject: &str,
+        from_name: Option<&str>,
+        from_address: &str,
+        to_json: &str,
+        cc_json: &str,
+        body_text: Option<&str>,
+        message_id: Option<&str>,
+        references_json: Option<&str>,
+    ) -> inboxly_store::thread_reader::LoadedEmail {
+        use inboxly_core::{EmailId, SlimEmailContent};
+        use inboxly_store::EmailRow;
+        use inboxly_store::thread_reader::LoadedEmail;
+
+        let row = EmailRow {
+            id: "e1".into(),
+            account_id: "a1".into(),
+            thread_id: "t1".into(),
+            from_name: from_name.map(str::to_string),
+            from_address: from_address.into(),
+            to_json: to_json.into(),
+            cc_json: cc_json.into(),
+            subject: subject.into(),
+            snippet: String::new(),
+            date: 1_775_572_320,
+            maildir_path: String::new(),
+            flags: 0,
+            size_bytes: 0,
+            imap_uid: 1,
+            imap_folder: "INBOX".into(),
+            has_attachments: false,
+            body_downloaded: body_text.is_some(),
+            message_id_header: message_id.map(str::to_string),
+            in_reply_to: None,
+            references_json: references_json.map(str::to_string),
+        };
+        let content = body_text.map(|body| SlimEmailContent {
+            id: EmailId("<e1@example.com>".into()),
+            body_text: Some(body.to_string()),
+            body_html: None,
+            attachments: Vec::new(),
+        });
+        LoadedEmail { row, content }
+    }
+
+    /// Phase 13 helper: Reply mode with throwaway ids.
+    fn p13_reply_mode() -> ComposeMode {
+        use inboxly_core::id::{EmailId, ThreadId};
+        ComposeMode::Reply {
+            thread_id: ThreadId::new(),
+            original_email_id: EmailId::new("<orig@example.com>"),
+        }
+    }
+
+    /// Phase 13 helper: ReplyAll mode with throwaway ids.
+    fn p13_reply_all_mode() -> ComposeMode {
+        use inboxly_core::id::{EmailId, ThreadId};
+        ComposeMode::ReplyAll {
+            thread_id: ThreadId::new(),
+            original_email_id: EmailId::new("<orig@example.com>"),
+        }
+    }
+
+    /// Phase 13 helper: Forward mode with throwaway ids.
+    fn p13_forward_mode() -> ComposeMode {
+        use inboxly_core::id::{EmailId, ThreadId};
+        ComposeMode::Forward {
+            thread_id: ThreadId::new(),
+            original_email_id: EmailId::new("<orig@example.com>"),
+        }
+    }
+
+    /// Scenario 1 — Reply from Thread: dispatching `ComposeReplyReady`
+    /// with a state built by `compose_state_from_original` for Reply
+    /// mode produces a single To chip (the original sender), a
+    /// subject that starts with "Re:", a quoted "wrote:" attribution
+    /// line in the body, and the Inline layout.
+    #[test]
+    fn m36b_phase13_reply_from_thread_single_to_chip_re_subject_quote_inline_layout() {
+        use crate::components::app::compose_state_from_original;
+
+        let original = p13_fake_loaded_email(
+            "project kickoff",
+            Some("Alice"),
+            "alice@example.com",
+            r#"[{"name":"Me","address":"me@example.com"}]"#,
+            "[]",
+            Some("first line of body"),
+            Some("<orig@example.com>"),
+            None,
+        );
+        let prefilled =
+            compose_state_from_original(&original, p13_reply_mode(), "me@example.com", 0);
+
+        let mut app = Inboxly::default();
+        app.accounts = vec![test_account("me@example.com")];
+        // Simulate an open thread so ContentArea would render the inline
+        // split; this also proves `ComposeReplyReady` does not clobber
+        // `open_thread_id`.
+        app.open_thread_id = Some("t-kickoff".to_string());
+        let _ = app.update(Message::ComposeReplyReady {
+            state: Box::new(prefilled),
+        });
+
+        assert_eq!(
+            app.compose.to.len(),
+            1,
+            "Reply must set a single To recipient (the original sender)"
+        );
+        assert_eq!(app.compose.to[0].address, "alice@example.com");
+        assert!(
+            app.compose.subject.starts_with("Re:"),
+            "Reply subject must start with `Re:` — got {:?}",
+            app.compose.subject
+        );
+        assert!(
+            app.compose.body_markdown.contains("wrote:"),
+            "Reply body must contain the `wrote:` attribution line — got {:?}",
+            app.compose.body_markdown
+        );
+        assert_eq!(
+            app.compose.layout,
+            ComposeLayout::Inline,
+            "ComposeReplyReady must default to Inline layout"
+        );
+        assert_eq!(
+            app.open_thread_id.as_deref(),
+            Some("t-kickoff"),
+            "open_thread_id must be preserved across ComposeReplyReady"
+        );
+    }
+
+    /// Scenario 2 — ReplyAll with user in Cc: the user's address is
+    /// excluded from the resulting Cc list, everyone else is kept.
+    #[test]
+    fn m36b_phase13_reply_all_with_user_in_cc_excludes_user() {
+        use crate::components::app::compose_state_from_original;
+
+        let original = p13_fake_loaded_email(
+            "meeting notes",
+            Some("Alice"),
+            "alice@example.com",
+            // To list contains Carol only (user is NOT in To).
+            r#"[{"name":"Carol","address":"carol@example.com"}]"#,
+            // Cc contains the user + Dave — user must be dropped.
+            r#"[{"name":"Me","address":"me@example.com"},{"name":"Dave","address":"dave@example.com"}]"#,
+            Some("body"),
+            Some("<orig@example.com>"),
+            None,
+        );
+        let prefilled =
+            compose_state_from_original(&original, p13_reply_all_mode(), "me@example.com", 0);
+
+        let mut app = Inboxly::default();
+        app.accounts = vec![test_account("me@example.com")];
+        let _ = app.update(Message::ComposeReplyReady {
+            state: Box::new(prefilled),
+        });
+
+        // Sender → To.
+        assert_eq!(app.compose.to.len(), 1);
+        assert_eq!(app.compose.to[0].address, "alice@example.com");
+        // Cc = (orig.To ∪ orig.Cc) \ user → carol + dave (me dropped).
+        let cc_addresses: Vec<&str> = app.compose.cc.iter().map(|c| c.address.as_str()).collect();
+        assert!(
+            !cc_addresses.contains(&"me@example.com"),
+            "user address must be excluded from Cc — got {cc_addresses:?}"
+        );
+        assert!(cc_addresses.contains(&"carol@example.com"));
+        assert!(cc_addresses.contains(&"dave@example.com"));
+        assert_eq!(cc_addresses.len(), 2);
+    }
+
+    /// Scenario 3 — ReplyAll with user in To: the user is excluded,
+    /// the original sender becomes the only To, and the remaining
+    /// To/Cc members end up in Cc.
+    #[test]
+    fn m36b_phase13_reply_all_with_user_in_to_sender_becomes_only_to() {
+        use crate::components::app::compose_state_from_original;
+
+        let original = p13_fake_loaded_email(
+            "budget",
+            Some("Alice"),
+            "alice@example.com",
+            // To: user + Carol — user must be dropped, Carol moves to Cc.
+            r#"[{"name":"Me","address":"me@example.com"},{"name":"Carol","address":"carol@example.com"}]"#,
+            r#"[{"name":"Dave","address":"dave@example.com"}]"#,
+            Some("body"),
+            Some("<orig@example.com>"),
+            None,
+        );
+        let prefilled =
+            compose_state_from_original(&original, p13_reply_all_mode(), "me@example.com", 0);
+
+        let mut app = Inboxly::default();
+        app.accounts = vec![test_account("me@example.com")];
+        let _ = app.update(Message::ComposeReplyReady {
+            state: Box::new(prefilled),
+        });
+
+        // Original sender → sole To.
+        assert_eq!(
+            app.compose.to.len(),
+            1,
+            "Sender must become the only To entry"
+        );
+        assert_eq!(app.compose.to[0].address, "alice@example.com");
+        // Cc = everyone else except the user. Order is orig.To first
+        // (minus user), then orig.Cc.
+        let cc_addresses: Vec<&str> = app.compose.cc.iter().map(|c| c.address.as_str()).collect();
+        assert_eq!(cc_addresses, vec!["carol@example.com", "dave@example.com"]);
+        assert!(
+            !cc_addresses.contains(&"me@example.com"),
+            "user address must be excluded from Cc"
+        );
+        assert!(
+            app.compose.show_cc_bcc,
+            "Cc/Bcc row must auto-expand when ReplyAll produces a non-empty Cc"
+        );
+    }
+
+    /// Scenario 4 — Forward: To is empty and subject starts with
+    /// "Fwd:". The attachment count assertion from the plan is
+    /// skipped here because Phase 9's extract_forward_attachments
+    /// runs in the bridge, not in `Inboxly::update`.
+    #[test]
+    fn m36b_phase13_forward_from_thread_empty_to_and_fwd_subject() {
+        use crate::components::app::compose_state_from_original;
+
+        let original = p13_fake_loaded_email(
+            "quarterly review",
+            Some("Alice"),
+            "alice@example.com",
+            r#"[{"name":"Bob","address":"bob@example.com"}]"#,
+            "[]",
+            Some("body"),
+            Some("<orig@example.com>"),
+            None,
+        );
+        let prefilled =
+            compose_state_from_original(&original, p13_forward_mode(), "me@example.com", 0);
+
+        let mut app = Inboxly::default();
+        app.accounts = vec![test_account("me@example.com")];
+        let _ = app.update(Message::ComposeReplyReady {
+            state: Box::new(prefilled),
+        });
+
+        assert!(
+            app.compose.to.is_empty(),
+            "Forward must leave To empty for the user to fill"
+        );
+        assert!(
+            app.compose.cc.is_empty(),
+            "Forward must leave Cc empty for the user to fill"
+        );
+        assert!(
+            app.compose.subject.starts_with("Fwd:"),
+            "Forward subject must start with `Fwd:` — got {:?}",
+            app.compose.subject
+        );
+        assert!(
+            app.compose.in_reply_to.is_none(),
+            "Forward starts a new thread — in_reply_to must be None"
+        );
+        assert!(
+            app.compose.references.is_none(),
+            "Forward starts a new thread — references must be None"
+        );
+    }
+
+    /// Scenario 5 — Reply to a "Re:"-prefixed thread: the subject
+    /// stays as a single "Re:" prefix (dedup), not "Re: Re: ...".
+    #[test]
+    fn m36b_phase13_reply_to_re_thread_collapses_re_prefix() {
+        use crate::components::app::compose_state_from_original;
+
+        let original = p13_fake_loaded_email(
+            "Re: project kickoff",
+            Some("Alice"),
+            "alice@example.com",
+            "[]",
+            "[]",
+            Some("body"),
+            Some("<orig@example.com>"),
+            None,
+        );
+        let prefilled =
+            compose_state_from_original(&original, p13_reply_mode(), "me@example.com", 0);
+
+        let mut app = Inboxly::default();
+        app.accounts = vec![test_account("me@example.com")];
+        let _ = app.update(Message::ComposeReplyReady {
+            state: Box::new(prefilled),
+        });
+
+        assert_eq!(
+            app.compose.subject, "Re: project kickoff",
+            "Replying to a Re:-prefixed thread must not produce `Re: Re: ...`"
+        );
+    }
+
+    /// Scenario 6 — Reply to a forwarded thread: Phase 6's
+    /// `subject_for_reply` strips the `Fwd:` prefix and replaces it
+    /// with `Re:` (see `reply_subject_fwd_becomes_re` in
+    /// `inboxly-core/src/reply.rs`). The result is `Re: <body>`, not
+    /// `Re: Fwd: <body>`.
+    #[test]
+    fn m36b_phase13_reply_to_fwd_thread_strips_fwd_adds_re() {
+        use crate::components::app::compose_state_from_original;
+
+        let original = p13_fake_loaded_email(
+            "Fwd: project kickoff",
+            Some("Alice"),
+            "alice@example.com",
+            "[]",
+            "[]",
+            Some("body"),
+            Some("<orig@example.com>"),
+            None,
+        );
+        let prefilled =
+            compose_state_from_original(&original, p13_reply_mode(), "me@example.com", 0);
+
+        let mut app = Inboxly::default();
+        app.accounts = vec![test_account("me@example.com")];
+        let _ = app.update(Message::ComposeReplyReady {
+            state: Box::new(prefilled),
+        });
+
+        assert_eq!(
+            app.compose.subject, "Re: project kickoff",
+            "Reply to a Fwd:-prefixed thread must strip Fwd and add Re (per Phase 6)"
+        );
+    }
+
+    /// Scenario 7 — Forward a forwarded thread: the subject stays as
+    /// a single `Fwd:` prefix — Phase 6's `subject_for_forward`
+    /// normalises an already-Fwd-prefixed subject and passes the
+    /// body through unchanged, so "Fwd: foo" → "Fwd: foo".
+    #[test]
+    fn m36b_phase13_forward_to_fwd_thread_keeps_single_fwd_prefix() {
+        use crate::components::app::compose_state_from_original;
+
+        let original = p13_fake_loaded_email(
+            "Fwd: project kickoff",
+            Some("Alice"),
+            "alice@example.com",
+            "[]",
+            "[]",
+            Some("body"),
+            Some("<orig@example.com>"),
+            None,
+        );
+        let prefilled =
+            compose_state_from_original(&original, p13_forward_mode(), "me@example.com", 0);
+
+        let mut app = Inboxly::default();
+        app.accounts = vec![test_account("me@example.com")];
+        let _ = app.update(Message::ComposeReplyReady {
+            state: Box::new(prefilled),
+        });
+
+        assert_eq!(
+            app.compose.subject, "Fwd: project kickoff",
+            "Forwarding a Fwd:-prefixed thread must keep a single Fwd prefix"
+        );
+    }
+
+    /// Scenario 8 — Toggle Inline → FullScreen preserves all compose
+    /// state: the toggle is layout-only and must not touch draft_id,
+    /// subject, body, recipients, in_reply_to, references, or
+    /// attachments. Regression guard against the handler calling
+    /// `ComposeState::default()` by accident.
+    #[test]
+    fn m36b_phase13_toggle_inline_to_full_screen_preserves_full_compose_state() {
+        use crate::components::app::compose_state_from_original;
+
+        let original = p13_fake_loaded_email(
+            "hello",
+            Some("Alice"),
+            "alice@example.com",
+            r#"[{"name":"Carol","address":"carol@example.com"}]"#,
+            r#"[{"name":"Dave","address":"dave@example.com"}]"#,
+            Some("body line"),
+            Some("<orig@example.com>"),
+            Some(r#"["<root@example.com>"]"#),
+        );
+        let prefilled =
+            compose_state_from_original(&original, p13_reply_all_mode(), "me@example.com", 2);
+
+        let mut app = Inboxly::default();
+        app.accounts = vec![test_account("me@example.com")];
+        app.open_thread_id = Some("t-hello".to_string());
+        let _ = app.update(Message::ComposeReplyReady {
+            state: Box::new(prefilled),
+        });
+        assert_eq!(app.compose.layout, ComposeLayout::Inline);
+
+        // Snapshot every field the toggle must preserve.
+        let draft_id_before = app.compose.draft_id.clone();
+        let subject_before = app.compose.subject.clone();
+        let body_before = app.compose.body_markdown.clone();
+        let to_before: Vec<String> = app
+            .compose
+            .to
+            .iter()
+            .map(|c| c.address.clone())
+            .collect();
+        let cc_before: Vec<String> = app
+            .compose
+            .cc
+            .iter()
+            .map(|c| c.address.clone())
+            .collect();
+        let in_reply_to_before = app.compose.in_reply_to.clone();
+        let references_before = app.compose.references.clone();
+        let from_account_index_before = app.compose.from_account_index;
+
+        // Toggle Inline → FullScreen.
+        let _ = app.update(Message::ComposeToggleLayout);
+
+        assert_eq!(app.compose.layout, ComposeLayout::FullScreen);
+        assert_eq!(app.active_view, ActiveView::Compose);
+        assert_eq!(app.compose.draft_id, draft_id_before);
+        assert_eq!(app.compose.subject, subject_before);
+        assert_eq!(app.compose.body_markdown, body_before);
+        let to_after: Vec<String> = app
+            .compose
+            .to
+            .iter()
+            .map(|c| c.address.clone())
+            .collect();
+        assert_eq!(to_after, to_before);
+        let cc_after: Vec<String> = app
+            .compose
+            .cc
+            .iter()
+            .map(|c| c.address.clone())
+            .collect();
+        assert_eq!(cc_after, cc_before);
+        assert_eq!(app.compose.in_reply_to, in_reply_to_before);
+        assert_eq!(app.compose.references, references_before);
+        assert_eq!(app.compose.from_account_index, from_account_index_before);
+    }
+
+    /// Scenario 9 — Toggle FullScreen → Inline with no open thread:
+    /// Phase 11's handler flips `layout = Inline` unconditionally and
+    /// routes `active_view` to Inbox. The ContentArea inline-split
+    /// branch only renders when `open_thread_id.is_some()`, so with
+    /// no open thread the user sees the non-split fallback; the
+    /// layout field itself still becomes Inline.
+    #[test]
+    fn m36b_phase13_toggle_full_screen_to_inline_with_no_open_thread_still_flips_layout() {
+        let mut app = Inboxly::default();
+        app.accounts = vec![test_account("me@example.com")];
+        assert!(app.open_thread_id.is_none());
+
+        // Stage a FullScreen compose via the production OpenCompose handler.
+        let _ = app.update(Message::OpenCompose);
+        assert_eq!(app.compose.layout, ComposeLayout::FullScreen);
+        assert_eq!(app.active_view, ActiveView::Compose);
+
+        // Click the toggle button → flip to Inline even though no
+        // thread is open (the handler is unconditional).
+        let _ = app.update(Message::ComposeToggleLayout);
+
+        assert_eq!(
+            app.compose.layout,
+            ComposeLayout::Inline,
+            "ComposeToggleLayout from FullScreen sets layout = Inline unconditionally"
+        );
+        assert_eq!(
+            app.active_view,
+            ActiveView::Inbox,
+            "FullScreen → Inline always routes active_view back to Inbox"
+        );
+        assert!(
+            app.open_thread_id.is_none(),
+            "Toggle must not fabricate an open_thread_id"
+        );
+    }
+
+    /// Scenario 10 — `OpenComposeReply` does NOT discard an
+    /// in-progress dirty draft. The handler is the synchronous half
+    /// of the two-step dispatch: it sets `pending_reply` +
+    /// `loading_reply` sentinels and returns. The existing
+    /// `compose.subject` / `body` / `draft_id` remain untouched
+    /// until the bridge dispatches `ComposeReplyReady`, at which
+    /// point the prefilled state clobbers them by design. This
+    /// intentionally differs from `OpenCompose`'s "reset every
+    /// field" behaviour — the bridge, not the sentinel handler,
+    /// owns the clobber.
+    #[test]
+    fn m36b_phase13_open_compose_reply_while_dirty_sets_sentinels_and_preserves_draft() {
+        use inboxly_core::id::{EmailId, ThreadId};
+
+        let mut app = Inboxly::default();
+        app.accounts = vec![test_account("me@example.com")];
+
+        // Stage a dirty in-progress draft the way the user would.
+        let _ = app.update(Message::OpenCompose);
+        let _ = app.update(Message::ComposeSubjectChanged("WIP draft".to_string()));
+        let _ = app.update(Message::ComposeBodyChanged("half-written body".to_string()));
+        let dirty_draft_id = app.compose.draft_id.clone();
+        assert!(app.compose.dirty);
+        assert_eq!(app.compose.subject, "WIP draft");
+
+        // Now click Reply on a thread while the dirty draft is open.
+        let mode = ComposeMode::Reply {
+            thread_id: ThreadId::new(),
+            original_email_id: EmailId::new("<orig@example.com>"),
+        };
+        let _ = app.update(Message::OpenComposeReply {
+            thread_id: "t-dirty".to_string(),
+            mode: mode.clone(),
+        });
+
+        // The sentinels are set…
+        assert!(
+            app.compose.loading_reply,
+            "OpenComposeReply must set loading_reply"
+        );
+        let pending = app
+            .compose
+            .pending_reply
+            .as_ref()
+            .expect("pending_reply must be Some after OpenComposeReply");
+        assert_eq!(pending.0, "t-dirty");
+        assert_eq!(pending.1, mode);
+
+        // …but the in-progress draft is preserved (the bridge will
+        // overwrite it when it dispatches ComposeReplyReady, which is
+        // the design).
+        assert_eq!(
+            app.compose.subject, "WIP draft",
+            "OpenComposeReply must not clobber the in-progress draft subject"
+        );
+        assert_eq!(
+            app.compose.body_markdown, "half-written body",
+            "OpenComposeReply must not clobber the in-progress draft body"
+        );
+        assert_eq!(
+            app.compose.draft_id, dirty_draft_id,
+            "OpenComposeReply must not clobber the in-progress draft_id"
+        );
+        assert!(
+            app.compose.dirty,
+            "OpenComposeReply must not clear the dirty flag on the existing draft"
+        );
+    }
+
+    /// Scenario 11 (bonus) — round-trip end-to-end: stage an open
+    /// thread, dispatch `OpenComposeReply`, then dispatch
+    /// `ComposeReplyReady` with a state built by
+    /// `compose_state_from_original`. This is the full sequence the
+    /// production bridge drives, end-to-end through `Inboxly::update`.
+    #[test]
+    fn m36b_phase13_open_reply_then_ready_round_trip_end_to_end() {
+        use crate::components::app::compose_state_from_original;
+        use inboxly_core::id::{EmailId, ThreadId};
+
+        let mut app = Inboxly::default();
+        app.accounts = vec![test_account("me@example.com")];
+        app.open_thread_id = Some("t-round".to_string());
+        app.active_view = ActiveView::Inbox;
+
+        // Step 1 — click Reply.
+        let mode = ComposeMode::Reply {
+            thread_id: ThreadId::new(),
+            original_email_id: EmailId::new("<orig@example.com>"),
+        };
+        let _ = app.update(Message::OpenComposeReply {
+            thread_id: "t-round".to_string(),
+            mode,
+        });
+        assert!(app.compose.loading_reply);
+        assert!(app.compose.pending_reply.is_some());
+        assert_eq!(
+            app.active_view,
+            ActiveView::Inbox,
+            "OpenComposeReply must not transition active_view"
+        );
+
+        // Step 2 — the bridge loads the original and dispatches Ready
+        // with a fully prefilled state.
+        let original = p13_fake_loaded_email(
+            "round trip",
+            Some("Alice"),
+            "alice@example.com",
+            "[]",
+            "[]",
+            Some("the body"),
+            Some("<orig@example.com>"),
+            None,
+        );
+        let prefilled =
+            compose_state_from_original(&original, p13_reply_mode(), "me@example.com", 0);
+        let _ = app.update(Message::ComposeReplyReady {
+            state: Box::new(prefilled),
+        });
+
+        // Sentinels cleared, state committed, layout Inline, and
+        // because open_thread_id is Some, active_view stays on Inbox
+        // so ContentArea can render the inline split.
+        assert!(!app.compose.loading_reply);
+        assert!(app.compose.pending_reply.is_none());
+        assert_eq!(app.compose.subject, "Re: round trip");
+        assert_eq!(app.compose.to.len(), 1);
+        assert_eq!(app.compose.to[0].address, "alice@example.com");
+        assert_eq!(app.compose.layout, ComposeLayout::Inline);
+        assert_eq!(app.active_view, ActiveView::Inbox);
+        assert_eq!(app.open_thread_id.as_deref(), Some("t-round"));
+    }
 }
