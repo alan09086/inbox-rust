@@ -67,6 +67,20 @@ pub struct ComposeState {
     /// Compose mode (always `New` in M35b).
     pub mode: ComposeMode,
 
+    // -- Reply threading headers (M36 Phase 7) --
+    /// RFC 5322 `In-Reply-To` header value. Set by
+    /// [`crate::components::app::compose_state_from_original`] for
+    /// `Reply` / `ReplyAll` modes; left `None` for `New` and `Forward`
+    /// (Forward starts a new thread per Gmail convention).
+    pub in_reply_to: Option<String>,
+
+    /// RFC 5322 `References` header value (JWZ threading chain).
+    /// Set by [`crate::components::app::compose_state_from_original`]
+    /// for `Reply` / `ReplyAll`; left `None` for `New` and `Forward`.
+    /// Built via [`inboxly_core::reply::build_references_chain`] from
+    /// the parent's existing `References` plus its `Message-ID`.
+    pub references: Option<String>,
+
     // -- Lifecycle bookkeeping --
     /// Set by any field-change handler. Cleared by the Phase 10 auto-save
     /// bridge after a successful `Store::update_draft` commit, but only
@@ -166,6 +180,8 @@ impl ComposeState {
             show_preview: false,
             attachments: Vec::new(),
             mode: ComposeMode::New,
+            in_reply_to: None,
+            references: None,
             dirty: false,
             save_generation: 0,
             send_state: ComposeSendState::Idle,

@@ -85,8 +85,8 @@ pub(crate) fn compose_state_to_draft_email(
             .map(|arc| (**arc).clone())
             .collect(),
         mode: compose.mode.clone(),
-        in_reply_to: None, // M36
-        references: None,  // M36
+        in_reply_to: compose.in_reply_to.clone(),
+        references: compose.references.clone(),
         maildir_path: None,
         // Auto-save doesn't track creation separately from updates; both
         // timestamps reflect the same instant. The storage layer's
@@ -97,6 +97,272 @@ pub(crate) fn compose_state_to_draft_email(
         created_at: now,
         updated_at: now,
     })
+}
+
+// ---------------------------------------------------------------------------
+// M36 Phase 7: compose_state_from_original helper + ComposeMode dispatch
+// ---------------------------------------------------------------------------
+
+/// Build a [`Contact`] from the `from_name` / `from_address` columns of an
+/// [`inboxly_store::EmailRow`].
+///
+/// `EmailRow` carries the sender as two separate columns rather than a
+/// pre-built `Contact` (the storage layer is intentionally schema-flat).
+/// Reply/Forward both need a real `Contact` for quoting and addressing,
+/// so this helper centralises the conversion. An absent display name
+/// becomes the empty string — the `Contact::Display` impl already handles
+/// that gracefully ("addr@host" rather than " <addr@host>").
+// Dead-code allow: only the Phase 7 unit tests call this. The Phase 8
+// `OpenComposeReply` handler will wire it into the dispatch path; until
+// then the symbol is unused outside `#[cfg(test)]`.
+#[allow(dead_code)]
+pub(crate) fn sender_contact_from_row(row: &inboxly_store::EmailRow) -> inboxly_core::Contact {
+    inboxly_core::Contact {
+        name: row.from_name.clone().unwrap_or_default(),
+        address: row.from_address.clone(),
+    }
+}
+
+/// Format the `date` column (Unix epoch seconds) of an
+/// [`inboxly_store::EmailRow`] as a Gmail-style attribution date string,
+/// e.g. `"Thu, 7 Apr 2026 at 14:32"`.
+///
+/// Returns the empty string if the timestamp can't be converted (e.g.
+/// astronomically out-of-range values from a corrupt row). The pure
+/// quote-formatting helpers in `inboxly_core::reply` accept any string
+/// for `date_formatted`, so an empty value just produces an attribution
+/// line of the form `"On , Alice <…> wrote:"` rather than panicking.
+// Dead-code allow: see `sender_contact_from_row` — Phase 8 wires it up.
+#[allow(dead_code)]
+fn format_email_row_date(row: &inboxly_store::EmailRow) -> String {
+    chrono::DateTime::from_timestamp(row.date, 0)
+        .map(|dt| dt.format("%a, %-d %b %Y at %H:%M").to_string())
+        .unwrap_or_default()
+}
+
+/// Extract the plaintext body of a [`LoadedEmail`] for use in a
+/// reply/forward quote block.
+///
+/// Returns an empty string when:
+/// - the body has not been downloaded yet (`content` is `None`), or
+/// - the body was downloaded as HTML-only (`body_text` is `None`).
+///
+/// The Phase 8 dispatch handler will gate on `body_downloaded` and
+/// trigger a body fetch if needed; Phase 7 just renders what's there.
+// Dead-code allow: see `sender_contact_from_row` — Phase 8 wires it up.
+#[allow(dead_code)]
+fn extract_body_text(original: &inboxly_store::thread_reader::LoadedEmail) -> String {
+    original
+        .content
+        .as_ref()
+        .and_then(|c| c.body_text.clone())
+        .unwrap_or_default()
+}
+
+/// Parse a JSON-encoded contact list (the `to_json` / `cc_json` columns of
+/// an `EmailRow`) into a `Vec<Contact>`.
+///
+/// Returns an empty vector on parse failure rather than propagating the
+/// error: a malformed contact list is logged at the storage layer and
+/// should not block the user from composing a reply.
+// Dead-code allow: see `sender_contact_from_row` — Phase 8 wires it up.
+#[allow(dead_code)]
+fn parse_contact_json(json: &str) -> Vec<inboxly_core::Contact> {
+    serde_json::from_str(json).unwrap_or_default()
+}
+
+/// Parse the JSON-encoded `references_json` column of an `EmailRow` into a
+/// space-separated chain suitable for
+/// [`inboxly_core::reply::build_references_chain`].
+///
+/// `references_json` is stored as a JSON array of Message-ID strings (see
+/// `inboxly-store/src/threading/headers.rs::threading_headers_from_fields`).
+/// The reply builder wants a flat space-joined string. Returns `None`
+/// when the column is `None` or parses to an empty array.
+// Dead-code allow: see `sender_contact_from_row` — Phase 8 wires it up.
+#[allow(dead_code)]
+fn parent_references_chain(references_json: Option<&str>) -> Option<String> {
+    let json = references_json?;
+    let parsed: Vec<String> = serde_json::from_str(json).ok()?;
+    if parsed.is_empty() {
+        None
+    } else {
+        Some(parsed.join(" "))
+    }
+}
+
+/// Apply the Reply / ReplyAll header bundle to a [`ComposeState`].
+///
+/// Sets `subject` (via [`inboxly_core::reply::subject_for_reply`]),
+/// prepends a `"\n\n"`-padded reply quote to `body_markdown` (via
+/// [`inboxly_core::reply::format_reply_quote`]), copies the parent's
+/// `Message-ID` into `in_reply_to`, and builds the JWZ-pruned
+/// `references` chain via
+/// [`inboxly_core::reply::build_references_chain`].
+///
+/// Shared between `Reply` and `ReplyAll` so the four header-setting lines
+/// live in exactly one place (eng review B1: DRY violation between the
+/// two reply variants).
+///
+/// Recipient population (`to` / `cc`) is **not** done here — the
+/// dispatcher branches on the mode after calling this helper because
+/// Reply uses `[original.from]` while ReplyAll consults
+/// [`inboxly_core::reply::reply_all_recipients`].
+// Dead-code allow: see `sender_contact_from_row` — Phase 8 wires it up.
+#[allow(dead_code)]
+pub(crate) fn apply_reply_headers(
+    state: &mut ComposeState,
+    original: &inboxly_store::thread_reader::LoadedEmail,
+) {
+    use inboxly_core::reply::{build_references_chain, format_reply_quote, subject_for_reply};
+
+    state.subject = subject_for_reply(&original.row.subject);
+
+    let from = sender_contact_from_row(&original.row);
+    let date = format_email_row_date(&original.row);
+    let body = extract_body_text(original);
+    let quote = format_reply_quote(&from, &date, &body);
+    state.body_markdown = format!("\n\n{quote}");
+
+    state.in_reply_to = original.row.message_id_header.clone();
+
+    if let Some(parent_msg_id) = original.row.message_id_header.as_deref()
+        && !parent_msg_id.is_empty()
+    {
+        let parent_refs = parent_references_chain(original.row.references_json.as_deref());
+        state.references = Some(build_references_chain(
+            parent_refs.as_deref(),
+            parent_msg_id,
+        ));
+    }
+}
+
+/// Apply the Forward header bundle to a [`ComposeState`].
+///
+/// Sets `subject` (via [`inboxly_core::reply::subject_for_forward`]) and
+/// prepends a `"\n\n"`-padded forward quote (via
+/// [`inboxly_core::reply::format_forward_quote`]) to `body_markdown`.
+///
+/// Forwards start a brand-new thread per Gmail convention, so
+/// `in_reply_to` and `references` are explicitly cleared. The
+/// dispatcher leaves `to` / `cc` empty for the user to fill, and
+/// Phase 9's streaming attachment extractor will populate the
+/// `attachments` field on top of this state.
+// Dead-code allow: see `sender_contact_from_row` — Phase 8 wires it up.
+#[allow(dead_code)]
+pub(crate) fn apply_forward_headers(
+    state: &mut ComposeState,
+    original: &inboxly_store::thread_reader::LoadedEmail,
+) {
+    use inboxly_core::reply::{format_forward_quote, subject_for_forward};
+
+    state.subject = subject_for_forward(&original.row.subject);
+
+    let from = sender_contact_from_row(&original.row);
+    let date = format_email_row_date(&original.row);
+    let body = extract_body_text(original);
+    let to_list = parse_contact_json(&original.row.to_json);
+    let quote = format_forward_quote(&from, &date, &original.row.subject, &to_list, &body);
+    state.body_markdown = format!("\n\n{quote}");
+
+    state.in_reply_to = None;
+    state.references = None;
+}
+
+/// Build a fully-populated [`ComposeState`] from an original
+/// [`LoadedEmail`] and a Reply/ReplyAll/Forward [`ComposeMode`].
+///
+/// This is the bridge between the Phase 6 pure helpers in
+/// `inboxly_core::reply` and the live `ComposeState` that the compose
+/// view consumes. Wired up by the Phase 8
+/// [`crate::app::Message::OpenComposeReply`] handler once the parent
+/// email's body has been downloaded.
+///
+/// **Per-mode behaviour:**
+/// - `Reply`: calls [`apply_reply_headers`] then sets
+///   `to = [Arc::new(original_sender)]`.
+/// - `ReplyAll`: calls [`apply_reply_headers`] then computes `(to, cc)`
+///   via [`inboxly_core::reply::reply_all_recipients`], handling the G5
+///   reply-to-self edge case (the user excludes themselves and inherits
+///   the original recipient list when continuing a thread they started).
+///   Auto-expands the Cc/Bcc row when the resulting Cc list is non-empty.
+/// - `Forward`: calls [`apply_forward_headers`] and leaves `to` / `cc`
+///   empty for the user to fill. Phase 9 plumbs in stream-extracted
+///   attachments on top of the returned state.
+/// - `New`: unreachable. The `OpenCompose` message dispatches a fresh
+///   compose; this dispatcher is for replies and forwards only. In
+///   debug builds the helper panics with a clear message; release
+///   builds simply return the partially-initialised state without
+///   touching headers.
+///
+/// `user_account_index` is the index into `Inboxly::accounts` that the
+/// reply should be sent FROM (typically the same account that received
+/// the original message — the Phase 8 handler computes this).
+/// `user_email` is the address used by
+/// [`inboxly_core::reply::reply_all_recipients`] to exclude the user
+/// from the recipient list.
+///
+/// A fresh UUID `draft_id` is generated eagerly so the per-draft
+/// attachment directory can be created before the first auto-save tick
+/// (consistent with `OpenCompose`, Gemini G4).
+///
+/// # Panics
+///
+/// In debug builds, panics if `mode` is [`ComposeMode::New`]. Use
+/// [`crate::app::Message::OpenCompose`] for fresh compose flows; this
+/// helper is exclusively for Reply/ReplyAll/Forward.
+// Dead-code allow: see `sender_contact_from_row` — the Phase 8
+// `OpenComposeReply` handler will be the production caller. Until then
+// the symbol lives only in the Phase 7 unit tests.
+#[allow(dead_code)]
+pub(crate) fn compose_state_from_original(
+    original: &inboxly_store::thread_reader::LoadedEmail,
+    mode: inboxly_core::ComposeMode,
+    user_email: &str,
+    user_account_index: usize,
+) -> ComposeState {
+    use inboxly_core::ComposeMode;
+    use inboxly_core::reply::reply_all_recipients;
+
+    let mut state = ComposeState::new();
+    state.draft_id = Some(uuid::Uuid::new_v4().to_string());
+    state.from_account_index = user_account_index;
+    state.mode = mode.clone();
+
+    match mode {
+        ComposeMode::Reply { .. } => {
+            apply_reply_headers(&mut state, original);
+            state.to = vec![Arc::new(sender_contact_from_row(&original.row))];
+        }
+        ComposeMode::ReplyAll { .. } => {
+            apply_reply_headers(&mut state, original);
+            let sender = sender_contact_from_row(&original.row);
+            let orig_to = parse_contact_json(&original.row.to_json);
+            let orig_cc = parse_contact_json(&original.row.cc_json);
+            let (to, cc) = reply_all_recipients(&sender, &orig_to, &orig_cc, user_email);
+            state.to = to.into_iter().map(Arc::new).collect();
+            state.cc = cc.into_iter().map(Arc::new).collect();
+            state.show_cc_bcc = !state.cc.is_empty();
+        }
+        ComposeMode::Forward { .. } => {
+            apply_forward_headers(&mut state, original);
+            // to / cc / bcc stay empty — the user picks recipients.
+            // Phase 9 will populate `attachments` from the parent.
+        }
+        ComposeMode::New => {
+            debug_assert!(
+                false,
+                "compose_state_from_original requires a Reply / ReplyAll / Forward mode \
+                 — use Message::OpenCompose for a fresh compose"
+            );
+            // Release-build fallthrough: return the partially-initialised
+            // state with the wrong mode. The caller is responsible for
+            // not invoking this helper with `New`; this branch only
+            // exists so we don't crash a shipped binary.
+        }
+    }
+
+    state
 }
 
 /// Infer a MIME type from a filename's extension.
@@ -1625,9 +1891,88 @@ pub fn App() -> Element {
 mod tests {
     use std::sync::Arc;
 
-    use inboxly_core::Contact;
+    use inboxly_core::{ComposeMode, Contact, EmailId, SlimEmailContent, ThreadId};
+    use inboxly_store::EmailRow;
+    use inboxly_store::thread_reader::LoadedEmail;
 
-    use super::{ComposeState, account_id_from_email, compose_state_to_draft_email};
+    use super::{
+        ComposeState, account_id_from_email, apply_forward_headers, apply_reply_headers,
+        compose_state_from_original, compose_state_to_draft_email,
+    };
+
+    /// Build a `LoadedEmail` fixture with sensible defaults for the
+    /// Phase 7 helper tests. Each test mutates only the fields it cares
+    /// about (subject, from, to_json, references, body) and accepts the
+    /// rest as defaults. The Message-ID column is non-empty so reply
+    /// helpers exercise the references-chain branch.
+    #[allow(clippy::too_many_arguments)] // test fixture: each arg overrides one EmailRow column
+    fn fake_loaded_email(
+        subject: &str,
+        from_name: Option<&str>,
+        from_address: &str,
+        to_json: &str,
+        cc_json: &str,
+        body_text: Option<&str>,
+        message_id: Option<&str>,
+        references_json: Option<&str>,
+    ) -> LoadedEmail {
+        let row = EmailRow {
+            id: "e1".into(),
+            account_id: "a1".into(),
+            thread_id: "t1".into(),
+            from_name: from_name.map(str::to_string),
+            from_address: from_address.into(),
+            to_json: to_json.into(),
+            cc_json: cc_json.into(),
+            subject: subject.into(),
+            snippet: String::new(),
+            // 2026-04-07 14:32 UTC ish — exact value isn't relevant; the
+            // tests assert on the helper's behaviour, not the exact
+            // attribution string (date format is verified separately).
+            date: 1_775_572_320,
+            maildir_path: String::new(),
+            flags: 0,
+            size_bytes: 0,
+            imap_uid: 1,
+            imap_folder: "INBOX".into(),
+            has_attachments: false,
+            body_downloaded: body_text.is_some(),
+            message_id_header: message_id.map(str::to_string),
+            in_reply_to: None,
+            references_json: references_json.map(str::to_string),
+        };
+        let content = body_text.map(|body| SlimEmailContent {
+            id: EmailId("<e1@example.com>".into()),
+            body_text: Some(body.to_string()),
+            body_html: None,
+            attachments: Vec::new(),
+        });
+        LoadedEmail { row, content }
+    }
+
+    /// Convenience: a Reply mode with throwaway thread/email ids.
+    fn reply_mode() -> ComposeMode {
+        ComposeMode::Reply {
+            thread_id: ThreadId::new(),
+            original_email_id: EmailId("<e1@example.com>".into()),
+        }
+    }
+
+    /// Convenience: a ReplyAll mode with throwaway thread/email ids.
+    fn reply_all_mode() -> ComposeMode {
+        ComposeMode::ReplyAll {
+            thread_id: ThreadId::new(),
+            original_email_id: EmailId("<e1@example.com>".into()),
+        }
+    }
+
+    /// Convenience: a Forward mode with throwaway thread/email ids.
+    fn forward_mode() -> ComposeMode {
+        ComposeMode::Forward {
+            thread_id: ThreadId::new(),
+            original_email_id: EmailId("<e1@example.com>".into()),
+        }
+    }
 
     /// `compose_state_to_draft_email` returns `None` when the compose
     /// state has no `draft_id`. The bridge depends on this so it can
@@ -1680,5 +2025,237 @@ mod tests {
         let c = account_id_from_email("bob@example.com");
         assert_eq!(a, b);
         assert_ne!(a, c);
+    }
+
+    // -----------------------------------------------------------------
+    // M36 Phase 7: apply_reply_headers / apply_forward_headers /
+    // compose_state_from_original tests
+    // -----------------------------------------------------------------
+
+    /// `apply_reply_headers` populates subject (Re:), body quote, and
+    /// the In-Reply-To / References threading headers from the parent.
+    #[test]
+    fn apply_reply_headers_sets_subject_body_in_reply_to_references() {
+        let original = fake_loaded_email(
+            "hello",
+            Some("Alice"),
+            "alice@example.com",
+            "[]",
+            "[]",
+            Some("first line\nsecond line"),
+            Some("<parent-msg@host>"),
+            Some(r#"["<root@host>","<a@host>"]"#),
+        );
+        let mut state = ComposeState::new();
+        apply_reply_headers(&mut state, &original);
+
+        assert_eq!(state.subject, "Re: hello");
+        assert!(
+            state.body_markdown.starts_with("\n\n"),
+            "body is prepended with two newlines so the cursor lands above the quote"
+        );
+        assert!(
+            state
+                .body_markdown
+                .contains("Alice <alice@example.com> wrote:")
+        );
+        assert!(state.body_markdown.contains("> first line"));
+        assert!(state.body_markdown.contains("> second line"));
+        assert_eq!(state.in_reply_to.as_deref(), Some("<parent-msg@host>"));
+        // References = parent.references + parent.message-id, joined by space.
+        assert_eq!(
+            state.references.as_deref(),
+            Some("<root@host> <a@host> <parent-msg@host>")
+        );
+    }
+
+    /// `apply_reply_headers` collapses an existing `Re:` prefix on the
+    /// parent subject (Phase 6's `subject_for_reply` does the dedup).
+    #[test]
+    fn apply_reply_headers_preserves_re_prefix_dedup() {
+        let original = fake_loaded_email(
+            "Re: foo",
+            Some("Alice"),
+            "alice@example.com",
+            "[]",
+            "[]",
+            None,
+            Some("<m1@host>"),
+            None,
+        );
+        let mut state = ComposeState::new();
+        apply_reply_headers(&mut state, &original);
+
+        assert_eq!(state.subject, "Re: foo");
+        // Without parent references_json, the chain is just the parent msgid.
+        assert_eq!(state.references.as_deref(), Some("<m1@host>"));
+    }
+
+    /// `apply_forward_headers` adds an `Fwd:` prefix and a
+    /// "Forwarded message" quote block built from the parent's headers
+    /// and body.
+    #[test]
+    fn apply_forward_headers_sets_fwd_prefix_and_quote() {
+        let to_json = r#"[{"name":"Bob","address":"bob@example.com"}]"#;
+        let original = fake_loaded_email(
+            "hello",
+            Some("Alice"),
+            "alice@example.com",
+            to_json,
+            "[]",
+            Some("body line"),
+            Some("<parent@host>"),
+            None,
+        );
+        let mut state = ComposeState::new();
+        apply_forward_headers(&mut state, &original);
+
+        assert_eq!(state.subject, "Fwd: hello");
+        assert!(state.body_markdown.starts_with("\n\n"));
+        assert!(
+            state
+                .body_markdown
+                .contains("---------- Forwarded message ----------\n")
+        );
+        assert!(
+            state
+                .body_markdown
+                .contains("From: Alice <alice@example.com>\n")
+        );
+        assert!(state.body_markdown.contains("Subject: hello\n"));
+        assert!(state.body_markdown.contains("To: Bob <bob@example.com>\n"));
+        assert!(state.body_markdown.ends_with("body line"));
+    }
+
+    /// Forward starts a brand-new thread per Gmail convention, so the
+    /// In-Reply-To / References headers are explicitly None even when
+    /// the parent has a Message-ID.
+    #[test]
+    fn apply_forward_headers_leaves_in_reply_to_none() {
+        let original = fake_loaded_email(
+            "hello",
+            Some("Alice"),
+            "alice@example.com",
+            "[]",
+            "[]",
+            None,
+            Some("<parent@host>"),
+            Some(r#"["<root@host>"]"#),
+        );
+        // Pre-populate the state with bogus values to prove the helper
+        // actively clears them rather than just leaving the default.
+        let mut state = ComposeState::new();
+        state.in_reply_to = Some("<should-be-cleared@host>".into());
+        state.references = Some("<should-be-cleared@host>".into());
+
+        apply_forward_headers(&mut state, &original);
+
+        assert!(state.in_reply_to.is_none());
+        assert!(state.references.is_none());
+    }
+
+    /// Reply mode dispatch: To = [original.from], Cc empty, mode set.
+    #[test]
+    fn compose_state_from_original_reply_sets_single_to_recipient() {
+        let original = fake_loaded_email(
+            "hello",
+            Some("Alice"),
+            "alice@example.com",
+            r#"[{"name":"Carol","address":"carol@example.com"}]"#,
+            "[]",
+            Some("body"),
+            Some("<m1@host>"),
+            None,
+        );
+        let state = compose_state_from_original(&original, reply_mode(), "me@example.com", 0);
+
+        assert_eq!(state.to.len(), 1);
+        assert_eq!(state.to[0].address, "alice@example.com");
+        assert!(
+            state.cc.is_empty(),
+            "Reply (not ReplyAll) does not populate Cc"
+        );
+        assert!(matches!(state.mode, ComposeMode::Reply { .. }));
+        assert!(state.subject.starts_with("Re: "));
+    }
+
+    /// ReplyAll dispatch: user is excluded from the merged To+Cc list,
+    /// the original sender becomes the sole To, and Cc auto-expands.
+    #[test]
+    fn compose_state_from_original_reply_all_excludes_user_email() {
+        let original = fake_loaded_email(
+            "hello",
+            Some("Alice"),
+            "alice@example.com",
+            // To: me@... and carol@... — me must be dropped.
+            r#"[{"name":"Me","address":"me@example.com"},{"name":"Carol","address":"carol@example.com"}]"#,
+            r#"[{"name":"Dave","address":"dave@example.com"}]"#,
+            Some("body"),
+            Some("<m1@host>"),
+            None,
+        );
+        let state = compose_state_from_original(&original, reply_all_mode(), "me@example.com", 0);
+
+        assert_eq!(state.to.len(), 1);
+        assert_eq!(state.to[0].address, "alice@example.com");
+        // Cc = (orig.to ∪ orig.cc) \ user → carol + dave (me dropped).
+        assert_eq!(state.cc.len(), 2);
+        assert_eq!(state.cc[0].address, "carol@example.com");
+        assert_eq!(state.cc[1].address, "dave@example.com");
+        assert!(
+            state.show_cc_bcc,
+            "Cc/Bcc row auto-expands when ReplyAll produces a non-empty Cc list"
+        );
+    }
+
+    /// Forward dispatch leaves To/Cc/Bcc empty (the user picks the
+    /// recipient list manually).
+    #[test]
+    fn compose_state_from_original_forward_empty_to_list() {
+        let original = fake_loaded_email(
+            "hello",
+            Some("Alice"),
+            "alice@example.com",
+            r#"[{"name":"Bob","address":"bob@example.com"}]"#,
+            "[]",
+            Some("body"),
+            Some("<m1@host>"),
+            None,
+        );
+        let state = compose_state_from_original(&original, forward_mode(), "me@example.com", 0);
+
+        assert!(state.to.is_empty());
+        assert!(state.cc.is_empty());
+        assert!(state.bcc.is_empty());
+        assert!(state.subject.starts_with("Fwd: "));
+        assert!(matches!(state.mode, ComposeMode::Forward { .. }));
+        assert!(state.in_reply_to.is_none());
+        assert!(state.references.is_none());
+    }
+
+    /// The dispatcher generates an eager UUID `draft_id` (Gemini G4 —
+    /// matches `OpenCompose` behaviour so the per-draft attachment dir
+    /// can be created before the first auto-save tick) and propagates
+    /// `user_account_index` into `from_account_index`.
+    #[test]
+    fn compose_state_from_original_sets_draft_id_and_from_account_index() {
+        let original = fake_loaded_email(
+            "hello",
+            Some("Alice"),
+            "alice@example.com",
+            "[]",
+            "[]",
+            None,
+            Some("<m1@host>"),
+            None,
+        );
+        let state = compose_state_from_original(&original, reply_mode(), "me@example.com", 3);
+
+        let draft_id = state.draft_id.as_deref().expect("eager draft_id assigned");
+        assert!(
+            uuid::Uuid::parse_str(draft_id).is_ok(),
+            "draft_id is a valid UUID, got {draft_id}"
+        );
+        assert_eq!(state.from_account_index, 3);
     }
 }
