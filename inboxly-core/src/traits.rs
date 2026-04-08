@@ -133,8 +133,8 @@ mod tests {
 
     #[test]
     fn traits_module_compiles() {
-        // This test verifies the traits module compiles successfully.
-        // Actual implementations are in their respective crates.
-        assert!(true);
+        // Empty body: reaching this point means the `_assert_*_bound` helpers
+        // above compiled successfully, which is the entire purpose of the
+        // test. Actual implementations live in their respective crates.
     }
 }
