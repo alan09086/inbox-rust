@@ -95,6 +95,23 @@ pub struct ComposeState {
     /// without panicking. Initial value is `0`; the bridge skips the
     /// initial render so the dialog does not pop on app start.
     pub attach_picker_counter: u64,
+
+    // -- Explicit save bridge trigger (M36 Phase 5) --
+    /// Counter bumped by [`crate::app::Message::ComposeSaveDraft`] (the
+    /// "Save Draft" button) and by the `Navigate` handler when it
+    /// detects dirty compose state being navigated away from. The
+    /// Phase 5 explicit-save bridge in `components::app` watches this
+    /// counter and fires SQLite + Maildir `.Drafts/` writes
+    /// synchronously (no 30 s timer like the auto-save bridge).
+    ///
+    /// Counter (rather than `bool`) for the same reason as
+    /// `attach_picker_counter`: two rapid Save Draft clicks must
+    /// produce two distinct bridge fires, which a `bool` would
+    /// coalesce. `wrapping_add(1)` so the bridge survives the
+    /// (unreachable) `u64::MAX` boundary. Initial value is `0`; the
+    /// bridge skips the initial render so the save logic does not run
+    /// on app start before any draft exists.
+    pub explicit_save_counter: u64,
 }
 
 /// Two-phase commit state for the SMTP send pipeline.
@@ -153,6 +170,7 @@ impl ComposeState {
             save_generation: 0,
             send_state: ComposeSendState::Idle,
             attach_picker_counter: 0,
+            explicit_save_counter: 0,
         }
     }
 

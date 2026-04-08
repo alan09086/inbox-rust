@@ -92,8 +92,7 @@ where
             }
         };
 
-        match replay_single_action(session, &action, maildir, well_known, draft_sender, store)
-            .await
+        match replay_single_action(session, &action, maildir, well_known, draft_sender, store).await
         {
             Ok(()) => {
                 store
@@ -378,6 +377,33 @@ where
                     )));
                 }
             }
+        }
+        OfflineAction::AppendDraft {
+            account_id,
+            draft_message_id,
+        } => {
+            // M36 Phase 5: warn-and-skip stub.
+            //
+            // The Phase 5 explicit-save bridge enqueues this variant
+            // whenever it writes a draft to the local Maildir
+            // `.Drafts/` folder. The replay handler is expected to
+            // mirror the Phase 4 `AppendSent` arm: look up the local
+            // `.Drafts/` copy by `Message-ID`, read its raw bytes,
+            // and `APPEND` them to the well-known Drafts folder
+            // (`well_known.drafts.as_deref().unwrap_or("Drafts")`).
+            //
+            // For now we drop the queue entry rather than re-queueing
+            // it. The user-visible consequence is that drafts saved
+            // while the IMAP replay handler is unimplemented will not
+            // appear in the server's Drafts folder until the user
+            // edits and re-saves after a future Inboxly upgrade. This
+            // mirrors how the Phase 3 `AppendSent` stub behaved
+            // before Phase 4 wired the real handler.
+            tracing::warn!(
+                account_id = %account_id,
+                message_id = %draft_message_id,
+                "AppendDraft replay not yet implemented (post-M36 scope) — dropping queue entry"
+            );
         }
     }
 
@@ -836,10 +862,7 @@ mod appendsent_tests {
         // what distinguishes the Sent-folder representation from the
         // SMTP wire representation.
         let parsed = mailparse::parse_mail(&read_bytes).expect("mailparse should parse");
-        let bcc = parsed
-            .headers
-            .get_first_value("Bcc")
-            .unwrap_or_default();
+        let bcc = parsed.headers.get_first_value("Bcc").unwrap_or_default();
         assert!(
             bcc.contains("dave@example.com"),
             "Sent folder copy must retain the Bcc list for audit, got: {bcc:?}"
@@ -1004,12 +1027,8 @@ mod appendsent_tests {
         let parsed = mailparse::parse_mail(&raw).expect("mailparse should parse");
 
         // Canonical header set the compose view depends on.
-        let header = |name: &str| -> String {
-            parsed
-                .headers
-                .get_first_value(name)
-                .unwrap_or_default()
-        };
+        let header =
+            |name: &str| -> String { parsed.headers.get_first_value(name).unwrap_or_default() };
         assert!(
             header("From").contains("alice@example.com"),
             "From header should include the account email, got {:?}",

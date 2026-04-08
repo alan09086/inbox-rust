@@ -24,3 +24,6 @@ url.workspace = true
 pulldown-cmark.workspace = true
 rfd.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

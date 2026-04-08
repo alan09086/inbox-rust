@@ -262,6 +262,113 @@ fn write_local_maildir_sent(
     }
 }
 
+/// **M36 Phase 5**: write a `DraftEmail` snapshot into the account's
+/// local Maildir `.Drafts/cur/` folder.
+///
+/// Mirrors [`write_local_maildir_sent`] one-for-one — same on-demand
+/// `MaildirStore` construction (the binary still does not own a
+/// long-lived `MaildirStore`), same fail-soft semantics, same
+/// `build_sent_folder_bytes` body builder. The only differences are
+/// the target folder ([`StandardFolder::Drafts`]) and the
+/// [`EmailFlags`] (the `\Draft` flag is set, the message is also
+/// marked `\Seen` so it never shows as unread in the user's own
+/// Drafts view).
+///
+/// We deliberately reuse `build_sent_folder_bytes` rather than
+/// introducing a parallel `build_draft_folder_bytes` helper: a draft
+/// is just a sent-shaped RFC 5322 message that has not been sent yet,
+/// the body builder produces identical bytes, and reusing the helper
+/// guarantees that a future fix to the body builder (e.g. a header
+/// bug) cannot drift between the Sent and Drafts code paths.
+///
+/// Failure modes are identical to `write_local_maildir_sent`:
+///
+/// - `Paths::resolve` returns `None` — skip the write.
+/// - `MaildirStore::init` fails on disk I/O — skip the write.
+/// - `build_sent_folder_bytes` fails on a malformed address —
+///   should not happen at this point because the user just typed
+///   recipients through the chip parser, but we check anyway.
+/// - `store_cur` fails on disk I/O — skip the write.
+///
+/// In every case, the [`inboxly_core::OfflineAction::AppendDraft`]
+/// queue entry is still enqueued by the caller so a future replay
+/// pass (post-M36) can reconcile — the only consequence here is that
+/// this particular local copy is missing, which the next full sync
+/// will fix once the IMAP-side handler is wired.
+#[cfg(not(test))]
+fn write_local_maildir_drafts(
+    account_config: &inboxly_core::AccountConfig,
+    draft: &inboxly_core::DraftEmail,
+    account_id: inboxly_core::AccountId,
+) {
+    use inboxly_core::EmailFlags;
+    use inboxly_core::config::Paths;
+    use inboxly_imap::smtp::build_sent_folder_bytes;
+    use inboxly_store::{MaildirStore, StandardFolder};
+
+    let Some(paths) = Paths::resolve() else {
+        tracing::warn!(
+            email = %account_config.email,
+            "Paths::resolve returned None; skipping Maildir Drafts write"
+        );
+        return;
+    };
+
+    let mail_root = paths
+        .maildir_root()
+        .join(account_id.0.to_string())
+        .join("mail");
+
+    let maildir_store = MaildirStore::new(mail_root);
+
+    if let Err(e) = maildir_store.init() {
+        tracing::warn!(
+            error = %e,
+            "failed to init Maildir for Drafts write; skipping local copy"
+        );
+        return;
+    }
+
+    let bytes = match build_sent_folder_bytes(account_config, draft) {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                message_id = %draft.message_id,
+                "build_sent_folder_bytes failed for Drafts; skipping Maildir Drafts write"
+            );
+            return;
+        }
+    };
+
+    // Drafts get the `\Draft` flag (so any future IMAP APPEND replay
+    // sets it server-side) and `\Seen` so the user's own Drafts view
+    // never shows the row as unread. The other flags are false.
+    let flags_drafts = EmailFlags {
+        read: true,
+        starred: false,
+        answered: false,
+        draft: true,
+    };
+
+    match maildir_store.store_cur(&StandardFolder::Drafts, &bytes, &flags_drafts) {
+        Ok(stored) => {
+            tracing::info!(
+                message_id = %draft.message_id,
+                path = ?stored.path,
+                "Maildir Drafts copy written"
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                message_id = %draft.message_id,
+                "Maildir Drafts store_cur failed; skipping local copy"
+            );
+        }
+    }
+}
+
 /// Run the SMTP send pipeline for the currently-Sending compose draft.
 ///
 /// Hosted as a free function (gated behind `cfg(not(test))`) so the
@@ -884,6 +991,248 @@ pub fn App() -> Element {
             app_state.write().update(Message::ComposeAutoSaveTick {
                 generation: captured_generation,
             });
+        });
+    });
+
+    // ===== M36 Phase 5: Explicit Save Draft bridge =====
+    //
+    // Watches `compose.explicit_save_counter`, which is bumped by:
+    //
+    //   1. The user clicking "Save Draft" — `Message::ComposeSaveDraft`
+    //      handler in `app.rs`.
+    //   2. The Phase 5 Navigate-with-compose guard — when the user
+    //      navigates AWAY from compose with `dirty == true`, the
+    //      `Message::Navigate` handler bumps the counter so the
+    //      bridge persists the in-flight draft before the view
+    //      switch commits.
+    //
+    // Unlike the Phase 10 auto-save bridge, this one fires
+    // synchronously (no `tokio::time::sleep`) — explicit saves are
+    // user-initiated, the user expects an immediate write. The
+    // structural shape is otherwise identical: peek-and-clone the
+    // owned values out of the snapshot, drop the borrow, then do
+    // the side-effects (SQLite + Maildir + offline-queue enqueue)
+    // on the owned copies.
+    //
+    // **Scope reduction (M36 Phase 5)**: only SQLite + Maildir
+    // `.Drafts/` tiers are wired here. The IMAP `APPEND` tier is
+    // enqueued as `OfflineAction::AppendDraft` with a warn-and-skip
+    // replay stub in `inboxly-imap::offline_replay`. A future phase
+    // will fill in the real replay handler (the Phase 4 `AppendSent`
+    // arm is the template).
+    //
+    // **Initial-render guard**: the `use_memo` fires on first
+    // render with `counter == 0`. We deliberately skip in that
+    // case so the bridge does not try to save a nonexistent draft
+    // on app startup.
+    //
+    // **Store-is-None guard**: the binary still does not
+    // instantiate a long-lived `Store` (pre-existing M35 gap), so
+    // every `store.update_draft` call would be a no-op. We
+    // structure the code as if the store WAS wired, so a future
+    // wiring pass needs no changes here. The on-demand
+    // `MaildirStore` construction (mirroring
+    // `write_local_maildir_sent`) does NOT require a long-lived
+    // `Store`, so the Maildir tier works today even without one.
+    let compose_explicit_save_signal = use_memo(move || {
+        let s = app_state.read();
+        (
+            s.compose.explicit_save_counter,
+            s.compose.draft_id.is_some(),
+        )
+    });
+    use_effect(move || {
+        let (counter, has_id) = *compose_explicit_save_signal.read();
+        if counter == 0 || !has_id {
+            // Initial render (counter == 0) or no active draft. The
+            // toolbar chip + Save Draft button are both gated on
+            // `draft_id.is_some()`, so reaching this branch with
+            // counter > 0 + has_id == false is defensive.
+            return;
+        }
+        let mut app_state = app_state;
+        spawn(async move {
+            // Single peek() to extract everything we need. peek does
+            // NOT subscribe, so the spawned task can never re-fire
+            // the parent effect from inside.
+            let (
+                send_state_is_send_pipeline_owned,
+                captured_generation,
+                draft,
+                store,
+                account_config,
+            ) = {
+                let snapshot = app_state.peek();
+
+                // Gemini G5: abort if the send pipeline owns canonical
+                // state. The user clicked Save Draft after clicking
+                // Send (or the Navigate guard fired during a send),
+                // and re-saving would race the send pipeline.
+                let send_state_is_send_pipeline_owned = matches!(
+                    snapshot.compose.send_state,
+                    ComposeSendState::Sending | ComposeSendState::Sent { .. }
+                );
+
+                // Issue 1.8: capture the generation BEFORE writing.
+                // The dispatch back to the handler uses this value
+                // as the "if generation still matches, clear dirty"
+                // guard.
+                let captured_generation = snapshot.compose.save_generation;
+
+                // Resolve the FROM account config so we can derive
+                // the deterministic AccountId AND build the message
+                // body via `build_sent_folder_bytes`.
+                let account_config = snapshot
+                    .accounts
+                    .get(snapshot.compose.from_account_index)
+                    .cloned();
+
+                let draft = match account_config.as_ref() {
+                    Some(cfg) => {
+                        let account_id = account_id_from_email(&cfg.email);
+                        compose_state_to_draft_email(&snapshot.compose, account_id)
+                    }
+                    None => None,
+                };
+
+                let store = snapshot.store.clone();
+
+                (
+                    send_state_is_send_pipeline_owned,
+                    captured_generation,
+                    draft,
+                    store,
+                    account_config,
+                )
+            };
+
+            if send_state_is_send_pipeline_owned {
+                tracing::debug!("explicit save aborted: send_state is Sending/Sent (Gemini G5)");
+                return;
+            }
+            let Some(draft) = draft else {
+                tracing::warn!("explicit save: no FROM account or no draft_id, skipping save");
+                // Dispatch the committed message anyway so the dirty
+                // flag can be cleared if generation matches — there
+                // is nothing to persist but we do not want the bridge
+                // to keep firing on subsequent counter bumps.
+                app_state
+                    .write()
+                    .update(Message::ComposeSaveDraftCommitted {
+                        generation: captured_generation,
+                    });
+                return;
+            };
+
+            // -- Tier 1: SQLite write. Gated behind cfg(not(test))
+            //    per the M34 side-effects-in-tests precedent.
+            //    Overnight test runs must never write to the user's
+            //    real SQLite store.
+            #[cfg(not(test))]
+            if let Some(store) = store.as_ref() {
+                match store.update_draft(&draft) {
+                    Ok(()) => {
+                        tracing::debug!(
+                            draft_id = %draft.id,
+                            "explicit save: update_draft ok"
+                        );
+                    }
+                    Err(inboxly_store::StoreError::NotFound(_)) => {
+                        // First save of a brand-new draft (the
+                        // auto-save bridge has not run yet). Insert
+                        // rather than update.
+                        match store.insert_draft(&draft) {
+                            Ok(()) => {
+                                tracing::debug!(
+                                    draft_id = %draft.id,
+                                    "explicit save: insert_draft ok"
+                                );
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    draft_id = %draft.id,
+                                    error = %e,
+                                    "explicit save: insert_draft failed"
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            draft_id = %draft.id,
+                            error = %e,
+                            "explicit save: update_draft failed"
+                        );
+                    }
+                }
+            }
+            #[cfg(test)]
+            {
+                let _ = store.as_ref(); // silence unused under cfg(test)
+                tracing::debug!(
+                    draft_id = %draft.id,
+                    "explicit save: SQLite write skipped in test mode"
+                );
+            }
+
+            // -- Tier 2: Maildir `.Drafts/` write. Gated behind
+            //    cfg(not(test)) for the same reason.
+            #[cfg(not(test))]
+            if let Some(cfg) = account_config.as_ref() {
+                let drafts_account_id = account_id_from_email(&cfg.email);
+                write_local_maildir_drafts(cfg, &draft, drafts_account_id);
+            }
+            #[cfg(test)]
+            {
+                let _ = account_config.as_ref(); // silence unused under cfg(test)
+            }
+
+            // -- Tier 3 (deferred): enqueue an
+            //    OfflineAction::AppendDraft so the next sync's
+            //    replay loop can `APPEND` to the server's Drafts
+            //    folder. The replay handler is a warn-and-skip stub
+            //    in M36 Phase 5; a future phase will wire the real
+            //    `APPEND` (the Phase 4 AppendSent arm is the
+            //    template).
+            #[cfg(not(test))]
+            if let Some(store) = store.as_ref()
+                && let Some(cfg) = account_config.as_ref()
+            {
+                let queue_action = inboxly_core::OfflineAction::AppendDraft {
+                    account_id: cfg.email.clone(),
+                    draft_message_id: draft.message_id.clone(),
+                };
+                match serde_json::to_string(&queue_action) {
+                    Ok(payload) => {
+                        if let Err(e) =
+                            store.enqueue_offline_action(queue_action.variant_name(), &payload)
+                        {
+                            tracing::warn!(
+                                error = %e,
+                                "failed to enqueue AppendDraft offline action"
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            "failed to serialize AppendDraft offline action"
+                        );
+                    }
+                }
+            }
+
+            // Dispatch the committed message — the handler clears
+            // dirty IFF the captured generation still matches
+            // (Issue 1.8 stale-result guard). If the user typed
+            // during the save, the generation will have advanced
+            // and dirty stays true so the next save (auto or
+            // explicit) re-runs.
+            app_state
+                .write()
+                .update(Message::ComposeSaveDraftCommitted {
+                    generation: captured_generation,
+                });
         });
     });
 
