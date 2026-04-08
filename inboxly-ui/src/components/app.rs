@@ -1219,8 +1219,41 @@ pub fn App() -> Element {
                 return;
             }
 
-            let new_state =
-                compose_state_from_original(&original, mode, &user_email, account_index);
+            let mut new_state =
+                compose_state_from_original(&original, mode.clone(), &user_email, account_index);
+
+            // M36 Phase 9: forward attachment passthrough.
+            //
+            // For Forward mode only, copy the original email's
+            // attachments into the new draft's per-draft directory so
+            // they travel with the forwarded message. The bridge runs
+            // on Dioxus's local executor; the extractor is sync
+            // filesystem I/O (read .eml + write per-attachment files)
+            // and briefly blocks the executor — acceptable for M36
+            // (~200-500 ms for a ~20 MB attachment). See
+            // `forward_attachments` module docs for the post-M36
+            // streaming TODO.
+            //
+            // Fail-soft: if extraction errors at the top level, log a
+            // warning and proceed with no attachments. Per-attachment
+            // failures are already swallowed inside the extractor.
+            if matches!(mode, ComposeMode::Forward { .. })
+                && let Some(ref draft_id) = new_state.draft_id
+            {
+                let eml_path = std::path::Path::new(&original.row.maildir_path);
+                match inboxly_store::extract_forward_attachments(eml_path, draft_id) {
+                    Ok(attachments) => {
+                        new_state.attachments =
+                            attachments.into_iter().map(std::sync::Arc::new).collect();
+                    }
+                    Err(e) => tracing::warn!(
+                        draft_id = %draft_id,
+                        error = %e,
+                        "forward_extract failed, Forward draft opened without attachments"
+                    ),
+                }
+            }
+
             app_state.write().update(Message::ComposeReplyReady {
                 state: Box::new(new_state),
             });
