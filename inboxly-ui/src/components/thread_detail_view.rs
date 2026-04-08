@@ -63,7 +63,18 @@ pub fn ThreadDetailView() -> Element {
                     // increment), not a deep clone of the body bytes.
                     // The Arc::clone makes the cheapness explicit at
                     // the call site so future readers don't worry.
-                    ThreadMessage { message: Arc::clone(message) }
+                    //
+                    // M36 phase 10: pass the parent thread id alongside
+                    // the message so the new Reply / Reply All / Forward
+                    // buttons in `ThreadMessage` can dispatch
+                    // `Message::OpenComposeReply` with the right
+                    // outer envelope. The clone is one short String
+                    // per message — cheap and avoids threading another
+                    // Arc layer through the prop.
+                    ThreadMessage {
+                        thread_id: thread.thread_id.clone(),
+                        message: Arc::clone(message),
+                    }
                 }
             }
         }
