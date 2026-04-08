@@ -27,6 +27,7 @@ uuid = { version = "1", features = ["v4", "v5", "serde"] }
 tokio = { version = "1", features = ["full"] }
 dioxus = { version = "0.7", features = ["desktop"] }
 ammonia = "4"
+keyring = { version = "3", default-features = false, features = ["linux-native-sync-persistent"] }
 open = "5"
 url = "2"
 lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "smtp-transport", "builder", "tracing"] }
