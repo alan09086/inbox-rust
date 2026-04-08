@@ -21,6 +21,16 @@ use std::sync::Arc;
 use inboxly_core::{AttachmentDraft, ComposeMode, Contact};
 
 /// State backing the compose view.
+///
+/// `Debug` + `Clone` are required because [`crate::app::Message`] derives
+/// both, and the M36 Phase 8 [`crate::app::Message::ComposeReplyReady`]
+/// variant carries `Box<ComposeState>` (boxed to keep the enum variant
+/// size below clippy's `large_enum_variant` 200-byte threshold). Cloning
+/// is cheap relative to the field count: every `Vec` field holds
+/// `Arc`-wrapped contents (`Arc<Contact>`, `Arc<AttachmentDraft>`), so a
+/// `ComposeState::clone` is mostly refcount bumps plus a handful of
+/// `String::clone` calls.
+#[derive(Debug, Clone)]
 pub struct ComposeState {
     /// UUID of the in-progress draft. Set by `OpenCompose` (eager — Gemini
     /// G4) so the per-draft attachment directory can be created before the
@@ -110,6 +120,34 @@ pub struct ComposeState {
     /// initial render so the dialog does not pop on app start.
     pub attach_picker_counter: u64,
 
+    // -- Reply prefill two-step dispatch (M36 Phase 8) --
+    /// Sentinel set by [`crate::app::Message::OpenComposeReply`] to ask
+    /// the reply-prefill bridge in `inboxly-ui::components::app` to
+    /// load the original message and build a Reply/ReplyAll/Forward
+    /// `ComposeState`. The bridge watches a `use_memo` over this field;
+    /// when it transitions from `None` to `Some`, the bridge spawns a
+    /// task that calls `ThreadReader::load_email`, then dispatches
+    /// [`crate::app::Message::ComposeReplyReady`] (success) or
+    /// [`crate::app::Message::ComposeReplyFailed`] (error). Both
+    /// terminal handlers clear this field back to `None`.
+    ///
+    /// Two-step dispatch is required because the click handler runs
+    /// inside the synchronous `Inboxly::update` loop, which cannot call
+    /// the `!Send + !Sync` `ThreadReader` (which holds a SQLite
+    /// connection) without blocking the event loop on disk I/O — and
+    /// because `Inboxly` itself does not own a `ThreadReader` handle in
+    /// every test fixture. The bridge picks the handle up via
+    /// `use_context` / `peek` at task spawn time.
+    pub pending_reply: Option<(String, inboxly_core::ComposeMode)>,
+
+    /// True while the reply-prefill task is running. Set synchronously
+    /// by [`crate::app::Message::OpenComposeReply`] alongside
+    /// `pending_reply`, cleared by both
+    /// [`crate::app::Message::ComposeReplyReady`] and
+    /// [`crate::app::Message::ComposeReplyFailed`]. Used by the compose
+    /// view (Phase 11+) to render a "Loading original..." sentinel.
+    pub loading_reply: bool,
+
     // -- Explicit save bridge trigger (M36 Phase 5) --
     /// Counter bumped by [`crate::app::Message::ComposeSaveDraft`] (the
     /// "Save Draft" button) and by the `Navigate` handler when it
@@ -187,6 +225,8 @@ impl ComposeState {
             send_state: ComposeSendState::Idle,
             attach_picker_counter: 0,
             explicit_save_counter: 0,
+            pending_reply: None,
+            loading_reply: false,
         }
     }
 

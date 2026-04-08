@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use dioxus::prelude::*;
-use inboxly_core::AuthMethod;
+use inboxly_core::{AuthMethod, ComposeMode};
 
 use crate::startup::OAuth2Contexts;
 
@@ -112,10 +112,6 @@ pub(crate) fn compose_state_to_draft_email(
 /// so this helper centralises the conversion. An absent display name
 /// becomes the empty string — the `Contact::Display` impl already handles
 /// that gracefully ("addr@host" rather than " <addr@host>").
-// Dead-code allow: only the Phase 7 unit tests call this. The Phase 8
-// `OpenComposeReply` handler will wire it into the dispatch path; until
-// then the symbol is unused outside `#[cfg(test)]`.
-#[allow(dead_code)]
 pub(crate) fn sender_contact_from_row(row: &inboxly_store::EmailRow) -> inboxly_core::Contact {
     inboxly_core::Contact {
         name: row.from_name.clone().unwrap_or_default(),
@@ -132,8 +128,6 @@ pub(crate) fn sender_contact_from_row(row: &inboxly_store::EmailRow) -> inboxly_
 /// quote-formatting helpers in `inboxly_core::reply` accept any string
 /// for `date_formatted`, so an empty value just produces an attribution
 /// line of the form `"On , Alice <…> wrote:"` rather than panicking.
-// Dead-code allow: see `sender_contact_from_row` — Phase 8 wires it up.
-#[allow(dead_code)]
 fn format_email_row_date(row: &inboxly_store::EmailRow) -> String {
     chrono::DateTime::from_timestamp(row.date, 0)
         .map(|dt| dt.format("%a, %-d %b %Y at %H:%M").to_string())
@@ -149,8 +143,6 @@ fn format_email_row_date(row: &inboxly_store::EmailRow) -> String {
 ///
 /// The Phase 8 dispatch handler will gate on `body_downloaded` and
 /// trigger a body fetch if needed; Phase 7 just renders what's there.
-// Dead-code allow: see `sender_contact_from_row` — Phase 8 wires it up.
-#[allow(dead_code)]
 fn extract_body_text(original: &inboxly_store::thread_reader::LoadedEmail) -> String {
     original
         .content
@@ -165,8 +157,6 @@ fn extract_body_text(original: &inboxly_store::thread_reader::LoadedEmail) -> St
 /// Returns an empty vector on parse failure rather than propagating the
 /// error: a malformed contact list is logged at the storage layer and
 /// should not block the user from composing a reply.
-// Dead-code allow: see `sender_contact_from_row` — Phase 8 wires it up.
-#[allow(dead_code)]
 fn parse_contact_json(json: &str) -> Vec<inboxly_core::Contact> {
     serde_json::from_str(json).unwrap_or_default()
 }
@@ -179,8 +169,6 @@ fn parse_contact_json(json: &str) -> Vec<inboxly_core::Contact> {
 /// `inboxly-store/src/threading/headers.rs::threading_headers_from_fields`).
 /// The reply builder wants a flat space-joined string. Returns `None`
 /// when the column is `None` or parses to an empty array.
-// Dead-code allow: see `sender_contact_from_row` — Phase 8 wires it up.
-#[allow(dead_code)]
 fn parent_references_chain(references_json: Option<&str>) -> Option<String> {
     let json = references_json?;
     let parsed: Vec<String> = serde_json::from_str(json).ok()?;
@@ -208,8 +196,6 @@ fn parent_references_chain(references_json: Option<&str>) -> Option<String> {
 /// dispatcher branches on the mode after calling this helper because
 /// Reply uses `[original.from]` while ReplyAll consults
 /// [`inboxly_core::reply::reply_all_recipients`].
-// Dead-code allow: see `sender_contact_from_row` — Phase 8 wires it up.
-#[allow(dead_code)]
 pub(crate) fn apply_reply_headers(
     state: &mut ComposeState,
     original: &inboxly_store::thread_reader::LoadedEmail,
@@ -248,8 +234,6 @@ pub(crate) fn apply_reply_headers(
 /// dispatcher leaves `to` / `cc` empty for the user to fill, and
 /// Phase 9's streaming attachment extractor will populate the
 /// `attachments` field on top of this state.
-// Dead-code allow: see `sender_contact_from_row` — Phase 8 wires it up.
-#[allow(dead_code)]
 pub(crate) fn apply_forward_headers(
     state: &mut ComposeState,
     original: &inboxly_store::thread_reader::LoadedEmail,
@@ -311,10 +295,6 @@ pub(crate) fn apply_forward_headers(
 /// In debug builds, panics if `mode` is [`ComposeMode::New`]. Use
 /// [`crate::app::Message::OpenCompose`] for fresh compose flows; this
 /// helper is exclusively for Reply/ReplyAll/Forward.
-// Dead-code allow: see `sender_contact_from_row` — the Phase 8
-// `OpenComposeReply` handler will be the production caller. Until then
-// the symbol lives only in the Phase 7 unit tests.
-#[allow(dead_code)]
 pub(crate) fn compose_state_from_original(
     original: &inboxly_store::thread_reader::LoadedEmail,
     mode: inboxly_core::ComposeMode,
@@ -1081,6 +1061,170 @@ pub fn App() -> Element {
                 open_thread.set(None);
             }
         }
+    });
+
+    // ===== M36 Phase 8: Reply / Forward prefill bridge =====
+    //
+    // Mirrors the M34 thread loader pattern at lines 998-1084 above.
+    // Watches `compose.pending_reply`. When it transitions from `None`
+    // to `Some((thread_id, mode))`, spawns a Dioxus-local task that:
+    //
+    //   1. Snapshots `app_state.peek()` to grab the live
+    //      `thread_reader` handle, the active account index, and the
+    //      active account email. Drops the borrow before any work to
+    //      keep `Inboxly` writable for the dispatched messages below.
+    //   2. If `thread_reader` is `None` (the binary still doesn't
+    //      wire one — pre-existing M35 gap), dispatches
+    //      `ComposeReplyFailed` and returns. The user sees the
+    //      tracing warning; future work will land a real handle.
+    //   3. Extracts the `original_email_id` from the `ComposeMode`
+    //      enum (every reply variant carries the field).
+    //   4. Calls `reader.load_email(...)`. On `BodyNotDownloaded`,
+    //      dispatches `ComposeReplyFailed` with a "wait for sync"
+    //      reason (G3 fallback path; a future post-M36 phase will
+    //      kick a real body fetch off here). On other store errors,
+    //      dispatches `ComposeReplyFailed` with the error string.
+    //   5. On success, calls
+    //      `compose_state_from_original(&original, mode, user_email,
+    //      account_index)` to build the prefilled `ComposeState` and
+    //      dispatches `Message::ComposeReplyReady { state: Box::new }`.
+    //
+    // **Threading note:** `ThreadReader` is `!Send + !Sync` (it owns a
+    // rusqlite Connection). The Dioxus desktop runtime is
+    // single-threaded so the `spawn` future runs on the local
+    // executor — passing the `Arc<ThreadReader>` across the await
+    // boundary inside that task is fine. Do NOT switch this to
+    // `tokio::spawn`; it will fail to compile.
+    //
+    // **Stale-result guard (mirrors thread loader Issue F-1):** the
+    // task captures the `pending_reply` tuple at spawn time. Before
+    // dispatching `ComposeReplyReady`, it re-peeks `compose.pending_reply`
+    // and verifies it still matches; if the user has dispatched a
+    // second `OpenComposeReply` (or any other compose action) in the
+    // meantime, the older result is dropped instead of clobbering the
+    // newer state.
+    //
+    // **Initial-render guard:** unlike the auto-save and explicit-save
+    // bridges (which use a counter and skip the initial render), this
+    // bridge keys on `Option` transitions. The default state has
+    // `pending_reply = None` so the initial render is naturally a
+    // no-op until the user clicks Reply.
+    let pending_reply_signal = use_memo(move || app_state.read().compose.pending_reply.clone());
+    use_effect(move || {
+        let pending = pending_reply_signal.read().clone();
+        let Some((thread_id, mode)) = pending else {
+            // None → nothing to do (initial render or post-completion).
+            return;
+        };
+
+        // Snapshot the live state before spawning. peek() does NOT
+        // subscribe — we don't want this effect to re-fire on every
+        // unrelated Inboxly write.
+        let snapshot = app_state.peek();
+        let reader_opt = snapshot.thread_reader.clone();
+        let account_index = snapshot.active_account_index;
+        let user_email = snapshot
+            .accounts
+            .get(account_index)
+            .map(|a| a.email.clone())
+            .unwrap_or_default();
+        drop(snapshot);
+
+        spawn(async move {
+            // Shadow as `mut` so the dispatch path can call
+            // `.write()` (mirrors the M35 send pipeline + auto-save
+            // bridges; `Signal` is `Copy` so this is just a binding
+            // mode change, not a clone).
+            let mut app_state = app_state;
+            let Some(reader) = reader_opt else {
+                tracing::warn!(
+                    thread_id = %thread_id,
+                    "ComposeReply prefill: no thread_reader wired (M35 pre-existing gap)"
+                );
+                app_state.write().update(Message::ComposeReplyFailed {
+                    reason: "thread reader not wired — sync path is post-M36 scope".to_string(),
+                });
+                return;
+            };
+
+            // Every reply variant of ComposeMode carries
+            // `original_email_id`. The `New` variant is unreachable
+            // here because `OpenComposeReply` only dispatches reply
+            // modes — but we handle it defensively.
+            let original_email_id: String = match &mode {
+                ComposeMode::Reply {
+                    original_email_id, ..
+                }
+                | ComposeMode::ReplyAll {
+                    original_email_id, ..
+                }
+                | ComposeMode::Forward {
+                    original_email_id, ..
+                } => original_email_id.0.clone(),
+                ComposeMode::New => {
+                    tracing::error!(
+                        "ComposeReply prefill bridge dispatched with ComposeMode::New — \
+                         this is a logic bug in OpenComposeReply"
+                    );
+                    app_state.write().update(Message::ComposeReplyFailed {
+                        reason: "internal: New mode dispatched to reply bridge".to_string(),
+                    });
+                    return;
+                }
+            };
+
+            let original = match reader.load_email(&original_email_id) {
+                Ok(loaded) => loaded,
+                Err(inboxly_store::thread_reader::ThreadReaderError::BodyNotDownloaded {
+                    email_id,
+                }) => {
+                    tracing::warn!(
+                        email_id = %email_id,
+                        thread_id = %thread_id,
+                        "ComposeReply prefill: body not downloaded — \
+                         deferring to (post-M36) on-demand body fetch"
+                    );
+                    app_state.write().update(Message::ComposeReplyFailed {
+                        reason: "body not downloaded — wait for sync to fetch the original"
+                            .to_string(),
+                    });
+                    return;
+                }
+                Err(inboxly_store::thread_reader::ThreadReaderError::Store(e)) => {
+                    tracing::warn!(
+                        email_id = %original_email_id,
+                        error = %e,
+                        "ComposeReply prefill: store error loading original"
+                    );
+                    app_state.write().update(Message::ComposeReplyFailed {
+                        reason: format!("failed to load original: {e}"),
+                    });
+                    return;
+                }
+            };
+
+            // Stale-result guard: if pending_reply changed under us
+            // (user clicked another Reply, or dispatched
+            // CloseCompose), drop this result instead of clobbering
+            // the newer state.
+            let still_current = matches!(
+                app_state.peek().compose.pending_reply.as_ref(),
+                Some((tid, _)) if tid == &thread_id
+            );
+            if !still_current {
+                tracing::debug!(
+                    thread_id = %thread_id,
+                    "ComposeReply prefill: dropping stale result (pending_reply changed)"
+                );
+                return;
+            }
+
+            let new_state =
+                compose_state_from_original(&original, mode, &user_email, account_index);
+            app_state.write().update(Message::ComposeReplyReady {
+                state: Box::new(new_state),
+            });
+        });
     });
 
     // ===== M35 Phase 10: Compose auto-save bridge =====

@@ -385,13 +385,57 @@ pub enum Message {
         /// [`crate::state::ComposeState::draft_id`]).
         draft_id: String,
     },
-    /// M36 placeholder — open compose in reply mode. Logs a warning in
-    /// M35b and otherwise does nothing.
+    /// **M36 Phase 8**: open compose in reply / reply-all / forward
+    /// mode. The handler sets `compose.loading_reply = true` and
+    /// `compose.pending_reply = Some((thread_id, mode))` synchronously,
+    /// then returns. The reply-prefill bridge in
+    /// `inboxly-ui::components::app` watches `compose.pending_reply`,
+    /// loads the original message via
+    /// [`inboxly_store::thread_reader::ThreadReader::load_email`],
+    /// builds a fully-prefilled `ComposeState` via
+    /// [`crate::components::app::compose_state_from_original`], and
+    /// dispatches [`Message::ComposeReplyReady`] (success) or
+    /// [`Message::ComposeReplyFailed`] (error). Two-step dispatch lets
+    /// the click handler return immediately even though the SQLite +
+    /// disk reads are synchronous.
     OpenComposeReply {
-        /// Thread ID being replied to.
+        /// Thread ID being replied to (carried so the bridge / future
+        /// telemetry can correlate the prefill with the originating
+        /// thread without re-deriving from the mode).
         thread_id: String,
-        /// Reply mode (Reply, ReplyAll, Forward).
+        /// Reply mode (Reply, ReplyAll, Forward). Carries the
+        /// `original_email_id` the bridge passes to
+        /// `ThreadReader::load_email`.
         mode: ComposeMode,
+    },
+    /// **M36 Phase 8**: dispatched by the reply-prefill bridge after it
+    /// has loaded the original and built a fully-populated
+    /// `ComposeState`. The handler commits the state, transitions
+    /// `active_view` to `Compose`, and clears the
+    /// `loading_reply` / `pending_reply` sentinels.
+    ///
+    /// `state` is `Box<ComposeState>` rather than `ComposeState` to
+    /// keep the `Message` enum variant size below clippy's
+    /// `large_enum_variant` 200-byte threshold — `ComposeState` carries
+    /// several `Vec` and `Option<String>` fields and weighs in around
+    /// 500 bytes when populated.
+    ComposeReplyReady {
+        /// Fully-prefilled compose state to commit. The handler moves
+        /// it into `self.compose` via deref-move.
+        state: Box<ComposeState>,
+    },
+    /// **M36 Phase 8**: dispatched by the reply-prefill bridge when
+    /// `ThreadReader::load_email` fails (row missing, body not
+    /// downloaded, no thread reader wired). The handler logs the
+    /// reason at `warn!`, clears the `loading_reply` / `pending_reply`
+    /// sentinels, and leaves `active_view` unchanged so the user stays
+    /// on whatever screen they were on. A future Phase 11 surface
+    /// element can render the reason to the user; for Phase 8 the
+    /// `tracing::warn!` is the only visible failure indicator.
+    ComposeReplyFailed {
+        /// Human-readable failure reason. Already redacted of any
+        /// sensitive content (no email bodies, no addresses).
+        reason: String,
     },
     /// Close the compose view without sending. Restores `previous_view`
     /// as `active_view` and leaves the compose state intact.
@@ -1647,9 +1691,64 @@ impl Inboxly {
                 self.compose.from_account_index = self.active_account_index;
             }
             Message::OpenComposeReply { thread_id, mode } => {
-                tracing::warn!(
-                    "OpenComposeReply is M36 territory -- not implemented in M35b (thread_id={thread_id}, mode={mode:?})"
+                // M36 Phase 8 — two-step dispatch.
+                //
+                // Step 1 (this handler, synchronous): set the
+                // `loading_reply` + `pending_reply` sentinels and
+                // return. The handler does NOT mutate `active_view`,
+                // does NOT touch the existing `compose.subject` /
+                // body, and does NOT call into the store. All of that
+                // happens in Step 2.
+                //
+                // Step 2 (the reply-prefill bridge in
+                // `components::app`, asynchronous): observe the
+                // `pending_reply` transition via `use_memo`, spawn a
+                // local task that calls `ThreadReader::load_email`,
+                // build a fully-populated ComposeState via
+                // `compose_state_from_original`, and dispatch
+                // `Message::ComposeReplyReady` (success) or
+                // `Message::ComposeReplyFailed` (error).
+                //
+                // Why two-step instead of doing the work here:
+                //   - `ThreadReader` is `!Send + !Sync` (it owns a
+                //     rusqlite Connection) so it cannot be moved into
+                //     a Tokio task; only Dioxus's local executor will
+                //     accept it. The handler runs inside the
+                //     `Inboxly::update` closure which is the same
+                //     reactive write — running disk I/O here would
+                //     block the click event.
+                //   - `Inboxly` itself does NOT own a `ThreadReader`
+                //     handle in every test fixture (M34 left it as
+                //     `Option` and the field is `None` in tests). The
+                //     bridge picks the handle up via the live signal,
+                //     not via `Inboxly::thread_reader`.
+                tracing::debug!(
+                    thread_id = %thread_id,
+                    "OpenComposeReply: setting pending_reply sentinel for bridge"
                 );
+                self.compose.loading_reply = true;
+                self.compose.pending_reply = Some((thread_id, mode));
+            }
+            Message::ComposeReplyReady { state } => {
+                // Box<ComposeState> deref-move: the unsized box drops
+                // its allocation, the inner state moves onto the
+                // stack and then into self.compose.
+                self.compose = *state;
+                self.compose.loading_reply = false;
+                self.compose.pending_reply = None;
+                self.previous_view = self.active_view;
+                self.active_view = ActiveView::Compose;
+                self.active_nav = NavTarget::View(ActiveView::Compose);
+            }
+            Message::ComposeReplyFailed { reason } => {
+                tracing::warn!(reason = %reason, "OpenComposeReply prefill failed: {reason}");
+                self.compose.loading_reply = false;
+                self.compose.pending_reply = None;
+                // Intentionally leave `active_view` and the rest of
+                // `self.compose` untouched: the user stays on whatever
+                // screen they were on (typically the thread detail),
+                // and any pre-existing draft they were working on is
+                // not clobbered.
             }
             Message::CloseCompose => {
                 // Note: compose state is NOT cleared. If the user reopens
@@ -3829,6 +3928,197 @@ mod tests {
             app.compose.body_markdown, "body content",
             "ResumeCompose with the active draft_id must NOT clobber the in-memory body"
         );
+    }
+
+    // -----------------------------------------------------------------
+    // M36 Phase 8: OpenComposeReply two-step dispatch
+    // -----------------------------------------------------------------
+
+    /// `OpenComposeReply` is the synchronous half of the two-step
+    /// dispatch. It MUST set `loading_reply = true` + `pending_reply =
+    /// Some((thread_id, mode))` and MUST NOT touch `active_view`,
+    /// `compose.subject`, etc. — that work belongs to the bridge in
+    /// `components::app` and the [`Message::ComposeReplyReady`] /
+    /// [`Message::ComposeReplyFailed`] terminal handlers.
+    #[test]
+    fn open_compose_reply_sets_loading_sentinel_and_pending_reply() {
+        use inboxly_core::id::{EmailId, ThreadId};
+
+        let mut app = Inboxly::default();
+        app.accounts = vec![test_account("alan@example.com")];
+        let view_before = app.active_view;
+        let subject_before = app.compose.subject.clone();
+        assert!(!app.compose.loading_reply);
+        assert!(app.compose.pending_reply.is_none());
+
+        let mode = ComposeMode::Reply {
+            thread_id: ThreadId::new(),
+            original_email_id: EmailId::new("<msg-1@example.com>"),
+        };
+        let _ = app.update(Message::OpenComposeReply {
+            thread_id: "thread-abc".to_string(),
+            mode: mode.clone(),
+        });
+
+        assert!(
+            app.compose.loading_reply,
+            "OpenComposeReply must set loading_reply"
+        );
+        let pending = app
+            .compose
+            .pending_reply
+            .as_ref()
+            .expect("pending_reply must be Some after OpenComposeReply");
+        assert_eq!(pending.0, "thread-abc");
+        assert_eq!(pending.1, mode);
+        assert_eq!(
+            app.active_view, view_before,
+            "OpenComposeReply must NOT transition active_view (the bridge does)"
+        );
+        assert_eq!(
+            app.compose.subject, subject_before,
+            "OpenComposeReply must NOT touch the in-memory compose subject"
+        );
+    }
+
+    /// `ComposeReplyReady` is the success terminal of the two-step
+    /// dispatch. It MUST move the boxed prefilled state into
+    /// `self.compose`, clear the loading sentinels, and transition
+    /// `active_view` to `Compose`.
+    #[test]
+    fn compose_reply_ready_commits_state_and_transitions_view() {
+        let mut app = Inboxly::default();
+        app.accounts = vec![test_account("alan@example.com")];
+        // Stage a fake "loading" state the same way OpenComposeReply
+        // would have done.
+        app.compose.loading_reply = true;
+        app.compose.pending_reply = Some((
+            "thread-xyz".to_string(),
+            ComposeMode::Reply {
+                thread_id: inboxly_core::id::ThreadId::new(),
+                original_email_id: inboxly_core::id::EmailId::new("<m@x>"),
+            },
+        ));
+        let view_before = app.active_view;
+
+        // Build a prefilled ComposeState the way the bridge would.
+        let mut prefilled = ComposeState::new();
+        prefilled.draft_id = Some("draft-uuid".to_string());
+        prefilled.subject = "Re: hello".to_string();
+        prefilled.body_markdown = "\n\nOn Thu, Alice wrote:\n> hi".to_string();
+        prefilled.to = vec![Arc::new(Contact::new("Alice", "alice@example.com"))];
+
+        let _ = app.update(Message::ComposeReplyReady {
+            state: Box::new(prefilled),
+        });
+
+        assert_eq!(app.compose.subject, "Re: hello");
+        assert_eq!(app.compose.draft_id.as_deref(), Some("draft-uuid"));
+        assert_eq!(app.compose.to.len(), 1);
+        assert!(
+            !app.compose.loading_reply,
+            "ComposeReplyReady must clear loading_reply"
+        );
+        assert!(
+            app.compose.pending_reply.is_none(),
+            "ComposeReplyReady must clear pending_reply"
+        );
+        assert_eq!(app.active_view, ActiveView::Compose);
+        assert_eq!(app.previous_view, view_before);
+    }
+
+    /// `ComposeReplyFailed` is the error terminal of the two-step
+    /// dispatch. It MUST clear the loading sentinels and MUST NOT
+    /// touch `active_view` (the user stays on whatever screen they
+    /// were on, typically the thread detail). Pre-existing compose
+    /// state is left intact so a draft the user was working on is
+    /// not clobbered by a failed reply prefill.
+    #[test]
+    fn compose_reply_failed_clears_sentinel_and_keeps_view() {
+        let mut app = Inboxly::default();
+        app.accounts = vec![test_account("alan@example.com")];
+        // Stage a fake in-flight reply prefill on top of an
+        // existing dirty draft.
+        let _ = app.update(Message::OpenCompose);
+        let _ = app.update(Message::ComposeSubjectChanged("WIP draft".to_string()));
+        let draft_id_before = app.compose.draft_id.clone();
+        app.compose.loading_reply = true;
+        app.compose.pending_reply = Some((
+            "thread-fail".to_string(),
+            ComposeMode::Reply {
+                thread_id: inboxly_core::id::ThreadId::new(),
+                original_email_id: inboxly_core::id::EmailId::new("<m@x>"),
+            },
+        ));
+        let view_before = app.active_view;
+
+        let _ = app.update(Message::ComposeReplyFailed {
+            reason: "body not downloaded — wait for sync".to_string(),
+        });
+
+        assert!(
+            !app.compose.loading_reply,
+            "ComposeReplyFailed must clear loading_reply"
+        );
+        assert!(
+            app.compose.pending_reply.is_none(),
+            "ComposeReplyFailed must clear pending_reply"
+        );
+        assert_eq!(
+            app.active_view, view_before,
+            "ComposeReplyFailed must NOT transition active_view"
+        );
+        assert_eq!(
+            app.compose.subject, "WIP draft",
+            "ComposeReplyFailed must NOT clobber the in-progress draft subject"
+        );
+        assert_eq!(
+            app.compose.draft_id, draft_id_before,
+            "ComposeReplyFailed must NOT clobber the in-progress draft_id"
+        );
+    }
+
+    /// Round-trip: an `OpenComposeReply` followed by a
+    /// `ComposeReplyReady` ends in the Compose view with the prefilled
+    /// state and both sentinels cleared. Exercises the full
+    /// state-machine path the bridge would drive in production.
+    #[test]
+    fn open_compose_reply_then_ready_round_trip() {
+        use inboxly_core::id::{EmailId, ThreadId};
+
+        let mut app = Inboxly::default();
+        app.accounts = vec![test_account("alan@example.com")];
+
+        // Step 1: click Reply.
+        let _ = app.update(Message::OpenComposeReply {
+            thread_id: "t1".to_string(),
+            mode: ComposeMode::ReplyAll {
+                thread_id: ThreadId::new(),
+                original_email_id: EmailId::new("<orig@example.com>"),
+            },
+        });
+        assert!(app.compose.loading_reply);
+        assert!(app.compose.pending_reply.is_some());
+        // Crucially, we are NOT yet in the Compose view.
+        assert_ne!(app.active_view, ActiveView::Compose);
+
+        // Step 2: bridge dispatches Ready with a prefilled state.
+        let mut prefilled = ComposeState::new();
+        prefilled.draft_id = Some("uuid".to_string());
+        prefilled.subject = "Re: round trip".to_string();
+        prefilled.to = vec![
+            Arc::new(Contact::new("Alice", "alice@example.com")),
+            Arc::new(Contact::new("Bob", "bob@example.com")),
+        ];
+        let _ = app.update(Message::ComposeReplyReady {
+            state: Box::new(prefilled),
+        });
+
+        assert_eq!(app.active_view, ActiveView::Compose);
+        assert_eq!(app.compose.subject, "Re: round trip");
+        assert_eq!(app.compose.to.len(), 2);
+        assert!(!app.compose.loading_reply);
+        assert!(app.compose.pending_reply.is_none());
     }
 
     /// **C2 from eng review**: integration test that exercises the
