@@ -143,9 +143,36 @@ Requires Rust edition 2024 (rustc 1.85+).
 | M33 | v0.33.0 | 242 | 📥 Inbox feed + widgets restored on Dioxus |
 | M33.1 | v0.33.1 | 870 | 🔧 Post-M33 polish (window title, dark mode) |
 | M34 | v0.34.0 | 882 | 🧵 Thread detail view + HTML email rendering |
-| **M34.1** | **v0.34.1** | **884** | **🔧 Post-M34 polish (test side effect, validate_external_url, Settings re-entry)** |
+| M34.1 | v0.34.1 | 884 | 🔧 Post-M34 polish (test side effect, validate_external_url, Settings re-entry) |
+| M35 | v0.35.0 | 961 | ✉️ SMTP engine + compose view + drafts (M35a refactor + M35b feature work) |
+| **M35.1** | **v0.35.1** | **961** | **🔧 Post-M35 dogfooding polish (inline CSS, 1280×800 default, FAB hide, blur-to-chip)** |
 
-**Current: v0.34.1** — 884 tests, 0 clippy warnings, 8-crate workspace
+**Current: v0.35.1** — 961 tests, 0 clippy warnings, 8-crate workspace
+
+### M35 highlights
+
+M35 closes the read/write loop. After M34 users could read email via the
+thread detail view; after M35 they can write it too. The milestone shipped
+in two sub-milestones:
+
+- **M35a** — behaviour-preserving god-object refactor (31 flat fields on
+  `Inboxly` extracted into `SettingsState`, `MenuState`, `SnoozeState`)
+- **M35b** — 14 phases covering lettre 0.11 API verification, core data
+  types, SQLite drafts table, SMTP transport with dual message builders
+  (Gemini G1 Bcc-not-in-headers invariant), retry logic with PII-redacted
+  logging, IMAP APPEND helpers, sync-side Message-ID dedup (G8), offline
+  replay via a `DraftSender` trait, ComposeState + 23 Message variants,
+  CSS, the ComposeView Dioxus component, FAB wiring, 30 s auto-save
+  bridge, rfd attachment picker, and the send bridge with two-phase
+  commit dismiss overlay (G9) + AppendSent fallback (G6).
+
+Known M35b limitations scheduled for M36: password auth needs
+`INBOXLY_SMTP_PASSWORD` env var (no keyring yet), OAuth2 SMTP send not
+yet wired through the compose bridge, Sent folder IMAP APPEND deferred,
+local Maildir Sent copy not written on send, manual Save Draft button
+is a no-op (auto-save is the only path), `AppendSent` replay handler
+is a warn-and-skip placeholder. See CHANGELOG.md for the full
+phase-by-phase breakdown.
 
 ## 📄 Licence
 
