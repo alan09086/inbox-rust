@@ -145,9 +145,46 @@ Requires Rust edition 2024 (rustc 1.85+).
 | M34 | v0.34.0 | 882 | 🧵 Thread detail view + HTML email rendering |
 | M34.1 | v0.34.1 | 884 | 🔧 Post-M34 polish (test side effect, validate_external_url, Settings re-entry) |
 | M35 | v0.35.0 | 961 | ✉️ SMTP engine + compose view + drafts (M35a refactor + M35b feature work) |
-| **M35.1** | **v0.35.1** | **961** | **🔧 Post-M35 dogfooding polish (inline CSS, 1280×800 default, FAB hide, blur-to-chip)** |
+| M35.1 | v0.35.1 | 961 | 🔧 Post-M35 dogfooding polish (inline CSS, 1280×800 default, FAB hide, blur-to-chip) |
+| **M36** | **v0.36.0** | **1072** | **✉️ Reply/ReplyAll/Forward + M35 cleanup (keyring, OAuth2 persistence, Sent write, explicit save)** |
 
-**Current: v0.35.1** — 961 tests, 0 clippy warnings, 8-crate workspace
+**Current: v0.36.0** — 1072 tests, 0 clippy warnings, 8-crate workspace
+
+### M36 highlights
+
+M36 closes every M35.1 follow-up item and ships the
+Reply / ReplyAll / Forward feature surface on top. Fourteen phases across
+two sub-milestones under a `/plan-eng-review` pass (findings A1-A9) and a
+Gemini outside-voice pass (findings G1-G8):
+
+- **M36a (Phases 0-5)** — M35 cleanup: a real `keyring 3` secrets backend
+  (replaces the `INBOXLY_SMTP_PASSWORD` env var), OAuth2 refresh token
+  persistence with a rotation callback (A3), a local `.Sent/` write on
+  every successful SMTP send + real IMAP `APPEND` via `WellKnownFolders`
+  (A6), and an explicit Save Draft bridge with a three-layer persistence
+  model (in-memory → SQLite → offline queue) plus a Navigate-with-compose
+  auto-save guard (A8). New `inboxly` CLI subcommands: `oauth2-authorize`,
+  `set-password`, `delete-credentials`.
+- **M36b (Phases 6-13)** — Reply feature surface: pure helpers for
+  subject normalization + References chain + Gmail-compatible quote
+  formatting, a `compose_state_from_original` DRY helper + `ComposeMode`
+  dispatch, a real `OpenComposeReply` handler with a body-fetch fallback
+  for header-only local copies (G3) via new `ThreadReader::load_email`,
+  forward attachment passthrough, Reply / ReplyAll / Forward buttons in
+  the thread message footer, an inline compose panel with a layout
+  toggle (Inline ↔ FullScreen), a quoted-original placeholder, and 11
+  end-to-end state-machine integration tests.
+
+**Known runtime gap preserved from M35:** the binary still doesn't
+instantiate `Store` / `MaildirStore` / `ThreadReader` at startup. Phases
+4, 5, and 8 use on-demand `MaildirStore` construction to sidestep this
+for the automated test paths, but clicking Reply in the running binary
+will surface `ComposeReplyFailed { reason: "thread_reader not wired" }`
+until a follow-up wires the data layer. A dedicated **M36.1 polish
+milestone** is scheduled to close this gap. See CHANGELOG.md for the
+full phase-by-phase breakdown and the four documented scope reductions
+(Phase 9 forward streaming, Phase 11 signal split, Phase 12 quoted
+original expansion, Phase 5 IMAP draft replay).
 
 ### M35 highlights
 
@@ -166,12 +203,18 @@ in two sub-milestones:
   bridge, rfd attachment picker, and the send bridge with two-phase
   commit dismiss overlay (G9) + AppendSent fallback (G6).
 
-Known M35b limitations scheduled for M36: password auth needs
-`INBOXLY_SMTP_PASSWORD` env var (no keyring yet), OAuth2 SMTP send not
-yet wired through the compose bridge, Sent folder IMAP APPEND deferred,
-local Maildir Sent copy not written on send, manual Save Draft button
-is a no-op (auto-save is the only path), `AppendSent` replay handler
-is a warn-and-skip placeholder. See CHANGELOG.md for the full
+All six M35b limitations scheduled for M36 were closed in M36a (Phases
+0-5): keyring-backed password secrets replace the `INBOXLY_SMTP_PASSWORD`
+env var, OAuth2 refresh token persistence with rotation callback is live
+end-to-end, `SmtpClient::send()` writes to the local Maildir `.Sent/`
+atomically on every success, the real `AppendSent` replay handler
+resolves the Sent folder via `WellKnownFolders`, the explicit Save Draft
+bridge landed with a three-layer persistence model and a
+Navigate-with-compose auto-save guard, and the toolbar Draft chip shows
+unsaved / saving / saved state. Remaining deferrals after M36 are four
+smaller scope reductions (all `TODO(post-M36)` in-tree): forward
+attachment streaming, compose signal split, quoted-original expanded
+preview, and IMAP APPEND for drafts. See CHANGELOG.md for the full
 phase-by-phase breakdown.
 
 ## 📄 Licence
