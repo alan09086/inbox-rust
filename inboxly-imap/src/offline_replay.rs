@@ -13,7 +13,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex as AsyncMutex;
 
 use inboxly_core::{DraftEmail, OfflineAction};
-use inboxly_store::Store;
+use inboxly_store::{MaildirStore, Store};
 
 use crate::append::imap_append_sent;
 use crate::error::ImapError;
@@ -35,6 +35,13 @@ use crate::smtp::DraftSender;
 /// 12's send bridge will pass `Some(&smtp_sender)` so queued drafts
 /// actually leave the wire.
 ///
+/// `maildir` is the per-account [`MaildirStore`] handle. Phase 3 of M36
+/// only threads it through to [`replay_single_action`]; Phase 4 wires
+/// it into the [`OfflineAction::AppendSent`] arm so that variant can
+/// look up the locally-stored Sent copy by `Message-ID` and replay the
+/// IMAP `APPEND` from those bytes. No action handler reads the handle
+/// in Phase 3.
+///
 /// Returns the count of successfully replayed actions.
 ///
 /// # Errors
@@ -45,6 +52,7 @@ use crate::smtp::DraftSender;
 pub async fn replay_offline_queue<S>(
     session: &Arc<AsyncMutex<Session<S>>>,
     store: &Store,
+    maildir: &Arc<MaildirStore>,
     well_known: &WellKnownFolders,
     draft_sender: Option<&dyn DraftSender>,
 ) -> Result<u64, ImapError>
@@ -84,7 +92,9 @@ where
             }
         };
 
-        match replay_single_action(session, &action, well_known, draft_sender, store).await {
+        match replay_single_action(session, &action, maildir, well_known, draft_sender, store)
+            .await
+        {
             Ok(()) => {
                 store
                     .dequeue_offline_action(row_id)
@@ -113,9 +123,15 @@ where
 }
 
 /// Replay a single offline action against IMAP.
+///
+/// `_maildir` is the per-account [`MaildirStore`] handle threaded through
+/// from [`replay_offline_queue`]. It is unused in Phase 3 — Phase 4 will
+/// wire it into the [`OfflineAction::AppendSent`] arm so that variant can
+/// load the locally-stored Sent copy by `Message-ID` for replay.
 async fn replay_single_action<S>(
     session: &Arc<AsyncMutex<Session<S>>>,
     action: &OfflineAction,
+    _maildir: &Arc<MaildirStore>,
     well_known: &WellKnownFolders,
     draft_sender: Option<&dyn DraftSender>,
     store: &Store,
