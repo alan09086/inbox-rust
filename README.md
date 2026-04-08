@@ -146,9 +146,10 @@ Requires Rust edition 2024 (rustc 1.85+).
 | M34.1 | v0.34.1 | 884 | 🔧 Post-M34 polish (test side effect, validate_external_url, Settings re-entry) |
 | M35 | v0.35.0 | 961 | ✉️ SMTP engine + compose view + drafts (M35a refactor + M35b feature work) |
 | M35.1 | v0.35.1 | 961 | 🔧 Post-M35 dogfooding polish (inline CSS, 1280×800 default, FAB hide, blur-to-chip) |
-| **M36** | **v0.36.0** | **1072** | **✉️ Reply/ReplyAll/Forward + M35 cleanup (keyring, OAuth2 persistence, Sent write, explicit save)** |
+| M36 | v0.36.0 | 1072 | ✉️ Reply/ReplyAll/Forward + M35 cleanup (keyring, OAuth2 persistence, Sent write, explicit save) |
+| **M36.1** | **v0.36.1** | **1076** | **🔧 Data-layer startup wiring — binary now instantiates Store / MaildirStore / ThreadReader** |
 
-**Current: v0.36.0** — 1072 tests, 0 clippy warnings, 8-crate workspace
+**Current: v0.36.1** — 1076 tests, 0 clippy warnings, 8-crate workspace
 
 ### M36 highlights
 
@@ -175,14 +176,22 @@ Gemini outside-voice pass (findings G1-G8):
   toggle (Inline ↔ FullScreen), a quoted-original placeholder, and 11
   end-to-end state-machine integration tests.
 
-**Known runtime gap preserved from M35:** the binary still doesn't
-instantiate `Store` / `MaildirStore` / `ThreadReader` at startup. Phases
-4, 5, and 8 use on-demand `MaildirStore` construction to sidestep this
-for the automated test paths, but clicking Reply in the running binary
-will surface `ComposeReplyFailed { reason: "thread_reader not wired" }`
-until a follow-up wires the data layer. A dedicated **M36.1 polish
-milestone** is scheduled to close this gap. See CHANGELOG.md for the
-full phase-by-phase breakdown and the four documented scope reductions
+**M36.1 patch — data-layer startup wiring (v0.36.1).** The runtime gap
+M36 phase 14 flagged (the binary never instantiating `Store` /
+`MaildirStore` / `ThreadReader`) is **closed as of v0.36.1**. `main()`
+now resolves XDG paths, opens SQLite, initialises per-account Maildir
+stores, and publishes both through new `inboxly-ui::startup::STORE` and
+`MAILDIR_STORES` singletons (gated behind a `MainThreadOnly<T>` Sync
+wrapper because rusqlite's `Connection` is `!Sync`). `App()` reads
+them on first render and builds a `ThreadReader` for the active
+account; `SwitchAccount` reconstructs it on every account change.
+Fail-soft at every step — paths-unresolved, ensure_dirs, Store::open,
+and MaildirStore::init errors all log a warning and leave the binary
+in the pre-patch `None` state instead of crashing. CLI subcommands
+(`--help`, `oauth2-authorize`, `set-password`, `delete-credentials`)
+still short-circuit before any data-layer call, preserving the Gemini
+G6 keyring-free-help invariant. See CHANGELOG.md for the full M36
+phase-by-phase breakdown and the four documented scope reductions
 (Phase 9 forward streaming, Phase 11 signal split, Phase 12 quoted
 original expansion, Phase 5 IMAP draft replay).
 

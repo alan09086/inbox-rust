@@ -2,6 +2,80 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.36.1] - 2026-04-08
+
+### Fixed — M36.1 data-layer startup wiring (closes pre-existing M35 gap)
+
+Patch release that closes the runtime gap M36 phase 14 documented as a
+known limitation: the binary's `main()` never instantiated `Store`,
+`MaildirStore`, or `ThreadReader`, so at runtime every `Inboxly::store`
+and `Inboxly::thread_reader` was `None`. This meant **M35's SQLite
+drafts persistence was silently a no-op in the running binary**
+(auto-save wrote to `None`) and **every click on Reply / ReplyAll /
+Forward in the running binary dispatched `ComposeReplyFailed { reason:
+"thread_reader not wired" }`**. Both subsystems were fully tested in
+`#[cfg(test)]` with in-memory `Store::open_in_memory()` + tempdir
+maildirs, which is why the 1072-test harness was green on v0.36.0.
+
+- **`inboxly::main()`** now calls `Paths::resolve` + `ensure_dirs`,
+  opens `Store::open(paths.database_file())`, and for each configured
+  account constructs a `MaildirStore` at
+  `paths.maildir_root()/<account_id>/mail` and calls `init()` to create
+  the `.Sent/`, `.Drafts/`, `.Trash/`, `.Spam/` subdirectories. The
+  resulting `Arc<Store>` and per-account `Arc<HashMap<String,
+  Arc<MaildirStore>>>` are published into new `inboxly-ui::startup::STORE`
+  and `inboxly-ui::startup::MAILDIR_STORES` singletons.
+- **`App()` first render** reads both singletons, seeds
+  `Inboxly::store`, and builds a `ThreadReader` for the first account
+  via the new `inboxly-ui::startup::build_thread_reader_for` helper.
+  `reload_feed()` is called after seeding so the inbox populates on
+  first paint.
+- **`SwitchAccount`** now reconstructs `thread_reader` from the new
+  account's `MaildirStore` on every account change. Without this, a
+  stale reader from the previous account would survive the switch and
+  the reply/forward pipeline would operate on the wrong maildir.
+- **Fail-soft at every step.** `Paths::resolve` returning `None`,
+  `ensure_dirs` failing, `Store::open` failing, or a per-account
+  `MaildirStore::init` failing all log a `warning:` to stderr and
+  leave the relevant singleton unset. The binary **still launches**
+  with the degraded `store = None` / `thread_reader = None` state —
+  the user sees the pre-patch "reply buttons not wired" behaviour
+  plus a clear warning they can read on next launch.
+- **CLI subcommands short-circuit before the data-layer init.**
+  `inboxly --help`, `inboxly oauth2-authorize`, `inboxly set-password`,
+  and `inboxly delete-credentials` all return / exit before
+  `build_data_layer` runs, preserving the Gemini G6 keyring-free
+  help invariant and also keeping them filesystem-access-free.
+- **Thread-safety.** `Store` and `MaildirStore` hold `!Sync` state
+  (rusqlite without `unlock_notify`, filesystem iterators). The
+  process-global statics require `Sync` on their contents, so a
+  `MainThreadOnly<T>` newtype wraps both singletons and asserts
+  `unsafe impl Sync` with a project-wide invariant: **every read
+  happens on the Dioxus main thread.** If a future change introduces
+  cross-thread access, the wrapper becomes unsound and must be
+  replaced with proper interior-locking.
+- **`account_id_from_email`** promoted from a private helper in
+  `inboxly-ui::components::app` to `pub` so the binary's `main()` can
+  derive account ids identically to the UI's send/drafts/reply
+  bridges. One keying scheme everywhere.
+
+Reply / ReplyAll / Forward now work end-to-end when the binary
+launches with configured accounts — no more `ComposeReplyFailed`
+disappointment on every click.
+
+### Tests
+
+- 4 new tests — 3 in `inboxly-ui::startup` covering the unset-singleton
+  fallback path (`STORE.get()` / `MAILDIR_STORES.get()` return `None`,
+  `maildir_stores()` returns empty, `build_thread_reader_for` returns
+  `None`) and 1 in `inboxly-ui::app` verifying `SwitchAccount`
+  reconstructs `thread_reader` without panicking when the singletons
+  are unset (guards against a regression where the handler might skip
+  the reassignment and leave a stale reader from the previous
+  account).
+- Test count: **1072 → 1076 (+4)**. Zero clippy warnings. Zero panics
+  introduced.
+
 ## [0.36.0] - 2026-04-08
 
 ### Added (M36 — Reply / ReplyAll / Forward + M35 cleanup)

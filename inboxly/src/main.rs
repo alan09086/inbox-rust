@@ -46,10 +46,15 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use dioxus::desktop::{Config, LogicalSize, WindowBuilder};
-use inboxly_core::config::{AccountConfig, AppConfig, AuthMethod};
+use inboxly_core::config::{AccountConfig, AppConfig, AuthMethod, Paths};
 use inboxly_imap::auth::shared_oauth2::{PersistCallback, SharedOAuth2State};
 use inboxly_imap::{GmailOAuth2Config, SharedOAuth2};
-use inboxly_ui::startup::{OAUTH2_CONTEXTS, OAuth2Contexts, STARTUP_ACCOUNTS};
+use inboxly_store::{MaildirStore, Store};
+use inboxly_ui::components::app::account_id_from_email;
+use inboxly_ui::startup::{
+    MAILDIR_STORES, MainThreadOnly, MaildirStoreMap, OAUTH2_CONTEXTS, OAuth2Contexts,
+    STARTUP_ACCOUNTS, STORE,
+};
 
 /// Environment variables consulted by the OAuth2 subcommand for the
 /// Gmail client_id and (optional) client_secret. The CLI subcommand
@@ -121,11 +126,34 @@ fn main() {
     // oauth2-authorize" error to the user).
     let oauth2_contexts: OAuth2Contexts = Arc::new(build_oauth2_contexts(&accounts));
 
+    // M36.1: build the data layer (SQLite Store + per-account Maildir
+    // stores) BEFORE setting any statics. Everything in here is
+    // fail-soft: a missing XDG data dir, a filesystem permission
+    // error, a SQLite open failure, or a MaildirStore::init failure
+    // all log a warning and leave the relevant singleton unset. The
+    // UI's App() first-render helper tolerates the unset state by
+    // seeding `Inboxly::store = None` / `Inboxly::thread_reader = None`
+    // — the binary still launches, and the degraded mode matches the
+    // pre-M36.1 behaviour (reply buttons show a clear error instead of
+    // working end-to-end).
+    let (store_opt, maildir_map_opt) = build_data_layer(&accounts);
+
     // Now publish the statics to the UI crate. Order matters: do this
-    // AFTER the keyring lookups but BEFORE the Dioxus launch so the
-    // first render of `App` sees both populated.
+    // AFTER the keyring lookups AND data-layer init but BEFORE the
+    // Dioxus launch so the first render of `App` sees everything
+    // populated.
     let _ = STARTUP_ACCOUNTS.set(accounts);
     let _ = OAUTH2_CONTEXTS.set(oauth2_contexts);
+    // SAFETY: `main()` runs on the process's initial thread, and
+    // Dioxus desktop's UI runs on that same thread (the single-thread
+    // local executor). No other thread ever reads these statics; see
+    // `MainThreadOnly` docs for the invariant.
+    if let Some(store) = store_opt {
+        let _ = STORE.set(unsafe { MainThreadOnly::new(store) });
+    }
+    if let Some(maildir_map) = maildir_map_opt {
+        let _ = MAILDIR_STORES.set(unsafe { MainThreadOnly::new(maildir_map) });
+    }
 
     // Default window size: 1280x800 (modern laptop-scale). The nav drawer
     // is 264 px wide so anything narrower than ~700 px eats the content
@@ -236,6 +264,101 @@ fn build_oauth2_contexts(accounts: &[AccountConfig]) -> HashMap<String, SharedOA
     }
 
     map
+}
+
+/// Build the shared SQLite `Store` and per-account `MaildirStore`
+/// map at startup.
+///
+/// Called once from [`main`] after the subcommand dispatch returns,
+/// before the Dioxus launch. The result is published into the
+/// [`STORE`] and [`MAILDIR_STORES`] singletons in `inboxly-ui::startup`
+/// so the UI's `App()` component can pick them up on first render.
+///
+/// # Fail-soft semantics
+///
+/// Every step of the data-layer construction is wrapped in an
+/// `eprintln!` warning on failure, and the whole function returns
+/// `(None, None)` rather than propagating any error:
+///
+/// 1. [`Paths::resolve`] returning `None` (no XDG data dir) → warn,
+///    return `(None, None)`. The binary still launches; `Inboxly` stays
+///    in its pre-patch `store = None` / `thread_reader = None` state.
+/// 2. [`Paths::ensure_dirs`] failing (fs permission, disk full, etc.)
+///    → warn, return `(None, None)`.
+/// 3. [`Store::open`] failing (SQLite open error, corrupt DB file,
+///    migration failure) → warn, return `(None, None)`.
+/// 4. Per-account [`MaildirStore::init`] failing → warn for that
+///    specific account and continue with the others. The store is
+///    still returned, and the account simply has no maildir entry in
+///    the map (the reply bridge will surface a clear "no thread
+///    reader for account X" error).
+///
+/// This fail-soft design is deliberate: the binary MUST continue to
+/// launch even if the data layer is unavailable. CLI subcommands
+/// (`inboxly --help`, `set-password`, `delete-credentials`,
+/// `oauth2-authorize`) already short-circuit *before* this function
+/// is called (see the dispatch at the top of [`main`]), so none of
+/// them ever touch `Paths::resolve` or open the SQLite file.
+fn build_data_layer(
+    accounts: &[AccountConfig],
+) -> (Option<Arc<Store>>, Option<MaildirStoreMap>) {
+    let Some(paths) = Paths::resolve() else {
+        eprintln!(
+            "warning: could not resolve XDG paths for inboxly; data layer disabled. \
+             Reply/Forward will fall back to the pre-patch 'not wired' error until the \
+             user runs Inboxly from a shell with HOME / XDG_DATA_HOME set."
+        );
+        return (None, None);
+    };
+    if let Err(err) = paths.ensure_dirs() {
+        eprintln!("warning: failed to create data directories: {err}; data layer disabled");
+        return (None, None);
+    }
+
+    let db_path = paths.database_file();
+    let store = match Store::open(&db_path) {
+        Ok(s) => s,
+        Err(err) => {
+            eprintln!(
+                "warning: failed to open SQLite store at {}: {err}; data layer disabled",
+                db_path.display(),
+            );
+            return (None, None);
+        }
+    };
+    // `Store` holds a `rusqlite::Connection` which is `!Send + !Sync`.
+    // Dioxus desktop runs on a single-threaded local executor so this
+    // is fine — see `Inboxly::with_store` for the matching
+    // `clippy::arc_with_non_send_sync` allow.
+    #[allow(clippy::arc_with_non_send_sync)]
+    let store = Arc::new(store);
+
+    // Per-account MaildirStores. Keyed by the same
+    // `account_id_from_email(...).0.to_string()` used by the UI's
+    // send / drafts / reply bridges, so there is exactly ONE way to
+    // locate an account's mail directory anywhere in the codebase.
+    let mut map: HashMap<String, Arc<MaildirStore>> = HashMap::new();
+    for account in accounts {
+        let account_id = account_id_from_email(&account.email).0.to_string();
+        let mail_root = paths.maildir_root().join(&account_id).join("mail");
+        let maildir = MaildirStore::new(&mail_root);
+        if let Err(err) = maildir.init() {
+            eprintln!(
+                "warning: failed to initialise maildir for {} at {}: {err}; \
+                 reply/forward will fall back to the 'not wired' error for this account",
+                account.email,
+                mail_root.display(),
+            );
+            continue;
+        }
+        #[allow(clippy::arc_with_non_send_sync)]
+        let maildir_arc = Arc::new(maildir);
+        map.insert(account_id, maildir_arc);
+    }
+
+    #[allow(clippy::arc_with_non_send_sync)]
+    let maildir_map = Arc::new(map);
+    (Some(store), Some(maildir_map))
 }
 
 /// Build the rotation persist callback used by every OAuth2 entry.

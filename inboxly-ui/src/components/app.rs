@@ -40,7 +40,14 @@ const COMPOSE_ACCOUNT_NAMESPACE: uuid::Uuid = uuid::uuid!("a4b3c4d5-e6f7-4a8b-9c
 
 /// Derive a deterministic [`inboxly_core::AccountId`] from an email
 /// address. See [`COMPOSE_ACCOUNT_NAMESPACE`] for the rationale.
-fn account_id_from_email(email: &str) -> inboxly_core::AccountId {
+///
+/// **Public (M36.1):** promoted from a private helper so the binary's
+/// `main()` can derive the same account ids when populating
+/// [`crate::startup::MAILDIR_STORES`]. Every call site that reads the
+/// per-account Maildir map MUST go through this helper so the keying
+/// stays consistent across binary-init and UI-render paths. Also used
+/// by the send/drafts/reply bridges inside this module.
+pub fn account_id_from_email(email: &str) -> inboxly_core::AccountId {
     inboxly_core::AccountId(uuid::Uuid::new_v5(
         &COMPOSE_ACCOUNT_NAMESPACE,
         email.as_bytes(),
@@ -949,11 +956,29 @@ pub fn App() -> Element {
             .get()
             .cloned()
             .unwrap_or_default();
-        Signal::new(Inboxly {
+        // M36.1: pull the Store + per-account MaildirStore singletons
+        // populated by the binary's main(). When the binary started
+        // the data layer successfully, `store` is Some and
+        // `thread_reader` is Some for the active (first) account; on
+        // any failure (paths unresolved, ensure_dirs failed,
+        // Store::open errored, account-specific maildir init errored)
+        // we silently fall back to None and the UI still launches.
+        // reload_feed() is a no-op when `store.is_none()`, so it
+        // is safe to call unconditionally at the end.
+        let store = crate::startup::store();
+        let thread_reader = startup_accounts.first().and_then(|account| {
+            let account_id = account_id_from_email(&account.email).0.to_string();
+            crate::startup::build_thread_reader_for(&account_id)
+        });
+        let mut app = Inboxly {
             theme: ThemeConfig::from_system(),
             accounts: startup_accounts,
+            store,
+            thread_reader,
             ..Inboxly::default()
-        })
+        };
+        app.reload_feed();
+        Signal::new(app)
     });
 
     // M36 phase 2: provide the per-account OAuth2 context map.
