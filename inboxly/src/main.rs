@@ -5,7 +5,7 @@
 
 use std::sync::OnceLock;
 
-use dioxus::desktop::{Config, WindowBuilder};
+use dioxus::desktop::{Config, LogicalSize, WindowBuilder};
 use inboxly_core::config::{AccountConfig, AppConfig};
 
 /// Accounts loaded from config, consumed once during app initialisation.
@@ -22,7 +22,13 @@ fn main() {
     };
     let _ = STARTUP_ACCOUNTS.set(accounts);
 
-    let window = WindowBuilder::new().with_title("Inboxly");
+    // Default window size: 1280x800 (modern laptop-scale). The nav drawer
+    // is 264 px wide so anything narrower than ~700 px eats the content
+    // area entirely. Users can resize freely after launch; this is the
+    // fresh-start default so the app isn't cramped on first run.
+    let window = WindowBuilder::new()
+        .with_title("Inboxly")
+        .with_inner_size(LogicalSize::new(1280.0, 800.0));
     let cfg = Config::new().with_window(window).with_menu(None);
     dioxus::LaunchBuilder::desktop()
         .with_cfg(cfg)

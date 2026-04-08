@@ -2,6 +2,71 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.35.1] - 2026-04-07
+
+### Fixed (post-M35 dogfooding)
+
+Four fixes caught during the first hands-on run of M35 against the live
+binary. The build/test pipeline was clean (961 tests, clippy clean) but
+the visual and UX state of the running app surfaced issues the test
+harness didn't cover.
+
+- **Dioxus 0.7 `document::Stylesheet { href: CSS }` pattern doesn't reach
+  the desktop webview.** Launching the freshly-built binary showed an
+  entirely unstyled window — nav items as horizontal browser-default
+  buttons, white background in dark mode, "You're all caught up"
+  rendered in plain text. Diagnosis via a red-background CSS diagnostic
+  confirmed the `asset!()` path wasn't being fetched at runtime
+  (`strings target/debug/inboxly` did contain the CSS source, but the
+  webview wasn't loading it). **Workaround:** switched to `include_str!`
+  + `<style>` tag with `dangerous_inner_html` in
+  `components/app.rs::App`. This embeds the stylesheet as a compile-time
+  string constant and injects it as an inline `<style>` block in the
+  root rsx, bypassing the asset protocol entirely. Root-cause
+  investigation of the asset serving is deferred — the workaround ships
+  the styles reliably and the cost is a single `include_str!` at
+  compile time.
+- **Default window size too small for the nav drawer + content area.**
+  `WindowBuilder::new().with_title("Inboxly")` left Dioxus desktop to
+  pick a default size, which on Wayland/Plasma opened at roughly
+  400 × 300 px — the 264 px nav drawer width consumed almost the whole
+  window. Added `.with_inner_size(LogicalSize::new(1280.0, 800.0))`
+  for a modern laptop-scale default. Users can still resize freely.
+- **SpeedDialFab rendered in Compose view and visually overlapped the
+  Send button.** The Phase 6 guard `if active_view != ActiveView::Settings`
+  allowed the FAB to render in Compose, where it stacked on top of the
+  footer's Send button (hiding it) and also risked data loss because
+  clicking it mid-compose would fire `OpenCompose` and reset the draft
+  via the Phase 6 "idempotent second OpenCompose resets state" branch.
+  Changed the guard to
+  `if !matches!(active_view, ActiveView::Settings | ActiveView::Compose)`.
+- **Recipient fields didn't chip on blur.** Phase 8 wired Enter/comma
+  to parse the input text into a `Contact` chip, but tab-out or
+  click-away left the plain text in the input buffer, which meant the
+  `to: Vec<Arc<Contact>>` stayed empty and the `can_send()` guard kept
+  Send disabled even after a valid address was typed. Added `onblur`
+  handlers to all three recipient inputs (To, Cc, Bcc) that run the
+  same `try_parse_recipient` + dispatch `ComposeAddRecipient` pipeline
+  as the Enter key handler. Matches Gmail/Outlook UX conventions.
+
+Verified end-to-end during the dogfooding session:
+- Click FAB → Compose view opens with the correct toolbar colour,
+  "Compose" title, back arrow, and AccountPickerDropdown.
+- Type recipient + Enter/comma/blur → blue chip appears, `to_input`
+  clears, Send button enables.
+- Type Markdown in the body → click Preview → full rendering of
+  headings, lists, tables, code blocks, blockquotes, tasklists,
+  strikethrough, links, and inline code.
+- Markdown preview correctly strips `<script>`, `<iframe>`,
+  `javascript:` hrefs, and tracker-pixel `<img src>` per Phase 1's
+  `Event::Html` filter + M34's `sanitize_html` (belt-and-suspenders
+  confirmed in live HTML — security invariants held).
+- Click Send with no account configured → compose view renders the
+  "no account configured" error banner via the Phase 12 send bridge's
+  early-exit path.
+
+Tests unchanged (961 passing, no regressions). Clippy clean.
+
 ## [0.35.0] - 2026-04-07
 
 ### Added (M35 — SMTP Engine + Compose View)

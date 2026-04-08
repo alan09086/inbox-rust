@@ -383,8 +383,16 @@ async fn run_send_pipeline(mut app_state: Signal<Inboxly>) {
     }
 }
 
-/// CSS asset for the main stylesheet.
-static CSS: Asset = asset!("/assets/main.css");
+/// Main stylesheet source embedded at compile time.
+///
+/// Dioxus 0.7's `document::Stylesheet { href: CSS }` pattern with `asset!()`
+/// is supposed to serve the asset path through the desktop webview's custom
+/// protocol, but for this build the CSS doesn't get fetched at runtime —
+/// everything that relies on CSS classes falls back to browser defaults.
+/// Embedding via `include_str!` and injecting through a `<style>` tag with
+/// `dangerous_inner_html` in the App component guarantees the styles reach
+/// the DOM. See `components/app.rs::App` for the inline injection.
+static CSS_INLINE: &str = include_str!("../../assets/main.css");
 
 /// Root application component.
 ///
@@ -1017,7 +1025,12 @@ pub fn App() -> Element {
     let active_view = app_state.read().active_view;
 
     rsx! {
-        document::Stylesheet { href: CSS }
+        // Dioxus 0.7's `document::Stylesheet { href: CSS }` pattern does not
+        // reach the desktop webview in our current setup (the asset protocol
+        // returns nothing and every .css-class rule falls back to browser
+        // defaults). The inline `<style>` tag below embeds the same CSS via
+        // `include_str!` and guarantees the rules land in the DOM.
+        style { dangerous_inner_html: CSS_INLINE }
 
         div {
             class: "app-shell",
@@ -1038,7 +1051,12 @@ pub fn App() -> Element {
 
         UndoSnackbar {}
 
-        if active_view != ActiveView::Settings {
+        // SpeedDialFab dispatches OpenCompose on click. Hide it in Compose
+        // view so (a) it doesn't visually stack on top of the Send button
+        // in the compose footer and (b) clicking it mid-compose doesn't
+        // reset the current draft via the "idempotent second OpenCompose"
+        // branch. Also hide in Settings per the existing rule.
+        if !matches!(active_view, ActiveView::Settings | ActiveView::Compose) {
             SpeedDialFab {}
             SnoozePicker {}
         }

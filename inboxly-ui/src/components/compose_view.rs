@@ -238,6 +238,21 @@ pub fn ComposeView() -> Element {
                                     }
                                 }
                             },
+                            // Commit on blur so the user doesn't have to press
+                            // Enter after typing a valid email address — matches
+                            // Gmail / Outlook behaviour. Invalid text stays in
+                            // the input so the user can fix it.
+                            onblur: move |_| {
+                                let current = app_state.read().compose.to_input.clone();
+                                if let Some(parsed) = try_parse_recipient(&current) {
+                                    let mut s = app_state.write();
+                                    s.update(Message::ComposeAddRecipient {
+                                        field: RecipientField::To,
+                                        contact: parsed,
+                                    });
+                                    s.update(Message::ComposeToInputChanged(String::new()));
+                                }
+                            },
                         }
                     }
                     button {
@@ -290,6 +305,17 @@ pub fn ComposeView() -> Element {
                                         }
                                     }
                                 },
+                                onblur: move |_| {
+                                    let current = app_state.read().compose.cc_input.clone();
+                                    if let Some(parsed) = try_parse_recipient(&current) {
+                                        let mut s = app_state.write();
+                                        s.update(Message::ComposeAddRecipient {
+                                            field: RecipientField::Cc,
+                                            contact: parsed,
+                                        });
+                                        s.update(Message::ComposeCcInputChanged(String::new()));
+                                    }
+                                },
                             }
                         }
                     }
@@ -329,6 +355,17 @@ pub fn ComposeView() -> Element {
                                             });
                                             s.update(Message::ComposeBccInputChanged(String::new()));
                                         }
+                                    }
+                                },
+                                onblur: move |_| {
+                                    let current = app_state.read().compose.bcc_input.clone();
+                                    if let Some(parsed) = try_parse_recipient(&current) {
+                                        let mut s = app_state.write();
+                                        s.update(Message::ComposeAddRecipient {
+                                            field: RecipientField::Bcc,
+                                            contact: parsed,
+                                        });
+                                        s.update(Message::ComposeBccInputChanged(String::new()));
                                     }
                                 },
                             }

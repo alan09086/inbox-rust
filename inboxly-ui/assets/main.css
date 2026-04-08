@@ -110,6 +110,9 @@ body {
     display: flex;
     flex: 1;
     overflow: hidden;
+    /* Explicitly render the theme's bg color so dark mode works even if
+       the body element's :root-scoped var lookup falls back to light. */
+    background: var(--bg-color);
 }
 
 /* ============================================================
@@ -395,6 +398,10 @@ body {
     flex-direction: column;
     overflow-y: auto;
     position: relative;
+    /* Explicit background so the content area doesn't leak through to a
+       light-mode body background in dark mode. */
+    background: var(--bg-color);
+    color: var(--text-primary);
 }
 
 /* ============================================================
