@@ -149,6 +149,119 @@ fn window_title(view: ActiveView) -> String {
     format!("Inboxly \u{2014} {}", view.title())
 }
 
+/// Write a local Maildir `.Sent/cur/` copy of a successfully-sent draft.
+///
+/// This is the M36 Phase 4 bridge between the SMTP success path and the
+/// user's on-disk Sent folder. Called from [`run_send_pipeline`] after
+/// the SMTP send returns `Ok(())` and BEFORE the SQLite draft delete,
+/// so that the offline replay handler has a concrete on-disk source for
+/// the eventual server-side IMAP APPEND.
+///
+/// Construction of the [`inboxly_store::MaildirStore`] is on-demand
+/// because the binary does not currently maintain a long-lived handle
+/// in `Inboxly::store` / `Inboxly::thread_reader` (pre-existing gap
+/// from M35). A new store is cheap — it's a `PathBuf` wrapper — and
+/// [`inboxly_store::MaildirStore::init`] is idempotent, so calling it
+/// on every send is safe.
+///
+/// # Fail-soft semantics
+///
+/// Every error path in this function is logged with `tracing::warn!`
+/// and then the function returns normally. The SMTP send already
+/// succeeded; the user MUST see the "Sent" overlay regardless of
+/// whether the local copy write succeeded. Worst-case failure modes:
+///
+/// - `Paths::resolve` returns `None` on a machine without a recognised
+///   home directory — skip the write.
+/// - `MaildirStore::init` fails on disk I/O (permission denied, disk
+///   full) — skip the write.
+/// - `build_rfc5322_for_sent_folder` fails because of a malformed
+///   address — should not happen at this point because the SMTP send
+///   just succeeded with the same draft, but we check anyway.
+/// - `store_cur` fails on disk I/O — skip the write.
+///
+/// In every case, the [`inboxly_core::OfflineAction::AppendSent`] queue
+/// entry is still enqueued by the caller so a future replay pass can
+/// reconcile — the only consequence here is that this particular local
+/// copy is missing, which the next full sync will fix.
+#[cfg(not(test))]
+fn write_local_maildir_sent(
+    account_config: &inboxly_core::AccountConfig,
+    draft: &inboxly_core::DraftEmail,
+    account_id: inboxly_core::AccountId,
+) {
+    use inboxly_core::EmailFlags;
+    use inboxly_core::config::Paths;
+    use inboxly_imap::smtp::build_sent_folder_bytes;
+    use inboxly_store::{MaildirStore, StandardFolder};
+
+    let Some(paths) = Paths::resolve() else {
+        tracing::warn!(
+            email = %account_config.email,
+            "Paths::resolve returned None; skipping Maildir Sent write"
+        );
+        return;
+    };
+
+    let mail_root = paths
+        .maildir_root()
+        .join(account_id.0.to_string())
+        .join("mail");
+
+    let maildir_store = MaildirStore::new(mail_root);
+
+    if let Err(e) = maildir_store.init() {
+        tracing::warn!(
+            error = %e,
+            "failed to init Maildir for Sent write; skipping local copy"
+        );
+        return;
+    }
+
+    // keep_bcc=true branch via `build_sent_folder_bytes`: the user's
+    // local Sent folder retains the Bcc list for audit (Gemini G1).
+    // Mirrors the `imap_append_sent` helper at
+    // `inboxly-imap/src/append.rs`. This helper is the single-crate
+    // wrapper that keeps `lettre` out of `inboxly-ui`'s dep graph.
+    let bytes = match build_sent_folder_bytes(account_config, draft) {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                message_id = %draft.message_id,
+                "build_sent_folder_bytes failed; skipping Maildir Sent write"
+            );
+            return;
+        }
+    };
+
+    // Sent mail is marked \Seen so it never shows as unread in the
+    // user's own Sent view. Starred/Answered/Draft are all false.
+    let flags_sent = EmailFlags {
+        read: true,
+        starred: false,
+        answered: false,
+        draft: false,
+    };
+
+    match maildir_store.store_cur(&StandardFolder::Sent, &bytes, &flags_sent) {
+        Ok(stored) => {
+            tracing::info!(
+                message_id = %draft.message_id,
+                path = ?stored.path,
+                "Maildir Sent copy written"
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                message_id = %draft.message_id,
+                "Maildir Sent store_cur failed; skipping local copy"
+            );
+        }
+    }
+}
+
 /// Run the SMTP send pipeline for the currently-Sending compose draft.
 ///
 /// Hosted as a free function (gated behind `cfg(not(test))`) so the
@@ -331,6 +444,36 @@ async fn run_send_pipeline(mut app_state: Signal<Inboxly>, oauth2_contexts: OAut
     match send_result {
         Ok(()) => {
             tracing::info!(message_id = %draft.message_id, "SMTP send succeeded");
+
+            // -- M36 Phase 4: write a local copy to the account's
+            //    Maildir `.Sent/cur/` folder BEFORE deleting the SQLite
+            //    draft. This closes the "outgoing mail has no local
+            //    record" gap from M35 and gives the offline replay
+            //    handler a concrete on-disk source for the eventual
+            //    server-side IMAP APPEND.
+            //
+            //    Fail-soft: any error here is logged but does NOT
+            //    block the success dispatch. The email already left
+            //    the wire, the user MUST be told.
+            //
+            //    NOTE: the binary does not currently instantiate a
+            //    long-lived `MaildirStore` at startup (pre-existing
+            //    state from M35), so this block constructs one
+            //    on-demand via `Paths::resolve` + per-account
+            //    subdirectory. `MaildirStore::new` is a cheap
+            //    `PathBuf` wrapper and `init()` is idempotent.
+            //
+            //    Path mismatch note: the `MaildirStore` doc comment
+            //    at `inboxly-store/src/maildir_store.rs:63` says
+            //    `<data_dir>/accounts/<account_id>/mail/`, but the
+            //    running app resolves it via
+            //    `Paths::maildir_root()` = `<data_dir>/maildir/`.
+            //    We use the `Paths` helper (source of truth for the
+            //    running app) and join `<account_id>/mail/` beneath
+            //    it, even though the `accounts/` intermediate from
+            //    the doc comment is stale.
+            let sent_account_id = account_id_from_email(&account_config.email);
+            write_local_maildir_sent(&account_config, &draft, sent_account_id);
 
             // -- Step 5a: enqueue the AppendSent fallback so the next
             //    replay pass writes the IMAP Sent folder copy. The
