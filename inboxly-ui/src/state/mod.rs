@@ -10,7 +10,7 @@ pub mod menu_state;
 pub mod settings_state;
 pub mod snooze_state;
 
-pub use compose_state::{ComposeSendState, ComposeState};
+pub use compose_state::{ComposeLayout, ComposeSendState, ComposeState};
 pub use menu_state::MenuState;
 pub use settings_state::SettingsState;
 pub use snooze_state::SnoozeState;

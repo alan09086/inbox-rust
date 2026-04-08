@@ -11,7 +11,9 @@ use inboxly_store::{BundleRow, Store};
 use crate::feed::{self, FeedSection};
 use crate::keyboard::{ShortcutAction, ShortcutMap};
 use crate::nav::{NavBundleCategory, NavTarget, default_bundle_categories};
-use crate::state::{ComposeSendState, ComposeState, MenuState, SettingsState, SnoozeState};
+use crate::state::{
+    ComposeLayout, ComposeSendState, ComposeState, MenuState, SettingsState, SnoozeState,
+};
 use crate::theme::{ActiveView, InboxlyTheme, SettingsReader};
 use crate::undo::{UndoAction, UndoState};
 
@@ -437,6 +439,22 @@ pub enum Message {
         /// sensitive content (no email bodies, no addresses).
         reason: String,
     },
+    /// **M36 Phase 11**: toggle between `Inline` and `FullScreen`
+    /// compose layouts.
+    ///
+    /// `Inline → FullScreen`: sets `active_view = Compose` so the
+    /// compose view takes over the content area; preserves the
+    /// existing `previous_view` semantics so `CloseCompose` returns
+    /// to wherever the user was.
+    ///
+    /// `FullScreen → Inline`: sets `active_view = Inbox`. The inline
+    /// split only renders when `open_thread_id.is_some()`; if no
+    /// thread is currently open the compose still flips to `Inline`
+    /// but `ContentArea` falls back to the non-split path (the inbox
+    /// list or `InboxZero`). The Phase 12 button only exposes this
+    /// from the compose view itself, so in practice the user always
+    /// has a thread open when toggling FullScreen → Inline.
+    ComposeToggleLayout,
     /// Close the compose view without sending. Restores `previous_view`
     /// as `active_view` and leaves the compose state intact.
     CloseCompose,
@@ -1736,9 +1754,50 @@ impl Inboxly {
                 self.compose = *state;
                 self.compose.loading_reply = false;
                 self.compose.pending_reply = None;
-                self.previous_view = self.active_view;
-                self.active_view = ActiveView::Compose;
-                self.active_nav = NavTarget::View(ActiveView::Compose);
+                // M36 Phase 11: default to Inline layout for
+                // reply-prefilled drafts. The Phase 12 toggle button
+                // lets the user expand to FullScreen if they prefer.
+                // The reply-prefill bridge always builds a fresh
+                // ComposeState, so any layout the bridge set on
+                // `*state` is ignored — Inline is the right default.
+                self.compose.layout = ComposeLayout::Inline;
+                // Only transition active_view to Compose if Inline
+                // would not be visible — i.e. there is no thread
+                // open above to render in the 35% top pane. With a
+                // thread open, leave active_view = Inbox so the
+                // ContentArea inline-split branch renders.
+                if self.open_thread_id.is_none() {
+                    self.previous_view = self.active_view;
+                    self.active_view = ActiveView::Compose;
+                    self.active_nav = NavTarget::View(ActiveView::Compose);
+                }
+            }
+            Message::ComposeToggleLayout => {
+                // M36 Phase 11: flip between Inline and FullScreen.
+                // The Phase 12 toggle button dispatches this; for
+                // Phase 11 the variant exists so the state-machine
+                // tests can exercise both transitions before the UI
+                // wires them up.
+                match self.compose.layout {
+                    ComposeLayout::Inline => {
+                        self.compose.layout = ComposeLayout::FullScreen;
+                        self.previous_view = self.active_view;
+                        self.active_view = ActiveView::Compose;
+                        self.active_nav = NavTarget::View(ActiveView::Compose);
+                    }
+                    ComposeLayout::FullScreen => {
+                        self.compose.layout = ComposeLayout::Inline;
+                        // Inline only makes visual sense when a
+                        // thread is open above the compose pane;
+                        // ContentArea falls back to the non-split
+                        // path (inbox list / InboxZero) when
+                        // `open_thread_id.is_none()`. Either way,
+                        // the user wants to leave the full-screen
+                        // compose, so route them back to Inbox.
+                        self.active_view = ActiveView::Inbox;
+                        self.active_nav = NavTarget::View(ActiveView::Inbox);
+                    }
+                }
             }
             Message::ComposeReplyFailed { reason } => {
                 tracing::warn!(reason = %reason, "OpenComposeReply prefill failed: {reason}");
@@ -4119,6 +4178,234 @@ mod tests {
         assert_eq!(app.compose.to.len(), 2);
         assert!(!app.compose.loading_reply);
         assert!(app.compose.pending_reply.is_none());
+    }
+
+    // ========================================================================
+    // M36 Phase 11: Inline compose layout
+    // ========================================================================
+    //
+    // These cover the pure state-machine layer for the
+    // `ComposeLayout::Inline` flow:
+    //   - `ComposeReplyReady` defaults to Inline when a thread is open
+    //     (and stays on Inbox so ContentArea can render the split).
+    //   - `OpenCompose` (FAB) defaults to FullScreen.
+    //   - `ComposeToggleLayout` flips both directions and updates
+    //     `active_view` accordingly.
+    //   - The toggle preserves draft_id + body (it is a layout-only
+    //     change, not a state reset).
+
+    /// `ComposeReplyReady` MUST set `compose.layout = Inline` and MUST
+    /// leave `active_view = Inbox` when a thread is currently open
+    /// above the compose pane. This is the production path that the
+    /// Reply button on a thread message takes.
+    #[test]
+    fn compose_reply_ready_sets_inline_layout_when_thread_open() {
+        use inboxly_core::id::{EmailId, ThreadId};
+
+        let mut app = Inboxly::default();
+        app.accounts = vec![test_account("alan@example.com")];
+        // Stage an open thread the way `OpenThread` would have.
+        app.open_thread_id = Some("t-inline".to_string());
+        app.active_view = ActiveView::Inbox;
+        // Stage the loading sentinels the way `OpenComposeReply`
+        // would have.
+        app.compose.loading_reply = true;
+        app.compose.pending_reply = Some((
+            "t-inline".to_string(),
+            ComposeMode::Reply {
+                thread_id: ThreadId::new(),
+                original_email_id: EmailId::new("<m@x>"),
+            },
+        ));
+
+        // The bridge builds a fully-prefilled ComposeState and
+        // dispatches `ComposeReplyReady`. Per the spec, the bridge
+        // does NOT need to set `layout` — the handler always
+        // overrides it to Inline.
+        let mut prefilled = ComposeState::new();
+        prefilled.draft_id = Some("draft-inline".to_string());
+        prefilled.subject = "Re: inline".to_string();
+        prefilled.body_markdown = "draft body".to_string();
+        prefilled.to = vec![Arc::new(Contact::new("Alice", "alice@example.com"))];
+
+        let _ = app.update(Message::ComposeReplyReady {
+            state: Box::new(prefilled),
+        });
+
+        assert_eq!(
+            app.compose.layout,
+            ComposeLayout::Inline,
+            "ComposeReplyReady must default to Inline layout"
+        );
+        assert_eq!(
+            app.active_view,
+            ActiveView::Inbox,
+            "active_view must stay on Inbox so ContentArea can render the inline split"
+        );
+        assert_eq!(
+            app.open_thread_id.as_deref(),
+            Some("t-inline"),
+            "open_thread_id must NOT be touched by ComposeReplyReady"
+        );
+        assert!(!app.compose.loading_reply);
+        assert!(app.compose.pending_reply.is_none());
+        assert_eq!(app.compose.subject, "Re: inline");
+    }
+
+    /// `OpenCompose` (the FAB / fresh-compose path) MUST default to
+    /// `FullScreen`. The fresh draft has no thread context to render
+    /// in the inline split's top pane, so Inline would be wrong.
+    #[test]
+    fn open_compose_defaults_to_full_screen_layout() {
+        let mut app = Inboxly::default();
+        app.accounts = vec![test_account("alan@example.com")];
+
+        let _ = app.update(Message::OpenCompose);
+
+        assert_eq!(
+            app.compose.layout,
+            ComposeLayout::FullScreen,
+            "OpenCompose must default to FullScreen layout"
+        );
+        assert_eq!(app.active_view, ActiveView::Compose);
+    }
+
+    /// `ComposeToggleLayout` from `Inline` MUST flip to `FullScreen`
+    /// and transition `active_view = Compose`. Models the Phase 12
+    /// "expand to full screen" toggle button.
+    #[test]
+    fn compose_toggle_layout_inline_to_full_screen() {
+        use inboxly_core::id::{EmailId, ThreadId};
+
+        let mut app = Inboxly::default();
+        app.accounts = vec![test_account("alan@example.com")];
+        app.open_thread_id = Some("t-toggle".to_string());
+        // Stage the inline reply state via the production
+        // ComposeReplyReady handler.
+        app.compose.pending_reply = Some((
+            "t-toggle".to_string(),
+            ComposeMode::Reply {
+                thread_id: ThreadId::new(),
+                original_email_id: EmailId::new("<m@x>"),
+            },
+        ));
+        app.compose.loading_reply = true;
+        let mut prefilled = ComposeState::new();
+        prefilled.draft_id = Some("draft-toggle".to_string());
+        prefilled.subject = "Re: toggle".to_string();
+        prefilled.to = vec![Arc::new(Contact::new("Bob", "bob@example.com"))];
+        let _ = app.update(Message::ComposeReplyReady {
+            state: Box::new(prefilled),
+        });
+        assert_eq!(app.compose.layout, ComposeLayout::Inline);
+        assert_eq!(app.active_view, ActiveView::Inbox);
+
+        // Click the toggle button → flip to FullScreen.
+        let _ = app.update(Message::ComposeToggleLayout);
+
+        assert_eq!(
+            app.compose.layout,
+            ComposeLayout::FullScreen,
+            "ComposeToggleLayout from Inline must produce FullScreen"
+        );
+        assert_eq!(
+            app.active_view,
+            ActiveView::Compose,
+            "Inline -> FullScreen must route active_view to Compose"
+        );
+    }
+
+    /// `ComposeToggleLayout` from `FullScreen` MUST flip back to
+    /// `Inline` and transition `active_view = Inbox`. Models the
+    /// Phase 12 "collapse to split" button on the full-screen
+    /// compose view.
+    #[test]
+    fn compose_toggle_layout_full_screen_to_inline() {
+        let mut app = Inboxly::default();
+        app.accounts = vec![test_account("alan@example.com")];
+        app.open_thread_id = Some("t-toggle-back".to_string());
+        // Stage a FullScreen compose via the production OpenCompose
+        // handler.
+        let _ = app.update(Message::OpenCompose);
+        assert_eq!(app.compose.layout, ComposeLayout::FullScreen);
+        assert_eq!(app.active_view, ActiveView::Compose);
+
+        // Click the toggle button → flip to Inline.
+        let _ = app.update(Message::ComposeToggleLayout);
+
+        assert_eq!(
+            app.compose.layout,
+            ComposeLayout::Inline,
+            "ComposeToggleLayout from FullScreen must produce Inline"
+        );
+        assert_eq!(
+            app.active_view,
+            ActiveView::Inbox,
+            "FullScreen -> Inline must route active_view to Inbox"
+        );
+        assert_eq!(
+            app.open_thread_id.as_deref(),
+            Some("t-toggle-back"),
+            "Toggle must NOT touch open_thread_id"
+        );
+    }
+
+    /// `ComposeToggleLayout` is a layout-only switch — it MUST
+    /// preserve `compose.draft_id`, the body, the subject, and the
+    /// recipient list across both directions. Regression guard
+    /// against accidentally calling `ComposeState::default()` in the
+    /// handler.
+    #[test]
+    fn compose_toggle_layout_preserves_draft_content() {
+        use inboxly_core::id::{EmailId, ThreadId};
+
+        let mut app = Inboxly::default();
+        app.accounts = vec![test_account("alan@example.com")];
+        app.open_thread_id = Some("t-preserve".to_string());
+
+        // Build a populated reply draft via the production handlers.
+        app.compose.loading_reply = true;
+        app.compose.pending_reply = Some((
+            "t-preserve".to_string(),
+            ComposeMode::Reply {
+                thread_id: ThreadId::new(),
+                original_email_id: EmailId::new("<m@x>"),
+            },
+        ));
+        let mut prefilled = ComposeState::new();
+        prefilled.draft_id = Some("draft-preserve".to_string());
+        prefilled.subject = "Re: preserve me".to_string();
+        prefilled.body_markdown = "first paragraph\n\nsecond paragraph".to_string();
+        prefilled.to = vec![
+            Arc::new(Contact::new("Alice", "alice@example.com")),
+            Arc::new(Contact::new("Carol", "carol@example.com")),
+        ];
+        let _ = app.update(Message::ComposeReplyReady {
+            state: Box::new(prefilled),
+        });
+        assert_eq!(app.compose.layout, ComposeLayout::Inline);
+
+        // Snapshot the populated state.
+        let draft_id_before = app.compose.draft_id.clone();
+        let subject_before = app.compose.subject.clone();
+        let body_before = app.compose.body_markdown.clone();
+        let to_len_before = app.compose.to.len();
+
+        // Inline -> FullScreen.
+        let _ = app.update(Message::ComposeToggleLayout);
+        assert_eq!(app.compose.layout, ComposeLayout::FullScreen);
+        assert_eq!(app.compose.draft_id, draft_id_before);
+        assert_eq!(app.compose.subject, subject_before);
+        assert_eq!(app.compose.body_markdown, body_before);
+        assert_eq!(app.compose.to.len(), to_len_before);
+
+        // FullScreen -> Inline (back).
+        let _ = app.update(Message::ComposeToggleLayout);
+        assert_eq!(app.compose.layout, ComposeLayout::Inline);
+        assert_eq!(app.compose.draft_id, draft_id_before);
+        assert_eq!(app.compose.subject, subject_before);
+        assert_eq!(app.compose.body_markdown, body_before);
+        assert_eq!(app.compose.to.len(), to_len_before);
     }
 
     /// **C2 from eng review**: integration test that exercises the

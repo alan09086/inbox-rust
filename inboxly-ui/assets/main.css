@@ -1463,3 +1463,51 @@ body {
     font-size: 14px;
     line-height: 1;
 }
+
+/* ============================================================
+   18. Inline compose split (M36 phase 11)
+   ============================================================ */
+
+/* The Inline compose layout (`ComposeLayout::Inline`) renders the
+   open thread above the compose view in a 35/65 vertical split,
+   keeping the conversation context visible while the user drafts
+   their reply. ContentArea wraps both panes in a flex column when
+   `compose.layout == Inline && open_thread_id.is_some() &&
+   compose.draft_id.is_some()`. The Phase 12 toggle button flips back
+   to `FullScreen` (which uses the existing `.compose-view` styles in
+   section 16). */
+.compose-inline-split {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.compose-inline-top {
+    flex: 35;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-bottom: var(--divider-thickness) solid var(--divider-color);
+}
+
+.compose-inline-bottom {
+    flex: 65;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* Eng review B4: scoped override so the existing `.compose-view`
+   full-screen styles (which assume they own the entire content area)
+   fill the 65% bottom pane instead of 100vh. The non-inline path is
+   unchanged — `.compose-view` outside `.compose-inline-bottom` keeps
+   its existing height behaviour. */
+.compose-inline-bottom .compose-view {
+    height: 100%;
+    flex: 1;
+    min-height: 0;
+}

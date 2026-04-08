@@ -164,6 +164,41 @@ pub struct ComposeState {
     /// bridge skips the initial render so the save logic does not run
     /// on app start before any draft exists.
     pub explicit_save_counter: u64,
+
+    // -- Layout (M36 Phase 11) --
+    /// How the compose view is rendered.
+    ///
+    /// `Inline` (Phase 11 default for reply-prefilled drafts) renders
+    /// the compose view inside a 35/65 vertical split below the open
+    /// thread, keeping the conversation context visible while the
+    /// user drafts their reply. `FullScreen` (the default for fresh
+    /// composes from the FAB and the only option in M35) takes over
+    /// the entire content area.
+    ///
+    /// The Phase 12 toggle button dispatches
+    /// [`crate::app::Message::ComposeToggleLayout`] to flip between
+    /// the two modes; the [`crate::app::Message::ComposeReplyReady`]
+    /// handler sets this to `Inline` for replies opened from the
+    /// thread detail view.
+    pub layout: ComposeLayout,
+}
+
+/// How the compose view is rendered (M36 Phase 11).
+///
+/// `FullScreen` is the default — fresh composes from the FAB have no
+/// thread context to show above them, so they take over the content
+/// area. The reply-prefill flow flips this to `Inline` so the user can
+/// keep reading the thread they are replying to.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum ComposeLayout {
+    /// Reply compose lives inside a 35/65 vertical split below the
+    /// open thread. ContentArea renders ThreadDetailView in the top
+    /// pane and ComposeView in the bottom pane.
+    Inline,
+    /// Compose takes over the full content area. `active_view` is
+    /// `Compose` whenever this layout is active.
+    #[default]
+    FullScreen,
 }
 
 /// Two-phase commit state for the SMTP send pipeline.
@@ -227,6 +262,7 @@ impl ComposeState {
             explicit_save_counter: 0,
             pending_reply: None,
             loading_reply: false,
+            layout: ComposeLayout::FullScreen,
         }
     }
 
