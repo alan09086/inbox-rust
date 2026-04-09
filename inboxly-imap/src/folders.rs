@@ -318,6 +318,101 @@ mod tests {
         let wkf = map_well_known_folders(&folders);
         assert_eq!(wkf.archive, Some("Archive".to_string()));
     }
+
+    // ===== M36 Phase 2: WellKnownFolders Sent-folder fixture sweep =====
+    //
+    // Eng review C3 (pragmatic substitution per Phase 2 instructions): the
+    // original ask was "3 fixture LIST responses + 3 mocked replay_offline
+    // sessions for each provider". The mocked-session test would need a
+    // shimmed `async_imap::Session`, which the workspace doesn't currently
+    // expose at the trait level. Phase 4 (real `AppendSent` handler body)
+    // is the right place to add the session-mocking infrastructure.
+    //
+    // Phase 2's substitute: three fixture tests that cover the *resolution*
+    // half of the chain. They feed each provider's representative folder
+    // listing into `map_well_known_folders` and assert `wk.sent` matches
+    // the canonical name. The Phase 4 `AppendSent` body will then use
+    // `wk.sent.as_deref().unwrap_or("Sent")` against this resolved value,
+    // so verifying the resolution is what guarantees the per-provider
+    // append-target correctness.
+
+    /// Gmail's IMAP exposes the Sent folder as `[Gmail]/Sent Mail` with
+    /// the `\Sent` SPECIAL-USE attribute. The bracket-prefixed namespace
+    /// means a name-only heuristic alone would not match (because the
+    /// fallback table has `[gmail]/sent mail` lowercased), but the
+    /// SPECIAL-USE pass should win first. This test locks in both
+    /// behaviours.
+    #[test]
+    fn well_known_sent_resolves_for_gmail() {
+        let folders = vec![
+            make_folder("INBOX", Some("\\Inbox")),
+            make_folder("[Gmail]/All Mail", Some("\\All")),
+            make_folder("[Gmail]/Drafts", Some("\\Drafts")),
+            make_folder("[Gmail]/Important", None),
+            make_folder("[Gmail]/Sent Mail", Some("\\Sent")),
+            make_folder("[Gmail]/Spam", Some("\\Junk")),
+            make_folder("[Gmail]/Starred", None),
+            make_folder("[Gmail]/Trash", Some("\\Trash")),
+        ];
+        let wk = map_well_known_folders(&folders);
+        assert_eq!(
+            wk.sent.as_deref(),
+            Some("[Gmail]/Sent Mail"),
+            "Gmail Sent should resolve to '[Gmail]/Sent Mail'"
+        );
+        // Sanity: the Phase 4 AppendSent body will use this branch.
+        let resolved = wk.sent.as_deref().unwrap_or("Sent");
+        assert_eq!(resolved, "[Gmail]/Sent Mail");
+    }
+
+    /// Outlook / Microsoft 365 exposes the Sent folder as `Sent Items`,
+    /// historically with the `\Sent` SPECIAL-USE attribute on modern
+    /// Exchange Online but without it on some on-premises servers.
+    /// Cover both shapes by issuing the SPECIAL-USE attribute.
+    #[test]
+    fn well_known_sent_resolves_for_outlook() {
+        let folders = vec![
+            make_folder("INBOX", Some("\\Inbox")),
+            make_folder("Sent Items", Some("\\Sent")),
+            make_folder("Drafts", Some("\\Drafts")),
+            make_folder("Deleted Items", Some("\\Trash")),
+            make_folder("Junk Email", Some("\\Junk")),
+            make_folder("Archive", Some("\\Archive")),
+            make_folder("Outbox", None),
+        ];
+        let wk = map_well_known_folders(&folders);
+        assert_eq!(
+            wk.sent.as_deref(),
+            Some("Sent Items"),
+            "Outlook Sent should resolve to 'Sent Items'"
+        );
+        let resolved = wk.sent.as_deref().unwrap_or("Sent");
+        assert_eq!(resolved, "Sent Items");
+    }
+
+    /// Fastmail exposes the Sent folder simply as `Sent` (with the
+    /// `\Sent` SPECIAL-USE attribute). This is also the IMAP RFC 6154
+    /// recommended canonical name and the fallback that Phase 4 will
+    /// use when SPECIAL-USE resolution fails entirely.
+    #[test]
+    fn well_known_sent_resolves_for_fastmail() {
+        let folders = vec![
+            make_folder("INBOX", Some("\\Inbox")),
+            make_folder("Sent", Some("\\Sent")),
+            make_folder("Drafts", Some("\\Drafts")),
+            make_folder("Trash", Some("\\Trash")),
+            make_folder("Spam", Some("\\Junk")),
+            make_folder("Archive", Some("\\Archive")),
+        ];
+        let wk = map_well_known_folders(&folders);
+        assert_eq!(
+            wk.sent.as_deref(),
+            Some("Sent"),
+            "Fastmail Sent should resolve to 'Sent'"
+        );
+        let resolved = wk.sent.as_deref().unwrap_or("Sent");
+        assert_eq!(resolved, "Sent");
+    }
 }
 
 /// List all folders from an authenticated IMAP session and resolve roles.

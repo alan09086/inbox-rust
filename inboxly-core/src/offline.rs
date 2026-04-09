@@ -112,6 +112,28 @@ pub enum OfflineAction {
         /// this to look up the local Maildir copy.
         draft_message_id: String,
     },
+
+    /// **M36 Phase 5**: A draft was saved locally (SQLite + Maildir
+    /// `.Drafts/`) by the explicit-save bridge or the Navigate guard,
+    /// but the IMAP `APPEND` to the server's Drafts folder could not
+    /// be performed because the UI bridge does not own an IMAP
+    /// session. The next sync's offline replay loop will look up the
+    /// locally-stored Draft copy by `Message-ID` and replay the
+    /// `APPEND` so the server eventually catches up.
+    ///
+    /// Phase 5 ships the variant + a warn-and-skip replay stub. A
+    /// post-M36 phase will fill in the real `APPEND` handler (the
+    /// Phase 4 `AppendSent` arm is the template — both variants
+    /// resolve a Maildir copy by `Message-ID` and `APPEND` it to a
+    /// well-known folder).
+    AppendDraft {
+        /// Account that owns the Drafts folder copy. Stored as the
+        /// account's email address (matches the bridge's accessor).
+        account_id: String,
+        /// `Message-ID` of the draft. The replay handler uses this
+        /// to look up the local Maildir copy in `.Drafts/`.
+        draft_message_id: String,
+    },
 }
 
 impl OfflineAction {
@@ -129,6 +151,7 @@ impl OfflineAction {
             Self::SendDraft { .. } => "send_draft",
             Self::SendDraftFull { .. } => "send_draft_full",
             Self::AppendSent { .. } => "append_sent",
+            Self::AppendDraft { .. } => "append_draft",
         }
     }
 }
@@ -216,6 +239,10 @@ mod tests {
                 account_id: "alice@example.com".into(),
                 draft_message_id: "<msg-1@inboxly.local>".into(),
             },
+            OfflineAction::AppendDraft {
+                account_id: "alice@example.com".into(),
+                draft_message_id: "<draft-1@inboxly.local>".into(),
+            },
         ];
 
         let expected_names = [
@@ -230,6 +257,7 @@ mod tests {
             "send_draft",
             "send_draft_full",
             "append_sent",
+            "append_draft",
         ];
 
         for (action, expected) in variants.iter().zip(expected_names.iter()) {
@@ -273,6 +301,35 @@ mod tests {
                 assert_eq!(draft_message_id, "<msg-roundtrip@inboxly.local>");
             }
             other => panic!("expected AppendSent variant, got {other:?}"),
+        }
+    }
+
+    /// **M36 Phase 5**: focused round-trip test for the new
+    /// `AppendDraft` variant. Mirrors the `append_sent_serialize_round_trip`
+    /// test above so a future rename of either `account_id` or
+    /// `draft_message_id` (or an accidental `#[serde(skip)]`) fails
+    /// loudly at test time rather than silently dropping queue entries.
+    #[test]
+    fn append_draft_serialize_round_trip() {
+        let action = OfflineAction::AppendDraft {
+            account_id: "alice@example.com".into(),
+            draft_message_id: "<draft-roundtrip@inboxly.local>".into(),
+        };
+        assert_eq!(action.variant_name(), "append_draft");
+
+        let json = serde_json::to_string(&action).expect("AppendDraft must serialise");
+        let back: OfflineAction = serde_json::from_str(&json).expect("AppendDraft must round-trip");
+        assert_eq!(back.variant_name(), "append_draft");
+
+        match back {
+            OfflineAction::AppendDraft {
+                account_id,
+                draft_message_id,
+            } => {
+                assert_eq!(account_id, "alice@example.com");
+                assert_eq!(draft_message_id, "<draft-roundtrip@inboxly.local>");
+            }
+            other => panic!("expected AppendDraft variant, got {other:?}"),
         }
     }
 }

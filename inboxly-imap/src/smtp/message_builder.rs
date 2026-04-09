@@ -29,7 +29,8 @@ use lettre::message::{
 
 use crate::smtp::error::SmtpError;
 use inboxly_core::{
-    AttachmentDraft, AttachmentSource, Contact, DraftEmail, markdown_to_html, markdown_to_plaintext,
+    AccountConfig, AttachmentDraft, AttachmentSource, Contact, DraftEmail, markdown_to_html,
+    markdown_to_plaintext,
 };
 
 /// Build an RFC 5322 message for SMTP wire transmission.
@@ -61,6 +62,57 @@ pub fn build_rfc5322_for_sent_folder(
     from: &Mailbox,
 ) -> Result<Message, SmtpError> {
     build_inner(draft, from, true)
+}
+
+/// Build a [`Mailbox`] (`From:` header value) from an [`AccountConfig`].
+///
+/// Mirrors the private `SmtpSender::build_from_mailbox` in
+/// [`crate::smtp::transport`] and the private `build_from_mailbox` in
+/// [`crate::append`] so both transports render an identical `From:` line.
+/// Exposed publicly for M36 Phase 4's UI-side local Maildir Sent writer,
+/// which does not otherwise depend on `lettre` directly.
+///
+/// # Errors
+///
+/// Returns [`SmtpError::MessageBuildError`] if `config.email` is not a
+/// valid RFC 5322 address.
+pub fn build_from_mailbox(config: &AccountConfig) -> Result<Mailbox, SmtpError> {
+    let address = Address::from_str(&config.email).map_err(|e| SmtpError::MessageBuildError {
+        reason: format!("invalid from address {}: {e}", config.email),
+    })?;
+    let name = if config.display_name.is_empty() {
+        None
+    } else {
+        Some(config.display_name.clone())
+    };
+    Ok(Mailbox::new(name, address))
+}
+
+/// Build the raw RFC 5322 bytes to write into a local Maildir `.Sent/`
+/// folder for a successfully-sent draft.
+///
+/// Wraps [`build_from_mailbox`] + [`build_rfc5322_for_sent_folder`] and
+/// calls `.formatted()` on the result. Exposed so the UI crate's local
+/// Maildir Sent writer (M36 Phase 4) does not need to depend on `lettre`
+/// directly — `inboxly-ui` does not currently pull it in and adding the
+/// dependency would expand the compile graph for a single 10-line call.
+///
+/// Bytes are suitable for
+/// [`inboxly_store::MaildirStore::store_cur`] in the
+/// [`inboxly_store::StandardFolder::Sent`] folder.
+///
+/// # Errors
+///
+/// Returns [`SmtpError::MessageBuildError`] if the `from` address is
+/// invalid or the message cannot be assembled (e.g. malformed
+/// attachments).
+pub fn build_sent_folder_bytes(
+    config: &AccountConfig,
+    draft: &DraftEmail,
+) -> Result<Vec<u8>, SmtpError> {
+    let from = build_from_mailbox(config)?;
+    let message = build_rfc5322_for_sent_folder(draft, &from)?;
+    Ok(message.formatted())
 }
 
 fn build_inner(

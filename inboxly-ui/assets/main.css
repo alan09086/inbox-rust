@@ -1409,3 +1409,105 @@ body {
     border-radius: 6px;
     font-size: 13px;
 }
+
+/* ============================================================
+   17. Thread message actions (M36 phase 10)
+   ============================================================ */
+
+/* Reply / Reply All / Forward action row pinned to the bottom of
+   each .thread-message card. Sits below the body and (optionally)
+   the attachments list. Mirrors the existing
+   .thread-message-attachments separator: a top divider + matching
+   horizontal padding so the buttons line up with the body's edge.
+   Each button dispatches Message::OpenComposeReply with the right
+   ComposeMode variant; see thread_message.rs for the wiring. */
+.thread-message-footer {
+    display: flex;
+    gap: 8px;
+    padding: 12px 18px 18px 18px;
+    border-top: var(--divider-thickness) solid var(--divider-color);
+}
+
+/* Pill-shaped action button matching M34's surface palette. The
+   light "outline" look uses the bg-color inset already used by
+   .thread-message-attachment, with --accent-blue taking over on
+   hover so dark and light themes both get a clear affordance. */
+.thread-message-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border: var(--divider-thickness) solid var(--divider-color);
+    border-radius: 9999px;
+    background: var(--bg-color);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.thread-message-action-btn:hover {
+    background: var(--accent-blue);
+    border-color: var(--accent-blue);
+    color: #ffffff;
+}
+
+.thread-message-action-btn:focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 2px;
+}
+
+.thread-message-action-icon {
+    font-size: 14px;
+    line-height: 1;
+}
+
+/* ============================================================
+   18. Inline compose split (M36 phase 11)
+   ============================================================ */
+
+/* The Inline compose layout (`ComposeLayout::Inline`) renders the
+   open thread above the compose view in a 35/65 vertical split,
+   keeping the conversation context visible while the user drafts
+   their reply. ContentArea wraps both panes in a flex column when
+   `compose.layout == Inline && open_thread_id.is_some() &&
+   compose.draft_id.is_some()`. The Phase 12 toggle button flips back
+   to `FullScreen` (which uses the existing `.compose-view` styles in
+   section 16). */
+.compose-inline-split {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.compose-inline-top {
+    flex: 35;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-bottom: var(--divider-thickness) solid var(--divider-color);
+}
+
+.compose-inline-bottom {
+    flex: 65;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* Eng review B4: scoped override so the existing `.compose-view`
+   full-screen styles (which assume they own the entire content area)
+   fill the 65% bottom pane instead of 100vh. The non-inline path is
+   unchanged — `.compose-view` outside `.compose-inline-bottom` keeps
+   its existing height behaviour. */
+.compose-inline-bottom .compose-view {
+    height: 100%;
+    flex: 1;
+    min-height: 0;
+}

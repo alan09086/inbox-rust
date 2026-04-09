@@ -13,7 +13,10 @@ pub mod transport;
 
 pub use draft_sender::DraftSender;
 pub use error::SmtpError;
-pub use message_builder::{build_rfc5322_for_sent_folder, build_rfc5322_for_smtp};
+pub use message_builder::{
+    build_from_mailbox, build_rfc5322_for_sent_folder, build_rfc5322_for_smtp,
+    build_sent_folder_bytes,
+};
 pub use redact::redact_for_log;
 pub use retry::{RetryDecision, should_retry};
 pub use transport::SmtpSender;

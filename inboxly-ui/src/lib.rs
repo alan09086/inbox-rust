@@ -11,6 +11,7 @@ pub mod loaded_thread;
 pub mod markdown_preview;
 pub mod nav;
 pub mod sanitize;
+pub mod startup;
 pub mod state;
 pub mod theme;
 pub mod undo;

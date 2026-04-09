@@ -20,6 +20,7 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
+use unicode_normalization::UnicodeNormalization;
 
 // ---------------------------------------------------------------------------
 // Avatar colour palette (BigTop APK)
@@ -141,6 +142,44 @@ impl Contact {
     pub fn avatar_color(&self) -> AvatarColor {
         avatar_color_for_letter(self.avatar_letter())
     }
+
+    /// Compare this contact's `address` to another address using
+    /// Unicode-aware case-insensitive semantics.
+    ///
+    /// Both sides are normalised via NFKC (Compatibility Composition) and
+    /// then lowercased before comparison. NFKC folds compatibility
+    /// variants — e.g. fullwidth Latin "ａ" (U+FF41) becomes plain ASCII
+    /// "a", ligatures like "ﬃ" (U+FB03) decompose to "ffi", and
+    /// half-width Katakana folds to full-width — so visually-identical
+    /// addresses compare equal regardless of input method.
+    ///
+    /// The subsequent `to_lowercase` handles per-character case
+    /// differences (Greek `Σ` → `σ`, German `İ` → `i\u{0307}`, etc).
+    ///
+    /// This is **not** full Unicode case folding per [TR #21]: a true
+    /// caseless match would also map Turkish capital İ (U+0130) to plain
+    /// "i" without the combining dot above. Rust's stdlib does not
+    /// expose case folding, so we accept that the (very rare) Turkish
+    /// dotted-I edge case may produce a false negative. For the ASCII
+    /// addresses that dominate real-world mail and the EAI cases that
+    /// NFKC + lowercase does cover, this is correct.
+    ///
+    /// Per [RFC 6531] (SMTPUTF8) the local-part of an internationalised
+    /// address is case-sensitive in the abstract, but in practice every
+    /// major mailbox provider treats addresses as case-insensitive.
+    ///
+    /// [TR #21]: https://www.unicode.org/reports/tr21/
+    /// [RFC 6531]: https://datatracker.ietf.org/doc/html/rfc6531
+    #[must_use]
+    pub fn same_address(&self, other: &str) -> bool {
+        casefold_address(&self.address) == casefold_address(other)
+    }
+}
+
+/// Casefold an email address for comparison: NFKC + lowercase.
+fn casefold_address(addr: &str) -> String {
+    let nfkc: String = addr.nfkc().collect();
+    nfkc.to_lowercase()
 }
 
 impl fmt::Display for Contact {
@@ -368,6 +407,36 @@ mod tests {
     fn contact_avatar_color_from_address() {
         let c = Contact::new("", "bob@example.com");
         assert_eq!(c.avatar_color(), AvatarColor::new(0xed, 0x61, 0x92)); // B
+    }
+
+    // --- Contact::same_address tests ---
+
+    #[test]
+    fn same_address_ascii_case_insensitive() {
+        let c = Contact::new("Alice", "Alice@Example.COM");
+        assert!(c.same_address("alice@example.com"));
+        assert!(c.same_address("ALICE@EXAMPLE.COM"));
+        assert!(!c.same_address("bob@example.com"));
+    }
+
+    #[test]
+    fn same_address_nfkc_fullwidth_latin() {
+        // NFKC folds compatibility variants: fullwidth Latin "ａ" (U+FF41)
+        // decomposes to plain ASCII "a". An address typed with a fullwidth
+        // letter should match the same address typed with ASCII.
+        let c = Contact::new("Test", "\u{FF41}lice@example.com"); // ａlice@…
+        assert!(c.same_address("alice@example.com"));
+        // Different addresses still don't match.
+        assert!(!c.same_address("bob@example.com"));
+    }
+
+    #[test]
+    fn same_address_nfkc_ligature_decomposition() {
+        // NFKC decomposes the "ﬃ" ligature (U+FB03) into "ffi". An
+        // address using the ligature should match the spelled-out form.
+        let c = Contact::new("Test", "o\u{FB03}ce@example.com"); // oﬃce@…
+        assert!(c.same_address("office@example.com"));
+        assert!(c.same_address("OFFICE@example.com"));
     }
 
     // --- Address parsing tests ---

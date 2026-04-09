@@ -13,7 +13,7 @@ use std::time::Duration;
 use tokio::sync::{Mutex, mpsc};
 use tokio_util::sync::CancellationToken;
 
-use inboxly_store::Store;
+use inboxly_store::{MaildirStore, Store};
 
 use crate::channel::SyncEvent;
 use crate::error::ImapError;
@@ -37,6 +37,11 @@ pub struct AccountSyncConfig {
     pub has_idle: bool,
     /// Resolved well-known folder names for this account.
     pub well_known: WellKnownFolders,
+    /// Per-account Maildir handle, threaded into
+    /// [`crate::offline_replay::replay_offline_queue`] so its
+    /// [`inboxly_core::OfflineAction::AppendSent`] arm can load the
+    /// locally-stored Sent copy by `Message-ID` (wired in M36 Phase 4).
+    pub maildir: Arc<MaildirStore>,
     /// Channel for sending sync events to the UI.
     pub event_tx: mpsc::Sender<SyncEvent>,
     /// Cancellation token for clean shutdown.
@@ -65,6 +70,7 @@ where
         has_condstore,
         has_idle,
         well_known,
+        maildir,
         event_tx,
         cancel,
     } = config;
@@ -82,6 +88,7 @@ where
             match offline_replay::replay_offline_queue(
                 &session_arc,
                 &store_guard,
+                &maildir,
                 &well_known,
                 None,
             )
@@ -181,13 +188,18 @@ where
             &account_id,
             has_condstore,
             &well_known,
+            &maildir,
             &event_tx,
             cancel,
             session_factory,
         )
         .await
     } else {
-        // No IDLE support — fall back to periodic polling
+        // No IDLE support — fall back to periodic polling.
+        // `run_poll_phase` does not invoke `replay_offline_queue`, so it
+        // does not yet need the `maildir` handle; M36 Phase 4 may revisit
+        // this if AppendSent retries should also fire from poll catch-up.
+        let _ = maildir;
         run_poll_phase(
             db,
             &account_id,
@@ -202,11 +214,19 @@ where
 }
 
 /// Run the IDLE-based sync phase.
+///
+/// Note: this is exempt from `clippy::too_many_arguments` because the
+/// per-account state is already a flat parameter list inherited from
+/// pre-M36 design. M36 Phase 3 added `maildir` to thread the Maildir
+/// handle into post-IDLE offline replay; collapsing the params into
+/// a struct is a separate refactor (likely Phase 4 or follow-up).
+#[allow(clippy::too_many_arguments)]
 async fn run_idle_phase<S, F, Fut>(
     db: Arc<Mutex<Store>>,
     account_id: &str,
     has_condstore: bool,
     well_known: &WellKnownFolders,
+    maildir: &Arc<MaildirStore>,
     event_tx: &mpsc::Sender<SyncEvent>,
     cancel: CancellationToken,
     session_factory: Arc<F>,
@@ -281,6 +301,7 @@ where
                     match offline_replay::replay_offline_queue(
                         &session_arc,
                         &store_guard,
+                        maildir,
                         well_known,
                         None,
                     )

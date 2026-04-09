@@ -8,8 +8,8 @@
 
 use std::sync::Arc;
 
-use inboxly_store::thread_reader::ThreadReader;
-use inboxly_store::{AccountRow, EmailRow, MaildirStore, Store};
+use inboxly_store::thread_reader::{ThreadReader, ThreadReaderError};
+use inboxly_store::{AccountRow, EmailRow, MaildirStore, Store, StoreError};
 use tempfile::TempDir;
 
 /// Account ID used by every test row. The fixture inserts a matching
@@ -180,6 +180,89 @@ fn load_thread_multiple_messages_in_chronological_order() {
     assert_eq!(result[1].row.id, "e2");
     assert_eq!(result[2].row.id, "e3");
     assert!(result.iter().all(|le| le.content.is_some()));
+}
+
+// ── M36 Phase 8: load_email branch coverage ───────────────────
+
+/// `load_email` happy path: row exists, body is downloaded, file
+/// reads cleanly → returns `Ok(LoadedEmail)` with `content` populated.
+#[test]
+fn load_email_success() {
+    let (temp, store, _maildir, reader) = fixture();
+    let path = write_eml(&temp, "single.eml", "Reply prefill body");
+    store
+        .insert_email(&make_row("e1", "t1", 1000, true, &path))
+        .expect("insert");
+
+    let loaded = reader.load_email("e1").expect("ok");
+    assert_eq!(loaded.row.id, "e1");
+    let content = loaded
+        .content
+        .as_ref()
+        .expect("body downloaded -> content present");
+    assert_eq!(content.body_text.as_deref(), Some("Reply prefill body"));
+}
+
+/// `load_email` G3 fallback: row exists but `body_downloaded == false`
+/// → returns [`ThreadReaderError::BodyNotDownloaded`] with the email
+/// id echoed back. The reply prefill bridge uses this branch to dispatch
+/// `Message::ComposeReplyFailed` instead of returning an empty quote.
+#[test]
+fn load_email_body_not_downloaded() {
+    let (_temp, store, _maildir, reader) = fixture();
+    store
+        .insert_email(&make_row("e1", "t1", 1000, /* downloaded */ false, ""))
+        .expect("insert");
+
+    let err = reader
+        .load_email("e1")
+        .expect_err("undownloaded body must surface BodyNotDownloaded");
+    match err {
+        ThreadReaderError::BodyNotDownloaded { email_id } => {
+            assert_eq!(email_id, "e1");
+        }
+        other => panic!("expected BodyNotDownloaded, got {other:?}"),
+    }
+}
+
+/// `load_email` defensive guard: row claims `body_downloaded == true`
+/// but `maildir_path` is empty (data-corruption case) → also returns
+/// [`ThreadReaderError::BodyNotDownloaded`] rather than panicking on
+/// an empty path. Same recovery path as the explicit
+/// `body_downloaded == false` case.
+#[test]
+fn load_email_missing_maildir_path() {
+    let (_temp, store, _maildir, reader) = fixture();
+    store
+        .insert_email(&make_row("e1", "t1", 1000, /* downloaded */ true, ""))
+        .expect("insert");
+
+    let err = reader
+        .load_email("e1")
+        .expect_err("empty maildir_path must surface BodyNotDownloaded");
+    assert!(matches!(
+        err,
+        ThreadReaderError::BodyNotDownloaded { ref email_id } if email_id == "e1"
+    ));
+}
+
+/// `load_email` distinguishes "row missing" from "body missing": a
+/// nonexistent id surfaces as a [`StoreError::NotFound`] wrapped in
+/// [`ThreadReaderError::Store`], NOT as `BodyNotDownloaded`. The reply
+/// prefill bridge treats `Store(_)` as a hard error (different
+/// recovery path than the body-fetch case).
+#[test]
+fn load_email_nonexistent_id() {
+    let (_temp, _store, _maildir, reader) = fixture();
+    let err = reader
+        .load_email("does-not-exist")
+        .expect_err("missing row must surface Store(NotFound)");
+    match err {
+        ThreadReaderError::Store(StoreError::NotFound(msg)) => {
+            assert!(msg.contains("does-not-exist"), "got: {msg}");
+        }
+        other => panic!("expected Store(NotFound), got {other:?}"),
+    }
 }
 
 // ── Branch 6: mixed downloaded/undownloaded ───────────────────

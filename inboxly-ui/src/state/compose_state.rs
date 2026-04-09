@@ -21,6 +21,16 @@ use std::sync::Arc;
 use inboxly_core::{AttachmentDraft, ComposeMode, Contact};
 
 /// State backing the compose view.
+///
+/// `Debug` + `Clone` are required because [`crate::app::Message`] derives
+/// both, and the M36 Phase 8 [`crate::app::Message::ComposeReplyReady`]
+/// variant carries `Box<ComposeState>` (boxed to keep the enum variant
+/// size below clippy's `large_enum_variant` 200-byte threshold). Cloning
+/// is cheap relative to the field count: every `Vec` field holds
+/// `Arc`-wrapped contents (`Arc<Contact>`, `Arc<AttachmentDraft>`), so a
+/// `ComposeState::clone` is mostly refcount bumps plus a handful of
+/// `String::clone` calls.
+#[derive(Debug, Clone)]
 pub struct ComposeState {
     /// UUID of the in-progress draft. Set by `OpenCompose` (eager — Gemini
     /// G4) so the per-draft attachment directory can be created before the
@@ -67,6 +77,20 @@ pub struct ComposeState {
     /// Compose mode (always `New` in M35b).
     pub mode: ComposeMode,
 
+    // -- Reply threading headers (M36 Phase 7) --
+    /// RFC 5322 `In-Reply-To` header value. Set by
+    /// [`crate::components::app::compose_state_from_original`] for
+    /// `Reply` / `ReplyAll` modes; left `None` for `New` and `Forward`
+    /// (Forward starts a new thread per Gmail convention).
+    pub in_reply_to: Option<String>,
+
+    /// RFC 5322 `References` header value (JWZ threading chain).
+    /// Set by [`crate::components::app::compose_state_from_original`]
+    /// for `Reply` / `ReplyAll`; left `None` for `New` and `Forward`.
+    /// Built via [`inboxly_core::reply::build_references_chain`] from
+    /// the parent's existing `References` plus its `Message-ID`.
+    pub references: Option<String>,
+
     // -- Lifecycle bookkeeping --
     /// Set by any field-change handler. Cleared by the Phase 10 auto-save
     /// bridge after a successful `Store::update_draft` commit, but only
@@ -95,6 +119,86 @@ pub struct ComposeState {
     /// without panicking. Initial value is `0`; the bridge skips the
     /// initial render so the dialog does not pop on app start.
     pub attach_picker_counter: u64,
+
+    // -- Reply prefill two-step dispatch (M36 Phase 8) --
+    /// Sentinel set by [`crate::app::Message::OpenComposeReply`] to ask
+    /// the reply-prefill bridge in `inboxly-ui::components::app` to
+    /// load the original message and build a Reply/ReplyAll/Forward
+    /// `ComposeState`. The bridge watches a `use_memo` over this field;
+    /// when it transitions from `None` to `Some`, the bridge spawns a
+    /// task that calls `ThreadReader::load_email`, then dispatches
+    /// [`crate::app::Message::ComposeReplyReady`] (success) or
+    /// [`crate::app::Message::ComposeReplyFailed`] (error). Both
+    /// terminal handlers clear this field back to `None`.
+    ///
+    /// Two-step dispatch is required because the click handler runs
+    /// inside the synchronous `Inboxly::update` loop, which cannot call
+    /// the `!Send + !Sync` `ThreadReader` (which holds a SQLite
+    /// connection) without blocking the event loop on disk I/O — and
+    /// because `Inboxly` itself does not own a `ThreadReader` handle in
+    /// every test fixture. The bridge picks the handle up via
+    /// `use_context` / `peek` at task spawn time.
+    pub pending_reply: Option<(String, inboxly_core::ComposeMode)>,
+
+    /// True while the reply-prefill task is running. Set synchronously
+    /// by [`crate::app::Message::OpenComposeReply`] alongside
+    /// `pending_reply`, cleared by both
+    /// [`crate::app::Message::ComposeReplyReady`] and
+    /// [`crate::app::Message::ComposeReplyFailed`]. Used by the compose
+    /// view (Phase 11+) to render a "Loading original..." sentinel.
+    pub loading_reply: bool,
+
+    // -- Explicit save bridge trigger (M36 Phase 5) --
+    /// Counter bumped by [`crate::app::Message::ComposeSaveDraft`] (the
+    /// "Save Draft" button) and by the `Navigate` handler when it
+    /// detects dirty compose state being navigated away from. The
+    /// Phase 5 explicit-save bridge in `components::app` watches this
+    /// counter and fires SQLite + Maildir `.Drafts/` writes
+    /// synchronously (no 30 s timer like the auto-save bridge).
+    ///
+    /// Counter (rather than `bool`) for the same reason as
+    /// `attach_picker_counter`: two rapid Save Draft clicks must
+    /// produce two distinct bridge fires, which a `bool` would
+    /// coalesce. `wrapping_add(1)` so the bridge survives the
+    /// (unreachable) `u64::MAX` boundary. Initial value is `0`; the
+    /// bridge skips the initial render so the save logic does not run
+    /// on app start before any draft exists.
+    pub explicit_save_counter: u64,
+
+    // -- Layout (M36 Phase 11) --
+    /// How the compose view is rendered.
+    ///
+    /// `Inline` (Phase 11 default for reply-prefilled drafts) renders
+    /// the compose view inside a 35/65 vertical split below the open
+    /// thread, keeping the conversation context visible while the
+    /// user drafts their reply. `FullScreen` (the default for fresh
+    /// composes from the FAB and the only option in M35) takes over
+    /// the entire content area.
+    ///
+    /// The Phase 12 toggle button dispatches
+    /// [`crate::app::Message::ComposeToggleLayout`] to flip between
+    /// the two modes; the [`crate::app::Message::ComposeReplyReady`]
+    /// handler sets this to `Inline` for replies opened from the
+    /// thread detail view.
+    pub layout: ComposeLayout,
+}
+
+/// How the compose view is rendered (M36 Phase 11).
+///
+/// `FullScreen` is the default — fresh composes from the FAB have no
+/// thread context to show above them, so they take over the content
+/// area. The reply-prefill flow flips this to `Inline` so the user can
+/// keep reading the thread they are replying to.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum ComposeLayout {
+    /// Reply compose lives inside a 35/65 vertical split below the
+    /// open thread. ContentArea renders ThreadDetailView in the top
+    /// pane and ComposeView in the bottom pane.
+    Inline,
+    /// Compose takes over the full content area. `active_view` is
+    /// `Compose` whenever this layout is active.
+    #[default]
+    FullScreen,
 }
 
 /// Two-phase commit state for the SMTP send pipeline.
@@ -149,10 +253,16 @@ impl ComposeState {
             show_preview: false,
             attachments: Vec::new(),
             mode: ComposeMode::New,
+            in_reply_to: None,
+            references: None,
             dirty: false,
             save_generation: 0,
             send_state: ComposeSendState::Idle,
             attach_picker_counter: 0,
+            explicit_save_counter: 0,
+            pending_reply: None,
+            loading_reply: false,
+            layout: ComposeLayout::FullScreen,
         }
     }
 

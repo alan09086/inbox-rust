@@ -2,6 +2,238 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.36.1] - 2026-04-08
+
+### Fixed — M36.1 data-layer startup wiring (closes pre-existing M35 gap)
+
+Patch release that closes the runtime gap M36 phase 14 documented as a
+known limitation: the binary's `main()` never instantiated `Store`,
+`MaildirStore`, or `ThreadReader`, so at runtime every `Inboxly::store`
+and `Inboxly::thread_reader` was `None`. This meant **M35's SQLite
+drafts persistence was silently a no-op in the running binary**
+(auto-save wrote to `None`) and **every click on Reply / ReplyAll /
+Forward in the running binary dispatched `ComposeReplyFailed { reason:
+"thread_reader not wired" }`**. Both subsystems were fully tested in
+`#[cfg(test)]` with in-memory `Store::open_in_memory()` + tempdir
+maildirs, which is why the 1072-test harness was green on v0.36.0.
+
+- **`inboxly::main()`** now calls `Paths::resolve` + `ensure_dirs`,
+  opens `Store::open(paths.database_file())`, and for each configured
+  account constructs a `MaildirStore` at
+  `paths.maildir_root()/<account_id>/mail` and calls `init()` to create
+  the `.Sent/`, `.Drafts/`, `.Trash/`, `.Spam/` subdirectories. The
+  resulting `Arc<Store>` and per-account `Arc<HashMap<String,
+  Arc<MaildirStore>>>` are published into new `inboxly-ui::startup::STORE`
+  and `inboxly-ui::startup::MAILDIR_STORES` singletons.
+- **`App()` first render** reads both singletons, seeds
+  `Inboxly::store`, and builds a `ThreadReader` for the first account
+  via the new `inboxly-ui::startup::build_thread_reader_for` helper.
+  `reload_feed()` is called after seeding so the inbox populates on
+  first paint.
+- **`SwitchAccount`** now reconstructs `thread_reader` from the new
+  account's `MaildirStore` on every account change. Without this, a
+  stale reader from the previous account would survive the switch and
+  the reply/forward pipeline would operate on the wrong maildir.
+- **Fail-soft at every step.** `Paths::resolve` returning `None`,
+  `ensure_dirs` failing, `Store::open` failing, or a per-account
+  `MaildirStore::init` failing all log a `warning:` to stderr and
+  leave the relevant singleton unset. The binary **still launches**
+  with the degraded `store = None` / `thread_reader = None` state —
+  the user sees the pre-patch "reply buttons not wired" behaviour
+  plus a clear warning they can read on next launch.
+- **CLI subcommands short-circuit before the data-layer init.**
+  `inboxly --help`, `inboxly oauth2-authorize`, `inboxly set-password`,
+  and `inboxly delete-credentials` all return / exit before
+  `build_data_layer` runs, preserving the Gemini G6 keyring-free
+  help invariant and also keeping them filesystem-access-free.
+- **Thread-safety.** `Store` and `MaildirStore` hold `!Sync` state
+  (rusqlite without `unlock_notify`, filesystem iterators). The
+  process-global statics require `Sync` on their contents, so a
+  `MainThreadOnly<T>` newtype wraps both singletons and asserts
+  `unsafe impl Sync` with a project-wide invariant: **every read
+  happens on the Dioxus main thread.** If a future change introduces
+  cross-thread access, the wrapper becomes unsound and must be
+  replaced with proper interior-locking.
+- **`account_id_from_email`** promoted from a private helper in
+  `inboxly-ui::components::app` to `pub` so the binary's `main()` can
+  derive account ids identically to the UI's send/drafts/reply
+  bridges. One keying scheme everywhere.
+
+Reply / ReplyAll / Forward now work end-to-end when the binary
+launches with configured accounts — no more `ComposeReplyFailed`
+disappointment on every click.
+
+### Tests
+
+- 4 new tests — 3 in `inboxly-ui::startup` covering the unset-singleton
+  fallback path (`STORE.get()` / `MAILDIR_STORES.get()` return `None`,
+  `maildir_stores()` returns empty, `build_thread_reader_for` returns
+  `None`) and 1 in `inboxly-ui::app` verifying `SwitchAccount`
+  reconstructs `thread_reader` without panicking when the singletons
+  are unset (guards against a regression where the handler might skip
+  the reassignment and leave a stale reader from the previous
+  account).
+- Test count: **1072 → 1076 (+4)**. Zero clippy warnings. Zero panics
+  introduced.
+
+## [0.36.0] - 2026-04-08
+
+### Added (M36 — Reply / ReplyAll / Forward + M35 cleanup)
+
+Fourteen phases across two sub-milestones. M36a (Phases 0-5) closes every
+limitation M35.1 flagged for follow-up; M36b (Phases 6-13) ships the
+Reply / ReplyAll / Forward feature surface on top of the cleaned-up
+foundation. The milestone ran under `/plan-eng-review` (findings A1-A9)
+and a Gemini outside-voice pass (findings G1-G8) — all flagged decisions
+were resolved before implementation began, and the phase commits cite
+the decisions they implement.
+
+Test count: **961 → 1072 (+111)**. Clippy clean. Zero panics introduced.
+
+#### M36a — Closing the M35.1 follow-up list (Phases 0-5)
+
+- **Phase 0 — Keyring + OAuth2 verification notes.** Downloaded the
+  `keyring 3` and `oauth2 5` crates and documented their APIs before
+  writing any code, confirming `linux-native-sync-persistent` (no
+  `tokio::task::spawn_blocking` required), rotating refresh tokens via
+  the async client's response, and `ExtraTokenFields` for persisting
+  provider scopes. Filed under `docs/superpowers/notes/`.
+- **Phase 1 — Keyring secrets backend.** New `inboxly-core::secrets`
+  module backed by `keyring 3` with `linux-native-sync-persistent`.
+  Typed wrappers for SMTP password, OAuth2 refresh token, and OAuth2
+  access token. Replaces the M35 `INBOXLY_SMTP_PASSWORD` env-var path
+  with a real secret-service backend. 7 tests, all against live keyring
+  behaviour (mock-free per the side-effecting-tests rule).
+- **Phase 2 — OAuth2 refresh token persistence (A3) + CLI subcommands.**
+  New `SharedOAuth2` handle plumbed through `SmtpClient::send()` and
+  the sync loop so both paths refresh the same token set, with a rotation
+  callback that writes the new refresh token back to the keyring after
+  each successful rotation (A3 eng-review finding). New `inboxly`
+  subcommands: `oauth2-authorize`, `set-password`, `delete-credentials`.
+  Also fixes a pre-existing M35 bug where `STARTUP_ACCOUNTS` was dead
+  code — the binary set it but nothing in the UI crate read it. 12
+  tests.
+- **Phase 3 — `replay_offline_queue` signature refactor.** Added the
+  `maildir` parameter so replay can write successful sends to the local
+  `.Sent/` during the replay path, not just at the live-send path.
+  Behaviour-preserving refactor; no test count change.
+- **Phase 4 — Local Maildir Sent write + real `AppendSent` replay
+  (A6).** `SmtpClient::send()` now writes every successful send to
+  `<maildir>/.Sent/new/` atomically, then attempts the IMAP APPEND; if
+  APPEND fails the message is already safe on disk and gets queued for
+  replay. `WellKnownFolders` resolves the Sent folder name per
+  Gmail / Outlook / Fastmail conventions (A6). 4 tests.
+- **Phase 5 — Explicit Save Draft bridge + Navigate guard (A8).**
+  Three-layer draft persistence: in-memory → SQLite via the new
+  `SaveDraft` state-machine edge → offline queue fallback via a new
+  `OfflineAction::AppendDraft` variant. A Navigate-with-compose guard
+  auto-saves any dirty draft before tearing down the compose panel.
+  Toolbar Draft chip shows unsaved / saving / saved state. 15 tests.
+  The IMAP replay body for `AppendDraft` is a warn-and-skip stub —
+  deferred to a post-M36 polish milestone.
+
+#### M36b — Reply / ReplyAll / Forward feature surface (Phases 6-13)
+
+- **Phase 6 — Pure helpers.** Subject normalization (`Re:`/`Fwd:`
+  idempotency, English-only), the References / In-Reply-To chain
+  construction, and Gmail-compatible ASCII quote formatting. 35 tests
+  covering `RE:`/`re:`/`Re[2]:` edge cases and empty chains.
+- **Phase 7 — `compose_state_from_original` helper + ComposeMode
+  dispatch.** DRY helper that takes an `Email` + `ComposeMode` and
+  returns a populated `ComposeState` (subject, To, Cc, quoted body,
+  References, In-Reply-To). The Reply / ReplyAll / Forward branches
+  differ only in recipient and attachment handling. 8 tests.
+- **Phase 8 — Real `OpenComposeReply` handler + body-fetch fallback
+  (G3).** New `ThreadReader::load_email(thread_id, email_id)` that
+  reads from maildir and falls back to an IMAP body fetch when the
+  local copy is header-only. Dispatches `ComposeReplyFailed { reason }`
+  with a user-visible error banner if both paths fail. 8 tests.
+- **Phase 9 — Forward attachment passthrough.** Forward now inherits
+  every attachment from the original message. **Scope reduction:**
+  shipped decode-to-disk via `mailparse 0.15`'s walk API, not the
+  byte-offset streaming originally planned — `mailparse 0.15` doesn't
+  expose per-part byte offsets, so true streaming requires either a
+  newer release or an upstream patch. Peak memory is one attachment's
+  decoded size (~20 MB for a large PDF). `TODO(post-M36)` documented
+  at the extraction site. 6 tests.
+- **Phase 10 — Reply / ReplyAll / Forward buttons.** Added to the
+  thread message footer with keyboard focus handling and ARIA labels.
+  No test-count change (covered by Phase 13 integration tests).
+- **Phase 11 — Inline compose panel.** New inline compose layout
+  below the thread detail view so users can reply without losing the
+  quoted original. **Scope reduction:** the signal split that would
+  move compose state out of `Inboxly` to prevent `ThreadDetailView`
+  from re-rendering on every compose keystroke was deferred (D1 eng
+  review) — 195 `self.compose` references in `app.rs` made the
+  refactor a 300-LOC change touching every test, and landing it
+  mid-milestone carried too much regression risk. `TODO(post-M36)`
+  documented at the inline-split render site referencing D1. 5 tests.
+- **Phase 12 — Layout toggle + quoted original placeholder.** Header
+  button swaps between Inline and FullScreen compose layouts. A
+  "quoted original" placeholder label renders above the body editor.
+  **Scope reduction:** expanding the placeholder to show the original
+  sender / subject / date requires new `ComposeState` fields that
+  Phase 7's helpers would have to populate — deferred to a post-M36
+  polish pass.
+- **Phase 13 — End-to-end state-machine integration tests.** 11 tests
+  driving the full state machine through Reply / ReplyAll / Forward
+  flows with in-memory fixtures, covering subject normalization edge
+  cases, References-chain continuation, attachment passthrough, and
+  the Navigate-with-dirty-compose auto-save guard. Zero runtime I/O.
+
+### Known limitations for dogfooding
+
+Two pre-existing M35 data-layer gaps remain and directly affect the
+M36 Reply buttons in the running binary:
+
+1. **`Store` + `MaildirStore` still not instantiated at startup.** The
+   binary's `Inboxly::new()` leaves `self.store = None`. M36 Phases 4,
+   5, and 8 all work around this by constructing `MaildirStore`
+   on-demand inside their handlers (it's a cheap path wrapper). That
+   keeps the unit + integration tests green — they build in-memory
+   fixtures directly — but it means SQLite drafts persistence is still
+   a no-op in the running binary.
+2. **`ThreadReader` is still `None` at runtime.** Phase 8's Reply
+   handler dispatches `ComposeReplyFailed { reason: "thread_reader not
+   wired" }` for any click on the Reply / ReplyAll / Forward buttons
+   in the running binary. The handler code is correct and tested
+   end-to-end against an in-memory fixture, but the runtime path is
+   blocked on the same startup wiring.
+
+**Net effect:** clicking Reply / ReplyAll / Forward in the v0.36.0
+binary will surface the error banner, not a populated compose panel.
+The buttons look right, the tests pass, the state machine is correct —
+but the data layer that feeds them is not wired. A dedicated **M36.1
+polish milestone** is recommended to instantiate `Store`,
+`MaildirStore`, and `ThreadReader` at startup from the (now plumbed
+through) `STARTUP_ACCOUNTS` so the data layer actually persists
+across restarts.
+
+The user should dogfood v0.36.0 with this expectation: visually
+verify the buttons, layout toggle, inline panel, toolbar Draft chip,
+and the keyring-backed credential commands — the end-to-end Reply
+send path will come online once M36.1 lands.
+
+### Scope reductions documented
+
+All four deferrals are tracked as `TODO(post-M36)` comments in-tree:
+
+1. Phase 9 forward attachment streaming (mailparse 0.15 API gap).
+2. Phase 11 compose signal split (D1 — 300-LOC refactor risk).
+3. Phase 12 quoted original expanded preview (requires new
+   `ComposeState` fields).
+4. Phase 5 IMAP APPEND for drafts (`OfflineAction::AppendDraft` replay
+   body is a warn-and-skip stub).
+
+### Eng review + outside voice attribution
+
+- **A3** (OAuth2 refresh token rotation callback) — Phase 2.
+- **A6** (Sent folder resolution via `WellKnownFolders`) — Phase 4.
+- **A8** (Navigate-with-compose auto-save guard) — Phase 5.
+- **D1** (compose signal split deferral) — Phase 11.
+- **G3** (body-fetch fallback for header-only local copies) — Phase 8.
+- **G6** (local `.Sent/` write on SMTP success) — Phase 4.
+
 ## [0.35.1] - 2026-04-07
 
 ### Fixed (post-M35 dogfooding)

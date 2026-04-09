@@ -12,6 +12,7 @@ path = "src/main.rs"
 dioxus.workspace = true
 inboxly-bundler.workspace = true
 inboxly-core.workspace = true
+inboxly-imap.workspace = true
 inboxly-store.workspace = true
 inboxly-ui.workspace = true
 tokio.workspace = true

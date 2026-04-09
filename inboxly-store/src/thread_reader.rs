@@ -20,6 +20,40 @@ use crate::maildir_store::MaildirStore;
 use crate::store::Store;
 use inboxly_core::SlimEmailContent;
 
+/// Error type returned by [`ThreadReader::load_email`].
+///
+/// Distinct from [`StoreError`] because [`ThreadReader::load_email`] needs
+/// to surface a specific "the row exists but the body bytes are not on
+/// disk yet" failure mode that the caller (the M36 reply prefill bridge)
+/// must distinguish from a generic SQLite error: the former triggers a
+/// best-effort body-fetch retry, the latter is a hard error shown to the
+/// user. [`ThreadReader::load_thread`] does NOT need this distinction
+/// because it tolerates missing bodies (returns `content: None` and lets
+/// the UI render the row metadata anyway), so it stays on plain
+/// [`StoreError`].
+#[derive(Debug, thiserror::Error)]
+pub enum ThreadReaderError {
+    /// The email row exists in SQLite but the body bytes have not been
+    /// downloaded to disk yet (or the on-disk file is unreadable). The
+    /// reply prefill bridge in `inboxly-ui` catches this and dispatches
+    /// `ComposeReplyFailed { reason: "body not downloaded" }` so the
+    /// user sees a "wait for sync" message instead of an empty quote
+    /// block. A future post-M36 phase will trigger a real on-demand
+    /// body fetch from this branch.
+    #[error("email body not downloaded for {email_id}")]
+    BodyNotDownloaded {
+        /// The email id whose body is missing. Echoed back to the
+        /// caller so the eventual body-fetch task knows which message
+        /// to fetch.
+        email_id: String,
+    },
+    /// Wrapped SQLite or storage error from the underlying [`Store`].
+    /// Includes "row not found" — the caller treats every variant
+    /// other than `BodyNotDownloaded` as a hard failure.
+    #[error("store error: {0}")]
+    Store(#[from] StoreError),
+}
+
 /// One email loaded from the store, with its slim body content if
 /// available. `content` is `None` when the body hasn't been
 /// downloaded yet OR when the disk read failed (latter is logged
@@ -91,6 +125,72 @@ impl ThreadReader {
             })
             .collect();
         Ok(loaded)
+    }
+
+    /// Load a single email by its id, hydrating it with its slim body
+    /// from disk. Used by the M36 Phase 8 reply prefill bridge in
+    /// `inboxly-ui` so it can fetch only the parent message of a reply
+    /// instead of paying to load the entire thread when the user only
+    /// wants to quote one message.
+    ///
+    /// **Failure modes (intentional):**
+    ///
+    /// - The row does not exist in SQLite → [`ThreadReaderError::Store`]
+    ///   wrapping [`StoreError::NotFound`]. The caller surfaces this as
+    ///   a hard error to the user.
+    /// - The row exists but `body_downloaded == false` OR
+    ///   `maildir_path` is empty → [`ThreadReaderError::BodyNotDownloaded`].
+    ///   The caller treats this as the G3 header-only-row fallback and
+    ///   (in a future post-M36 phase) triggers an on-demand body fetch.
+    /// - The row exists, `body_downloaded == true`, `maildir_path` is
+    ///   set, but the on-disk file is unreadable (permission denied,
+    ///   missing file, corrupted bytes) → also
+    ///   [`ThreadReaderError::BodyNotDownloaded`]. The disk read error
+    ///   is logged at `warn!`. We collapse this case into
+    ///   `BodyNotDownloaded` because the caller's recovery path is the
+    ///   same: re-fetch the body. (Contrast with
+    ///   [`ThreadReader::load_thread`], which tolerates a missing body
+    ///   on a per-row basis and renders the rest of the thread anyway —
+    ///   acceptable for thread display, fatal for reply prefill which
+    ///   needs the body to make a quote block.)
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ThreadReaderError::Store`] if the SQLite query fails
+    /// (including `NotFound` for unknown ids), or
+    /// [`ThreadReaderError::BodyNotDownloaded`] if the row exists but
+    /// the body bytes are not available on disk.
+    pub fn load_email(
+        &self,
+        email_id: &str,
+    ) -> std::result::Result<LoadedEmail, ThreadReaderError> {
+        let row = self.store.get_email(email_id)?;
+        if !row.body_downloaded || row.maildir_path.is_empty() {
+            return Err(ThreadReaderError::BodyNotDownloaded {
+                email_id: email_id.to_string(),
+            });
+        }
+        let content = self
+            .maildir
+            .read_email_slim(Path::new(&row.maildir_path))
+            .inspect_err(|e| {
+                tracing::warn!(
+                    path = %row.maildir_path,
+                    error = %e,
+                    "ThreadReader::load_email: read_email_slim failed"
+                );
+            })
+            .ok();
+        // Disk read failed (logged above) — collapse into the same
+        // BodyNotDownloaded branch so the caller's recovery path is
+        // uniform. The reply prefill cannot meaningfully proceed
+        // without the body bytes anyway.
+        if content.is_none() {
+            return Err(ThreadReaderError::BodyNotDownloaded {
+                email_id: email_id.to_string(),
+            });
+        }
+        Ok(LoadedEmail { row, content })
     }
 }
 
