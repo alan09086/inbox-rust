@@ -51,9 +51,9 @@
 | M31 ✅ | Store Trait Integration + IMAP Action Execution | `store`, `imap`, `ui` | [M31 Plan](./2026-04-06-m31-store-traits-action-execution.md) |
 | M32 ✅ | Iced → Dioxus Framework Conversion (unplanned detour) | `ui` (whole shell) | _no plan file — direct conversion_ |
 | M33 ✅ | Inbox Feed Widgets on Dioxus | `ui` | [M33 Plan](./2026-04-06-m33-inbox-feed-widgets.md) |
-| M34 | Thread Detail View + HTML Email Rendering | `ui` | _v2 spec §M32 (adapted for Dioxus — no wry needed)_ |
-| M35 | SMTP Engine + Compose View on Dioxus | `imap`, `ui` | _v2 spec §M33 (compose view created from scratch)_ |
-| M36 | Reply + Reply All + Forward | `imap`, `ui` | _v2 spec §M34_ |
+| M34 ✅ | Thread Detail View + HTML Email Rendering | `ui` | _v2 spec §M32 (adapted for Dioxus — no wry needed)_ |
+| M35 ✅ | SMTP Engine + Compose View on Dioxus | `imap`, `ui` | _v2 spec §M33 (compose view created from scratch)_ |
+| M36 ✅ | Reply + Reply All + Forward | `imap`, `ui` | _v2 spec §M34_ |
 | M37 | Full Attachment Support | `imap`, `store`, `ui` | _v2 spec §M35_ |
 | M38 | Advanced Search | `store`, `ui` | _v2 spec §M36_ |
 | M39 | End-to-End Bundling | `bundler`, `imap`, `ui` | _v2 spec §M37_ |
